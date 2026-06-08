@@ -1,0 +1,37 @@
+{
+  "name": "hms-pro-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "node \"./backend/server.js\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test:backend": "npm --prefix backend test",
+    "seed:backend": "node \"./backend/seed.js\"",
+    "migrate:doctor-profiles": "npm --prefix backend run migrate:doctor-profiles",
+    "audit:integrity": "npm --prefix backend run audit:integrity"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "latest",
+    "axios": "^1.16.1",
+    "framer-motion": "^12.39.0",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "socket.io-client": "^4.8.3",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@vitejs/plugin-react": "latest",
+    "eslint": "latest",
+    "eslint-plugin-react-hooks": "latest",
+    "eslint-plugin-react-refresh": "latest",
+    "globals": "latest"
+  }
+}

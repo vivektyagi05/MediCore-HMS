@@ -1,0 +1,36 @@
+{
+  "name": "hms-pro-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "migrate:doctor-profiles": "node migrations/ensureDoctorProfiles.js",
+    "audit:integrity": "node migrations/auditDatabaseIntegrity.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "bcrypt": "latest",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "express-rate-limit": "latest",
+    "helmet": "latest",
+    "jsonwebtoken": "latest",
+    "mongoose": "latest",
+    "multer": "^2.1.1",
+    "nodemailer": "latest",
+    "pdfkit": "latest",
+    "qrcode": "^1.5.4",
+    "razorpay": "latest",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "latest",
+    "nodemon": "latest",
+    "supertest": "latest",
+    "vitest": "latest"
+  }
+}

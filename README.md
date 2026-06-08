@@ -292,4 +292,4 @@ Interested in:
 
 ## 📄 License
 
-This project is currently maintained for educational, learning, and portfolio purposes.
+This project is currently maintained for educational, learning, and Real World Problem Solver.

@@ -219,6 +219,7 @@ if (activeLeave) {
       patientId: req.user._id,
       doctorId: doctor._id,
       date: appointmentDate,
+      timeSlot: req.body.timeSlot,
 
       status: {
         $in: [
@@ -352,7 +353,17 @@ if (
     );
   }
 
+  if (
+    req.body.status ===
+    APPOINTMENT_STATUS.APPROVED
+  ) {
+
+    appointment.paymentStatus =
+      PAYMENT_STATUS.PENDING;
+  }
+
   appointment.status = req.body.status;
+  
   if (req.body.notes !== undefined) appointment.notes = req.body.notes;
 
   await appointment.save();
@@ -440,13 +451,27 @@ if (
         appointment._id,
     });
 
+  const existingRefund =
+  await RefundRequest.findOne({
+    paymentId: payment._id,
+  });
+
+  if (existingRefund) {
+
+    return res.status(200).json({
+      success: true,
+      data: appointment,
+      message:
+        "Appointment cancelled successfully",
+    });
+  }
+
   if (payment) {
 
     await RefundRequest.create({
-      paymentId:
-        payment._id,
+      paymentId: payment._id,
 
-      userId:
+      requestedBy:
         appointment.patientId,
 
       amount:
@@ -457,6 +482,15 @@ if (
 
       status:
         "pending",
+
+      timeline: [
+        {
+          status: "pending",
+          note: "Auto refund request created",
+          actorId:
+            appointment.patientId,
+        },
+      ],
     });
   }
 }

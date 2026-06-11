@@ -13,9 +13,14 @@ import { calculateInvoiceAmounts, invoiceService } from "../services/invoiceServ
 import { emailService } from "../services/emailService.js";
 import { transactionLogger } from "../utils/transactionLogger.js";
 import { env } from "../config/env.js";
-import { PAYMENT_STATUS as APPOINTMENT_PAYMENT_STATUS } from "../constants/appointmentStatus.js";
+import {
+  PAYMENT_STATUS as APPOINTMENT_PAYMENT_STATUS,
+  APPOINTMENT_STATUS,
+} from "../constants/appointmentStatus.js";
 import { couponService } from "../payments/couponService.js";
 import { paymentEmitter } from "../realtime/paymentEmitter.js";
+import ConsultationHistory
+from "../models/ConsultationHistory.js";
 
 const ensureObjectId = (id, label) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -298,12 +303,37 @@ export const verifyPayment = asyncHandler(async (req, res) => {
   payment.invoiceId = invoice._id;
   await payment.save();
 
+
+
   await Appointment.findByIdAndUpdate(
   appointment._id,
   {
     invoiceId: invoice._id,
   }
 );
+
+await ConsultationHistory.findOneAndUpdate(
+  {
+    appointmentId:
+      appointment._id,
+  },
+  {
+    $set: {
+      doctorId:
+        appointment.doctorId._id,
+
+      patientId:
+        appointment.patientId._id,
+
+      paymentId:
+        payment._id,
+    },
+  },
+  {
+    upsert: true,
+  }
+);
+
 
   await TransactionLedger.create({
     userId: payment.userId,

@@ -30,6 +30,14 @@ const processRefund = async ({ payment, refundAmount, reason, actorId, refundReq
   payment.refundStatus = REFUND_STATUS.PENDING;
   await payment.save();
 
+  await Appointment.findByIdAndUpdate(
+    payment.appointmentId,
+    {
+      paymentStatus:
+        APPOINTMENT_PAYMENT_STATUS.REFUNDED,
+    }
+  );
+
   const refund = await razorpayService.refundPayment({
     paymentId: payment.paymentId,
     amount: refundAmount,

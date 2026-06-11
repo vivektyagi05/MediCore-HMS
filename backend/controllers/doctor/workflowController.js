@@ -85,11 +85,6 @@ const upsertHistoryLink = async ({ doctorId, patientId, appointmentId, prescript
   const update = {};
   if (prescriptionId) update.$addToSet = { prescriptionIds: prescriptionId };
   if (noteId) update.$addToSet = { ...(update.$addToSet || {}), noteIds: noteId };
-  await ConsultationHistory.findOneAndUpdate(
-    { doctorId, patientId, appointmentId },
-    { ...update, $setOnInsert: { doctorId, patientId, appointmentId } },
-    { upsert: true, returnDocument: "after" },
-  );
 };
 
 export const listPrescriptions = asyncHandler(async (req, res) => {

@@ -12,6 +12,10 @@ import SavedDoctor from "../../models/SavedDoctor.js";
 import User from "../../models/User.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
+import {
+ PAYMENT_STATUS
+}
+from "../../constants/appointmentStatus.js";
 
 const ownership = (req) => ({ userId: req.user._id });
 
@@ -57,6 +61,7 @@ export const uploadReport = asyncHandler(async (req, res) => {
     mimeType: req.file.mimetype,
     size: req.file.size,
   });
+
   res.status(201).json({ success: true, data: { report }, message: "Report uploaded successfully" });
 });
 
@@ -108,6 +113,19 @@ export const listInsurance = asyncHandler(async (req, res) => {
 
 export const createInsurance = asyncHandler(async (req, res) => {
   if (!req.body.provider || !req.body.policyNumber || !req.body.policyHolder || !req.body.validTill) throw new AppError("Insurance provider, policy number, holder, and validity are required", 400);
+  const existingPolicy =
+  await Insurance.findOne({
+    userId: req.user._id,
+    policyNumber:
+      req.body.policyNumber,
+  });
+
+  if (existingPolicy) {
+    throw new AppError(
+      "Insurance policy already exists",
+      409
+    );
+  }
   const policy = await Insurance.create({
     ...req.body,
     userId: req.user._id,
@@ -167,7 +185,7 @@ if (!appointment) {
 
 if (
   appointment.paymentStatus !==
-  "paid"
+  PAYMENT_STATUS.PAID
 ) {
   throw new AppError(
     "Only paid appointments can be reviewed",
@@ -230,6 +248,18 @@ export const listSavedDoctors = asyncHandler(async (req, res) => {
 });
 
 export const saveDoctor = asyncHandler(async (req, res) => {
+
+  const doctor =
+  await Doctor.findById(
+    req.body.doctorId
+  );
+
+  if (!doctor) {
+    throw new AppError(
+      "Doctor not found",
+      404
+    );
+  }
   const savedDoctor = await SavedDoctor.findOneAndUpdate(
     { userId: req.user._id, doctorId: req.body.doctorId },
     { notes: req.body.notes || "" },

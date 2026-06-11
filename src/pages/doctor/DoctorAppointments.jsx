@@ -297,6 +297,16 @@ function DoctorAppointments() {
                         {appointment.status}
                       </span>
 
+                      <span
+                          className={`rounded-xl px-3 py-2 text-xs font-black capitalize ${
+                            appointment.paymentStatus === "paid"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {appointment.paymentStatus || "unpaid"}
+                        </span>
+
                       {appointment.status ===
                         "pending" && (
                         <>
@@ -333,11 +343,7 @@ function DoctorAppointments() {
                         </>
                       )}
 
-                      {appointment.status ===
-                          "approved" &&
-
-                      appointment.paymentStatus ===
-                          "paid" && (
+                      {appointment.status === "approved" && appointment.paymentStatus === "paid" && (
                           <Button
                             onClick={() =>
                               updateStatus(

@@ -44,6 +44,7 @@ const navigation = [
   { name: "Analytics", path: "/doctor/analytics", icon: LineChart, roles: ["doctor"] },
   { name: "Billing", path: "/doctor/billing", icon: CreditCard, roles: ["doctor"] },
   { name: "Payments", path: "/admin/payments", icon: CreditCard, roles: ["admin", "super_admin"] },
+  {name: "Refunds",path: "/admin/refunds",icon: CreditCard,roles: ["admin", "super_admin"]},
   { name: "Payments", path: "/patient/payments", icon: CreditCard, roles: ["patient"] },
   { name: "Finance", path: "/admin/finance", icon: CreditCard, roles: ["admin", "super_admin"] },
   { name: "Finance Ops", path: "/admin/finance/ops", icon: LineChart, roles: ["admin", "super_admin"] },

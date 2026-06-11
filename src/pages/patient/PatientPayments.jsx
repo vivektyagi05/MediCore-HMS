@@ -17,9 +17,13 @@ import EmptyState from "../../components/shared/EmptyState";
 import Button from "../../components/ui/Button";
 
 const statusStyles = {
+  created: "bg-slate-100 text-slate-700",
   pending: "bg-amber-100 text-amber-700",
-  paid: "bg-emerald-100 text-emerald-700",
+  captured: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
+  refunded: "bg-purple-100 text-purple-700",
+  partially_refunded:
+    "bg-indigo-100 text-indigo-700",
 };
 
 function formatDate(value) {
@@ -106,8 +110,8 @@ function PatientPayments() {
     total: payments.length,
 
     paid: payments.filter(
-      (p) => p.status === "paid"
-    ).length,
+    (p) => p.status === "captured"
+  ).length,
 
     pending: payments.filter(
       (p) =>
@@ -116,7 +120,7 @@ function PatientPayments() {
 
     amount: payments
       .filter(
-        (p) => p.status === "paid"
+        (p) => p.status === "captured"
       )
       .reduce(
         (sum, p) =>
@@ -251,8 +255,16 @@ function PatientPayments() {
               All
             </option>
 
-            <option value="paid">
+            <option value="captured">
               Paid
+            </option>
+
+            <option value="refunded">
+              Refunded
+            </option>
+
+            <option value="partially_refunded">
+              Partial Refund
             </option>
 
             <option value="pending">

@@ -66,6 +66,9 @@ const AdminAppointments = lazy(
 const AdminPayments = lazy(
   () => import("../pages/admin/AdminPayments")
 );
+const AdminRefunds = lazy(
+  () => import("../pages/admin/AdminRefunds")
+);
 const InvoicePreview = lazy(() => import("../pages/invoice/InvoicePreview"));
 const FinanceHistory = lazy(() => import("../pages/finance/FinanceHistory"));
 const InvoiceHistory = lazy(() => import("../pages/finance/InvoiceHistory"));
@@ -106,6 +109,10 @@ function AppRoutes() {
           <Route
             path="payments"
             element={<AdminPayments />}
+          />
+          <Route
+            path="refunds"
+            element={<AdminRefunds />}
           />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="finance" element={<AdminFinanceDashboard />} />

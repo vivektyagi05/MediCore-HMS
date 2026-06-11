@@ -13,4 +13,27 @@ export const paymentApi = {
   getSummary() {
     return apiClient.get("/payments/summary").then((res) => res.data);
   },
+  getRefundRequests(params = {}) {
+    return apiClient
+      .get("/refunds", { params })
+      .then((res) => res.data);
+  },
+
+  approveRefund(id, payload = {}) {
+    return apiClient
+      .patch(
+        `/refunds/requests/${id}/approve`,
+        payload
+      )
+      .then((res) => res.data);
+  },
+
+  rejectRefund(id, payload = {}) {
+    return apiClient
+      .patch(
+        `/refunds/requests/${id}/reject`,
+        payload
+      )
+      .then((res) => res.data);
+  },
 };

@@ -69,6 +69,25 @@ const AdminPayments = lazy(
 const AdminRefunds = lazy(
   () => import("../pages/admin/AdminRefunds")
 );
+const DoctorReviews =
+lazy(
+ () =>
+ import(
+ "../pages/doctor/DoctorReviews"
+ )
+);
+const AdminReviews = lazy(
+ () =>
+ import(
+  "../pages/admin/AdminReviews"
+ )
+);
+const DoctorEarnings =
+lazy(
+()=>import(
+"../pages/doctor/DoctorEarnings"
+)
+);
 const InvoicePreview = lazy(() => import("../pages/invoice/InvoicePreview"));
 const FinanceHistory = lazy(() => import("../pages/finance/FinanceHistory"));
 const InvoiceHistory = lazy(() => import("../pages/finance/InvoiceHistory"));
@@ -110,9 +129,16 @@ function AppRoutes() {
             path="payments"
             element={<AdminPayments />}
           />
+          
           <Route
             path="refunds"
             element={<AdminRefunds />}
+          />
+          <Route
+          path="reviews"
+          element={
+            <AdminReviews />
+          }
           />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="finance" element={<AdminFinanceDashboard />} />
@@ -158,6 +184,13 @@ function AppRoutes() {
     />
 
     <Route
+      path="earnings"
+      element={
+        <DoctorEarnings/>
+      }
+      />
+
+    <Route
       path="schedule"
       element={<DoctorSchedule />}
     />
@@ -175,6 +208,13 @@ function AppRoutes() {
     <Route
       path="billing"
       element={<SubscriptionBilling />}
+    />
+
+    <Route
+    path="reviews"
+    element={
+      <DoctorReviews />
+    }
     />
 
   </Route>

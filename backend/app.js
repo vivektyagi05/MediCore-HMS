@@ -27,7 +27,8 @@ import { requestLogger } from "./utils/logger.js";
 import { razorpayWebhookHandler } from "./payments/webhookHandler.js";
 import userAdminRoutes from "./routes/admin/userAdminRoutes.js";
 import doctorOnboardingRoutes from "./routes/doctor/onboardingRoutes.js";
-
+import adminReviewRoutes
+from "./routes/adminReviewRoutes.js";
 
 
 const sanitizeValue = (value) => {
@@ -119,4 +120,8 @@ app.use("/api/admin/features", featureAdminRoutes);
 app.use("/api/admin/activity", activityAdminRoutes);
 app.use("/api/admin/exports", exportAdminRoutes);
 app.use("/api/admin/users", userAdminRoutes);
+app.use(
+ "/api/admin/reviews",
+ adminReviewRoutes
+);
 export default app;

@@ -8,8 +8,28 @@ const reviewSchema = new mongoose.Schema(
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, trim: true, maxlength: 1000, default: "" },
     isEdited: { type: Boolean, default: false },
+    doctorReply: {
+      message: {
+        type: String,
+        trim: true,
+        maxlength: 1000,
+      },
+      repliedAt: Date,
+    },
+    adminDeleted: {
+      type: Boolean,
+      default: false,
+    },
+
+    adminDeletedAt: Date,
+
+    adminDeletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
   { timestamps: true },
+  
 );
 
 reviewSchema.index({ userId: 1, appointmentId: 1 }, { unique: true });

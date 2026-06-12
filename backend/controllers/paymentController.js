@@ -21,6 +21,8 @@ import { couponService } from "../payments/couponService.js";
 import { paymentEmitter } from "../realtime/paymentEmitter.js";
 import ConsultationHistory
 from "../models/ConsultationHistory.js";
+import DoctorPayout
+from "../models/DoctorPayout.js";
 
 const ensureObjectId = (id, label) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -131,19 +133,57 @@ export const createPaymentOrder = asyncHandler(async (req, res) => {
     throw new AppError("A minimum payable gateway amount of INR 1 is required", 400);
   }
 
-  const receipt = `appt_${appointment._id.toString().slice(-12)}`;
-  const razorpayOrder = await razorpayService.createOrder({
-    amount: gatewayAmount,
-    currency: "INR",
-    receipt,
-    notes: {
-      appointmentId: appointment._id.toString(),
-      patientId: req.user._id.toString(),
-      walletApplied: String(walletApplied),
-      couponCode: couponCode || "",
-      module: "hms_finance",
-    },
-  });
+  const receipt =
+  `appt_${appointment._id.toString().slice(-12)}`;
+
+
+  let razorpayOrder;
+
+  try {
+
+    razorpayOrder =
+      await razorpayService.createOrder({
+        amount: gatewayAmount,
+        currency: "INR",
+        receipt,
+        notes: {
+          appointmentId:
+            appointment._id.toString(),
+          patientId:
+            req.user._id.toString(),
+          walletApplied:
+            String(walletApplied),
+          couponCode:
+            couponCode || "",
+          module:
+            "hms_finance",
+        },
+      });
+
+    console.log(
+      "RAZORPAY ORDER CREATED:",
+      razorpayOrder
+    );
+
+  } catch (error) {
+
+    console.error(
+      "RAZORPAY ERROR FULL:",
+      error
+    );
+
+    console.error(
+      "RAZORPAY RESPONSE:",
+      error?.response
+    );
+
+    console.error(
+      "RAZORPAY BODY:",
+      error?.response?.data
+    );
+
+    throw error;
+  }
 
   const payment = await Payment.create({
     appointmentId: appointment._id,
@@ -222,6 +262,8 @@ export const verifyPayment = asyncHandler(async (req, res) => {
   payment.paidAt = new Date();
   await payment.save();
 
+  
+
   if (payment.walletAmount > 0) {
     const wallet = await Wallet.findOneAndUpdate(
       { userId: payment.userId, balance: { $gte: payment.walletAmount } },
@@ -298,6 +340,38 @@ export const verifyPayment = asyncHandler(async (req, res) => {
       }
     )
   );
+
+  const existingPayout =
+    await DoctorPayout.findOne({
+      paymentId:
+        payment._id,
+    });
+
+    if (!existingPayout) {
+
+      await DoctorPayout.create({
+
+        doctorId:
+          appointment.doctorId,
+
+        paymentId:
+          payment._id,
+
+        appointmentId:
+          appointment._id,
+
+        grossAmount:
+          payment.totalAmount,
+
+        platformFee:
+          payment.totalAmount * 0.1,
+
+        doctorAmount:
+          payment.totalAmount * 0.9,
+
+      });
+
+    }
 
   const invoice = await invoiceService.createInvoice({ payment, appointment });
   payment.invoiceId = invoice._id;

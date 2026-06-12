@@ -34,4 +34,11 @@ export const aiApi = {
   getReminders(params = {}) {
     return apiClient.get("/ai/automation/reminders", { params }).then((res) => res.data);
   },
+  getReviews() {
+  return apiClient
+    .get("/doctors/reviews")
+    .then(
+      (res) => res.data
+    );
+},
 };

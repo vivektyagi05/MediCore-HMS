@@ -12,8 +12,17 @@ import {
 import { ROLES } from "../constants/roles.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
-
+import {
+ getDoctorReviews,
+ replyToReview,
+}
+from "../controllers/doctor/doctorReviewController.js";
 const router = Router();
+
+import {
+  getDoctorEarnings
+}
+from "../controllers/doctor/doctorEarningsController.js";
 
 /*
 |--------------------------------------------------------------------------
@@ -102,4 +111,30 @@ router.put(
   rejectDoctor
 );
 
+router.get(
+ "/reviews",
+ protect,
+ authorizeRoles(
+   ROLES.DOCTOR
+ ),
+ getDoctorReviews
+);
+
+router.patch(
+  "/reviews/:id/reply",
+  protect,
+  authorizeRoles(
+    ROLES.DOCTOR
+  ),
+  replyToReview
+);
+
+router.get(
+"/earnings",
+protect,
+authorizeRoles(
+ROLES.DOCTOR
+),
+getDoctorEarnings
+);
 export default router;

@@ -325,7 +325,7 @@ function PatientAppointments() {
       "completed" && (
 
       <Link
-        to={`/patient/review/${appointment._id}`}
+        to={`/patient/saved-doctors/`}
         className="rounded-xl bg-amber-500 px-3 py-2 text-xs font-black text-white"
       >
         Review Doctor

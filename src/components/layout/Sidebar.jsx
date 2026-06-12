@@ -12,6 +12,8 @@ import {
   Stethoscope,
   Users,
   X,
+  Star,
+  WalletCards
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
@@ -36,6 +38,27 @@ const navigation = [
   path: "/doctor/appointments",
   icon: CalendarDays,
   roles: ["doctor"]
+},
+{
+ name: "Reviews",
+ path: "/doctor/reviews",
+ icon: Star,
+ roles: ["doctor"]
+},
+{
+ name:"Reviews",
+ path:"/admin/reviews",
+ icon: Star,
+ roles:[
+   "admin",
+   "super_admin"
+ ]
+},
+{
+ name:"Earnings",
+ path:"/doctor/earnings",
+ icon:WalletCards,
+ roles:["doctor"]
 },
   { name: "Appointments", path: "/patient/appointments", icon: CalendarDays, roles: ["patient"] },
   { name: "Clinical", path: "/doctor/clinical", icon: NotebookPen, roles: ["doctor"] },

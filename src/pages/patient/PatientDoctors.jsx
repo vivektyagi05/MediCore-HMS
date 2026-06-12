@@ -10,16 +10,26 @@ import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
 import Loader from "../../components/ui/Loader";
 import { useToast } from "../../context/ToastContext";
+import { useSearchParams } from "react-router-dom";
 
 function PatientDoctors() {
   const [doctors, setDoctors] = useState([]);
   const [saved, setSaved] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [reviews, setReviews] = useState([]);
-  const [reviewForm, setReviewForm] = useState({ appointmentId: "", rating: 5, comment: "" });
+  const [reviewForm, setReviewForm] =
+useState({
+  appointmentId: "",
+  rating: 0,
+  comment: "",
+});
   const [isLoading, setIsLoading] = useState(true);
   const toast = useToast();
+  const [searchParams] =
+  useSearchParams();
 
+const reviewAppointmentId =
+  searchParams.get("review");
   const load = async () => {
     setIsLoading(true);
     try {
@@ -42,8 +52,25 @@ function PatientDoctors() {
 
   useEffect(() => { load(); }, []);
 
+  if (reviewAppointmentId) {
+    setReviewForm((prev) => ({
+      ...prev,
+      appointmentId:
+        reviewAppointmentId,
+    }));
+  }
+
   const savedIds = useMemo(() => new Set(saved.map((item) => item.doctorId?._id)), [saved]);
-  const completedAppointments = appointments.filter((item) => item.status === "completed");
+  const completedAppointments =
+  appointments.filter(
+  (item) =>
+  item.status === "completed" &&
+  item.paymentStatus === "paid" &&
+  !reviews.some(
+    (review) =>
+      review.appointmentId === item._id
+  )
+  );
 
   const saveDoctor = async (doctorId) => {
     try {
@@ -55,8 +82,25 @@ function PatientDoctors() {
     }
   };
 
+  
+
   const saveReview = async (event) => {
     event.preventDefault();
+    if (
+      !reviewForm.appointmentId
+    ) {
+      return toast.error(
+        "Select appointment"
+      );
+    }
+
+    if (
+      reviewForm.rating < 1
+    ) {
+      return toast.error(
+        "Please select rating"
+      );
+    }
     try {
       await patientWorkflowApi.saveReview(reviewForm);
       toast.success("Review saved");
@@ -95,7 +139,25 @@ function PatientDoctors() {
           </form>
         </Card>
         <Card title="My Reviews">
-          <div className="space-y-3">{reviews.map((review) => <div key={review._id} className="rounded-2xl bg-white/60 p-4 shadow-lg"><RatingStars value={review.rating} /><p className="mt-2 font-black text-slate-950">Dr. {review.doctorId?.userId?.name}</p><p className="mt-1 text-sm text-slate-600">{review.comment}</p></div>)}</div>
+          <div className="space-y-3">{reviews.map((review) => <div key={review._id} className="rounded-2xl bg-white/60 p-4 shadow-lg"><RatingStars value={review.rating} /><p className="mt-2 font-black text-slate-950">Dr. {review.doctorId?.userId?.name}</p><p className="mt-1 text-sm text-slate-600">{review.doctorReply
+            ?.message && (
+
+            <div className="mt-3 rounded-xl bg-blue-50 p-3">
+
+              <p className="text-xs font-black uppercase text-blue-700">
+                Doctor Reply
+              </p>
+
+              <p className="mt-1 text-sm text-slate-700">
+                {
+                  review.doctorReply
+                    .message
+                }
+              </p>
+
+            </div>
+
+          )}</p></div>)}</div>
         </Card>
       </div>
     </div>

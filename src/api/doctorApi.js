@@ -7,6 +7,14 @@ export const doctorApi = {
   |--------------------------------------------------------------------------
   */
 
+  getReviews() {
+    return apiClient
+      .get("/doctors/reviews")
+      .then(
+        (res) => res.data
+      );
+  },
+
   getDoctors(params = {}) {
     return apiClient
       .get("/doctors", { params })
@@ -98,5 +106,32 @@ updateOnboarding(payload) {
         })
         .then((res) => res.data);
     },
+
+    replyReview(
+      reviewId,
+      payload
+    ) {
+      return apiClient
+        .patch(
+          `/doctors/reviews/${reviewId}/reply`,
+          payload
+        )
+        .then(
+          (res) => res.data
+        );
+    },
+
+    getEarnings() {
+    return apiClient
+      .get(
+      "/doctors/earnings"
+      )
+      .then(
+      (res)=>res.data
+      );
+    },
+
+    
+
 };
 

@@ -1,0 +1,55 @@
+name: CI
+
+# Runs the checks that already exist in this repository's package.json
+# scripts (lint, backend tests, frontend build). It does not add any new
+# testing infrastructure — it just runs what "npm run lint",
+# "npm run test:backend", and "npm run build" already do locally.
+#
+# Backend tests are dependency-free (backend/tests/run-all.mjs spawns each
+# *.test.mjs file with dummy env vars — see that file), so no MongoDB
+# service container is configured here. If a test suite that genuinely
+# requires a live MongoDB is added later, add a `services:` block with a
+# `mongo` container before relying on this workflow for it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build

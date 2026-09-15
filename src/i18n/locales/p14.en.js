@@ -1,0 +1,83 @@
+export default {
+  "public": {
+    "filters": "Filters",
+  },
+  "story": {"eyebrow":"MediCore public care platform","loginTitle":"Continue care with the right account.","loginDescription":"Find the right doctor, review real availability, and continue into the care workflow from one trusted public experience.","registerTitle":"Start your MediCore care journey.","registerDescription":"Create the account that matches your care role and keep your next step connected to the public MediCore experience.","discover":"Discover","discoverText":"Search doctors and services using the public discovery tools.","availability":"Real availability","availabilityText":"Appointment slots come from the existing scheduling workflow.","protected":"Protected access","protectedText":"Account areas stay separated by role and backend authorization.","bookingContext":"Your original booking request can continue after patient authentication.","generalContext":"Use your MediCore account to continue to the correct role-based destination."},
+
+  "login": {
+    "eyebrow": "Account access",
+    "title": "Sign in to MediCore",
+    "subtitle": "Continue to your account securely.",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "noAccount": "New to MediCore?",
+    "createAccount": "Create a patient account",
+    "invalidEmail": "Enter a valid email address.",
+    "passwordRequired": "Enter your password.",
+    "networkError": "We could not reach MediCore. Check your connection and try again.",
+    "roleBookingError": "This booking requires a patient account. Please sign in with a patient account.",
+    "roleDoctor": "Doctor",
+    "roleAdmin": "Admin",
+    "roleSuperAdmin": "Super admin",
+    "roleReceptionist": "Receptionist",
+    "secureNote": "Your account access is protected by role-based permissions.",
+    "bookingNote": "Your booking request will be restored after patient sign-in.",
+    "sessionNote": "You are already signed in. Continue to your account."
+  },
+  "register": {
+    "eyebrow": "Account setup",
+    "title": "Create your MediCore account",
+    "subtitle": "Start with a secure account for your healthcare journey.",
+    "nameLabel": "Full name",
+    "namePlaceholder": "Your full name",
+    "roleLabel": "Account type",
+    "rolePatient": "Patient",
+    "roleDoctor": "Doctor",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "At least 8 characters",
+    "confirmPasswordLabel": "Confirm password",
+    "confirmPasswordPlaceholder": "Re-enter your password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "submit": "Create account",
+    "submitting": "Creating account…",
+    "haveAccount": "Already have an account?",
+    "signIn": "Sign in",
+    "patientBooking": "Patient account required for booking. Your original booking request will be restored after registration.",
+    "invalidEmail": "Enter a valid email address.",
+    "nameShort": "Enter at least 2 characters.",
+    "passwordShort": "Password must be at least 8 characters.",
+    "passwordMismatch": "Passwords do not match.",
+    "networkError": "We could not reach MediCore. Check your connection and try again.",
+    "roleError": "Choose a supported account type.",
+    "doctorNote": "Doctor accounts continue through the existing doctor onboarding and verification workflow.",
+    "secureNote": "Privileged roles are not available through public registration."
+  },
+  "roles": {
+    "patient": "Patient",
+    "doctor": "Doctor",
+    "admin": "Admin",
+    "super_admin": "Super admin",
+    "receptionist": "Receptionist"
+  },
+  "seo": {
+    "loginTitle": "Sign in",
+    "loginDescription": "Sign in to your MediCore account.",
+    "registerTitle": "Create account",
+    "registerDescription": "Create a MediCore account."
+  },
+  "errors": {
+    "sessionExpired": "Your session is no longer valid. Please sign in again.",
+    "unauthorizedRole": "You do not have permission to open this area.",
+    "registrationFailed": "We could not create your account. Please review the form and try again.",
+    "loginFailed": "We could not sign you in. Please check your details and try again."
+  }
+};

@@ -1,0 +1,83 @@
+export default {
+  "public": {
+    "filters": "Filters",
+  },
+  "story": {"eyebrow":"MediCore public care platform","loginTitle":"Sahi account ke saath care continue karo.","loginDescription":"Right doctor find karo, real availability review karo, aur trusted public experience se care workflow mein continue karo.","registerTitle":"Apni MediCore care journey start karo.","registerDescription":"Apni care role ke hisaab se account banao aur next step ko MediCore public experience se connected rakho.","discover":"Discover","discoverText":"Public discovery tools se doctors aur services search karo.","availability":"Real availability","availabilityText":"Appointment slots existing scheduling workflow se aate hain.","protected":"Protected access","protectedText":"Account areas role aur backend authorization ke hisaab se separated rehte hain.","bookingContext":"Patient authentication ke baad tumhari original booking request continue ho sakti hai.","generalContext":"MediCore account se correct role-based destination par continue karo."},
+
+  "login": {
+    "eyebrow": "Account access",
+    "title": "MediCore mein Sign In Karo",
+    "subtitle": "Apne account mein securely continue karo.",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Apna password enter karo",
+    "showPassword": "Password dikhao",
+    "hidePassword": "Password chhupao",
+    "submit": "Sign In Karo",
+    "submitting": "Sign in ho raha hai…",
+    "noAccount": "MediCore par naye ho?",
+    "createAccount": "Patient account banao",
+    "invalidEmail": "Valid email address enter karo.",
+    "passwordRequired": "Apna password enter karo.",
+    "networkError": "MediCore se connect nahi ho saka. Connection check karke dobara try karo.",
+    "roleBookingError": "Is booking ke liye patient account zaroori hai. Patient account se sign in karo.",
+    "roleDoctor": "Doctor",
+    "roleAdmin": "Admin",
+    "roleSuperAdmin": "Super admin",
+    "roleReceptionist": "Receptionist",
+    "secureNote": "Account access role-based permissions se protected hai.",
+    "bookingNote": "Patient sign-in ke baad tumhari booking request restore ho jayegi.",
+    "sessionNote": "Tum already signed in ho. Apne account par continue karo."
+  },
+  "register": {
+    "eyebrow": "Account setup",
+    "title": "Apna MediCore Account Banao",
+    "subtitle": "Apni healthcare journey ke liye secure account se shuru karo.",
+    "nameLabel": "Full name",
+    "namePlaceholder": "Apna full name",
+    "roleLabel": "Account type",
+    "rolePatient": "Patient",
+    "roleDoctor": "Doctor",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Kam se kam 8 characters",
+    "confirmPasswordLabel": "Confirm password",
+    "confirmPasswordPlaceholder": "Password dobara enter karo",
+    "showPassword": "Password dikhao",
+    "hidePassword": "Password chhupao",
+    "submit": "Account Banao",
+    "submitting": "Account ban raha hai…",
+    "haveAccount": "Pehle se account hai?",
+    "signIn": "Sign In Karo",
+    "patientBooking": "Booking ke liye patient account zaroori hai. Registration ke baad original booking request restore ho jayegi.",
+    "invalidEmail": "Valid email address enter karo.",
+    "nameShort": "Kam se kam 2 characters ka naam enter karo.",
+    "passwordShort": "Password kam se kam 8 characters ka hona chahiye.",
+    "passwordMismatch": "Passwords match nahi karte.",
+    "networkError": "MediCore se connect nahi ho saka. Connection check karke dobara try karo.",
+    "roleError": "Supported account type choose karo.",
+    "doctorNote": "Doctor accounts existing doctor onboarding aur verification workflow mein continue karte hain.",
+    "secureNote": "Public registration se privileged roles available nahi hain."
+  },
+  "roles": {
+    "patient": "Patient",
+    "doctor": "Doctor",
+    "admin": "Admin",
+    "super_admin": "Super admin",
+    "receptionist": "Receptionist"
+  },
+  "seo": {
+    "loginTitle": "Sign In",
+    "loginDescription": "Apne MediCore account mein sign in karo.",
+    "registerTitle": "Account Banao",
+    "registerDescription": "MediCore account banao."
+  },
+  "errors": {
+    "sessionExpired": "Tumhara session valid nahi raha. Please dobara sign in karo.",
+    "unauthorizedRole": "Tumhe is area ko open karne ki permission nahi hai.",
+    "registrationFailed": "Account create nahi ho saka. Form check karke dobara try karo.",
+    "loginFailed": "Sign in nahi ho saka. Apni details check karke dobara try karo."
+  }
+};

@@ -1,0 +1,83 @@
+export default {
+  "public": {
+    "filters": "फ़िल्टर",
+  },
+  "story": {"eyebrow":"MediCore सार्वजनिक केयर प्लेटफॉर्म","loginTitle":"सही अकाउंट के साथ केयर जारी रखें।","loginDescription":"सही डॉक्टर खोजें, वास्तविक उपलब्धता देखें और एक भरोसेमंद सार्वजनिक अनुभव से केयर वर्कफ़्लो में आगे बढ़ें।","registerTitle":"अपनी MediCore केयर यात्रा शुरू करें।","registerDescription":"अपनी केयर भूमिका के अनुसार अकाउंट बनाएं और अगला कदम MediCore के सार्वजनिक अनुभव से जुड़ा रखें।","discover":"डिस्कवर","discoverText":"सार्वजनिक डिस्कवरी टूल्स से डॉक्टर और सेवाएं खोजें।","availability":"वास्तविक उपलब्धता","availabilityText":"अपॉइंटमेंट स्लॉट मौजूदा शेड्यूलिंग वर्कफ़्लो से आते हैं।","protected":"सुरक्षित पहुंच","protectedText":"अकाउंट क्षेत्र भूमिका और बैकएंड ऑथराइज़ेशन के अनुसार अलग रहते हैं।","bookingContext":"पेशेंट ऑथेंटिकेशन के बाद आपकी मूल बुकिंग रिक्वेस्ट जारी रह सकती है।","generalContext":"अपने MediCore अकाउंट से सही भूमिका वाले गंतव्य पर आगे बढ़ें।"},
+
+  "login": {
+    "eyebrow": "अकाउंट एक्सेस",
+    "title": "MediCore में साइन इन करें",
+    "subtitle": "अपने खाते में सुरक्षित रूप से आगे बढ़ें।",
+    "emailLabel": "ईमेल पता",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "पासवर्ड",
+    "passwordPlaceholder": "अपना पासवर्ड दर्ज करें",
+    "showPassword": "पासवर्ड दिखाएँ",
+    "hidePassword": "पासवर्ड छिपाएँ",
+    "submit": "साइन इन करें",
+    "submitting": "साइन इन हो रहा है…",
+    "noAccount": "MediCore पर नए हैं?",
+    "createAccount": "मरीज का खाता बनाएं",
+    "invalidEmail": "मान्य ईमेल पता दर्ज करें।",
+    "passwordRequired": "अपना पासवर्ड दर्ज करें।",
+    "networkError": "MediCore से कनेक्ट नहीं हो सका। अपना कनेक्शन जांचें और फिर प्रयास करें।",
+    "roleBookingError": "इस बुकिंग के लिए मरीज का खाता जरूरी है। कृपया मरीज के खाते से साइन इन करें।",
+    "roleDoctor": "डॉक्टर",
+    "roleAdmin": "एडमिन",
+    "roleSuperAdmin": "सुपर एडमिन",
+    "roleReceptionist": "रिसेप्शनिस्ट",
+    "secureNote": "आपके खाते की पहुंच भूमिका-आधारित अनुमतियों से सुरक्षित है।",
+    "bookingNote": "मरीज के साइन इन के बाद आपकी बुकिंग रिक्वेस्ट बहाल कर दी जाएगी।",
+    "sessionNote": "आप पहले से साइन इन हैं। अपने खाते में आगे बढ़ें।"
+  },
+  "register": {
+    "eyebrow": "अकाउंट सेटअप",
+    "title": "अपना MediCore खाता बनाएं",
+    "subtitle": "अपनी हेल्थकेयर यात्रा के लिए सुरक्षित खाते से शुरुआत करें।",
+    "nameLabel": "पूरा नाम",
+    "namePlaceholder": "अपना पूरा नाम",
+    "roleLabel": "खाते का प्रकार",
+    "rolePatient": "मरीज",
+    "roleDoctor": "डॉक्टर",
+    "emailLabel": "ईमेल पता",
+    "emailPlaceholder": "you@example.com",
+    "passwordLabel": "पासवर्ड",
+    "passwordPlaceholder": "कम से कम 8 अक्षर",
+    "confirmPasswordLabel": "पासवर्ड की पुष्टि करें",
+    "confirmPasswordPlaceholder": "पासवर्ड फिर से दर्ज करें",
+    "showPassword": "पासवर्ड दिखाएँ",
+    "hidePassword": "पासवर्ड छिपाएँ",
+    "submit": "खाता बनाएं",
+    "submitting": "खाता बनाया जा रहा है…",
+    "haveAccount": "पहले से खाता है?",
+    "signIn": "साइन इन करें",
+    "patientBooking": "बुकिंग के लिए मरीज का खाता जरूरी है। रजिस्ट्रेशन के बाद आपकी मूल बुकिंग रिक्वेस्ट बहाल कर दी जाएगी।",
+    "invalidEmail": "मान्य ईमेल पता दर्ज करें।",
+    "nameShort": "कम से कम 2 अक्षरों का नाम दर्ज करें।",
+    "passwordShort": "पासवर्ड कम से कम 8 अक्षरों का होना चाहिए।",
+    "passwordMismatch": "पासवर्ड मेल नहीं खाते।",
+    "networkError": "MediCore से कनेक्ट नहीं हो सका। अपना कनेक्शन जांचें और फिर प्रयास करें।",
+    "roleError": "समर्थित खाते का प्रकार चुनें।",
+    "doctorNote": "डॉक्टर खाते मौजूदा डॉक्टर ऑनबोर्डिंग और वेरिफिकेशन वर्कफ़्लो में आगे बढ़ते हैं।",
+    "secureNote": "पब्लिक रजिस्ट्रेशन से विशेषाधिकार प्राप्त भूमिकाएँ उपलब्ध नहीं हैं।"
+  },
+  "roles": {
+    "patient": "मरीज",
+    "doctor": "डॉक्टर",
+    "admin": "एडमिन",
+    "super_admin": "सुपर एडमिन",
+    "receptionist": "रिसेप्शनिस्ट"
+  },
+  "seo": {
+    "loginTitle": "साइन इन",
+    "loginDescription": "अपने MediCore खाते में साइन इन करें।",
+    "registerTitle": "खाता बनाएं",
+    "registerDescription": "MediCore खाता बनाएं।"
+  },
+  "errors": {
+    "sessionExpired": "आपका सत्र अब मान्य नहीं है। कृपया फिर से साइन इन करें।",
+    "unauthorizedRole": "आपको इस क्षेत्र को खोलने की अनुमति नहीं है।",
+    "registrationFailed": "खाता नहीं बनाया जा सका। फॉर्म की जानकारी जांचकर फिर प्रयास करें।",
+    "loginFailed": "साइन इन नहीं हो सका। अपनी जानकारी जांचकर फिर प्रयास करें।"
+  }
+};

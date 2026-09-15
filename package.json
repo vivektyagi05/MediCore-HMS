@@ -1,0 +1,41 @@
+{
+  "name": "hms-pro-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "node \"./backend/server.js\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test:backend": "npm --prefix backend test",
+    "seed:backend": "node \"./backend/seed.js\"",
+    "migrate:doctor-profiles": "npm --prefix backend run migrate:doctor-profiles",
+    "migrate:consultation-mode": "npm --prefix backend run migrate:consultation-mode",
+    "migrate:content-lifecycle": "npm --prefix backend run migrate:content-lifecycle",
+    "audit:integrity": "npm --prefix backend run audit:integrity"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "latest",
+    "axios": "^1.16.1",
+    "framer-motion": "^12.39.0",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "socket.io-client": "^4.8.3",
+    "vite": "latest",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^5.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@vitejs/plugin-react": "latest",
+    "eslint": "latest",
+    "eslint-plugin-react-hooks": "latest",
+    "eslint-plugin-react-refresh": "latest",
+    "globals": "latest"
+  }
+}

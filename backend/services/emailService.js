@@ -4,12 +4,58 @@ import { refundEmail } from "../emails/refundEmail.js";
 import { logger } from "../utils/logger.js";
 import fs from "fs/promises";
 import { passwordRecoveryEmail } from "../emails/passwordRecoveryEmail.js";
+import { doctorApprovalEmail, doctorRejectionEmail } from "../emails/doctorVerificationEmail.js";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
 
 
 const BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
+const BREVO_ACCOUNT_ENDPOINT = "https://api.brevo.com/v3/account";
 export const isBrevoConfigured = () => Boolean(env.brevo.apiKey && env.brevo.senderEmail);
+
+// PHASE 2-D — Brevo diagnostics bugfix: `isBrevoConfigured()` only ever
+// checked that BREVO_API_KEY/BREVO_SENDER_EMAIL env vars are *present* --
+// never that the key is actually *valid* with Brevo. That gap is the real
+// reason the reported 401 was confusing: the platform health check
+// reported email as "healthy" (env vars present) right up until a real
+// send attempt hit Brevo and got rejected. This calls Brevo's lightweight
+// account-info endpoint (no email is sent) to verify the key itself is
+// live, so a revoked/rotated/incorrect key shows up in health checks
+// before it silently breaks the next real send. Never logs the key value.
+let cachedCredentialCheck = null;
+const CREDENTIAL_CHECK_TTL_MS = 60_000;
+
+export const verifyBrevoCredentials = async () => {
+  if (!isBrevoConfigured()) {
+    return { healthy: false, checked: false, reason: "not_configured" };
+  }
+
+  if (cachedCredentialCheck && cachedCredentialCheck.expiresAt > Date.now()) {
+    return cachedCredentialCheck.result;
+  }
+
+  let result;
+  try {
+    const response = await fetch(BREVO_ACCOUNT_ENDPOINT, {
+      method: "GET",
+      headers: { "api-key": env.brevo.apiKey, Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      result = { healthy: false, checked: true, reason: "invalid_credentials" };
+    } else if (!response.ok) {
+      result = { healthy: false, checked: true, reason: `provider_error_${response.status}` };
+    } else {
+      result = { healthy: true, checked: true, reason: "ok" };
+    }
+  } catch (error) {
+    result = { healthy: false, checked: true, reason: "network_error", errorName: error.name };
+  }
+
+  cachedCredentialCheck = { result, expiresAt: Date.now() + CREDENTIAL_CHECK_TTL_MS };
+  return result;
+};
 
 export class BrevoConfigurationError extends Error {
   constructor(message) { super(message); this.name = "BrevoConfigurationError"; }
@@ -150,6 +196,7 @@ export const emailService = {
   isBrevoConfigured() {
     return isBrevoConfigured();
   },
+  verifyBrevoCredentials,
   sendPasswordRecoveryOtpEmail,
   sendContactLeadAcknowledgement,
 
@@ -176,6 +223,29 @@ export const emailService = {
       to: patient.email,
       subject: "Refund processed",
       html: refundEmail({ patient, amount, currency }),
+    });
+  },
+
+  // PHASE 2-B — Doctor Real Workflow. Section 6/7 of the brief: approval and
+  // rejection must send a REAL email through this same Brevo abstraction
+  // (never console.log/fake success). Business state (verificationStatus)
+  // is never rolled back if this throws -- the caller catches and logs
+  // the delivery failure separately, matching the existing
+  // sendPasswordRecoveryOtpEmail/sendRefundConfirmation contract (throw on
+  // provider failure, let the caller decide what "handled safely" means).
+  sendDoctorApprovalEmail({ toEmail, toName, specialization }) {
+    return sendMail({
+      to: toEmail,
+      subject: `Your ${env.hospital.name} doctor verification is approved`,
+      html: doctorApprovalEmail({ name: toName, hospitalName: env.hospital.name, specialization }),
+    });
+  },
+
+  sendDoctorRejectionEmail({ toEmail, toName, reason }) {
+    return sendMail({
+      to: toEmail,
+      subject: `Your ${env.hospital.name} doctor verification update`,
+      html: doctorRejectionEmail({ name: toName, hospitalName: env.hospital.name, reason }),
     });
   },
 };

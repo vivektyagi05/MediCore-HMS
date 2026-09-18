@@ -19,4 +19,11 @@ export const authApi = {
   resetPassword(payload) {
     return apiClient.post("/auth/reset-password", payload).then((res) => res.data);
   },
+  // PHASE 2-A — session restoration. Re-verifies the token against the
+  // backend and returns the current user document, so cached fields like
+  // `doctorOnboardingStatus` can never go stale for the lifetime of a
+  // session.
+  me() {
+    return apiClient.get("/auth/me", { dedupe: false }).then((res) => res.data);
+  },
 };

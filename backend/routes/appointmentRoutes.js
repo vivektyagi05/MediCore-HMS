@@ -21,7 +21,7 @@ const router = Router();
 router.get(
   "/available-slots",
   protect,
-  authorizeRoles(ROLES.PATIENT, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR),
+  authorizeRoles(ROLES.PATIENT, ROLES.SUPER_ADMIN, ROLES.DOCTOR),
   getAvailableSlots,
 );
 
@@ -31,7 +31,7 @@ router.get(
 router.get(
   "/next-available",
   protect,
-  authorizeRoles(ROLES.PATIENT, ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR),
+  authorizeRoles(ROLES.PATIENT, ROLES.SUPER_ADMIN, ROLES.DOCTOR),
   getNextAvailableSlot,
 );
 
@@ -48,19 +48,19 @@ router.post("/", protect, authorizeRoles(ROLES.PATIENT), createAppointment);
 router.get(
   "/:id",
   protect,
-  authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR, ROLES.PATIENT),
+  authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR, ROLES.PATIENT),
   getAppointmentById,
 );
 router.get(
   "/",
   protect,
-  authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR, ROLES.PATIENT),
+  authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR, ROLES.PATIENT),
   getAppointments,
 );
 router.put(
   "/:id/status",
   protect,
-  authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR),
+  authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR),
   updateAppointmentStatus,
 );
 router.patch(
@@ -77,7 +77,7 @@ router.patch(
 router.patch(
   "/:id/reschedule",
   protect,
-  authorizeRoles(ROLES.PATIENT, ROLES.DOCTOR, ROLES.ADMIN, ROLES.SUPER_ADMIN),
+  authorizeRoles(ROLES.PATIENT, ROLES.DOCTOR, ROLES.SUPER_ADMIN),
   rescheduleAppointment,
 );
 export default router;

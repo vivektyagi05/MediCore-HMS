@@ -37,7 +37,10 @@ console.log("chatAuthorization.test.mjs");
 const doctorUser = { _id: "u-doctor-1", role: "doctor" };
 const patientUser = { _id: "u-patient-1", role: "patient" };
 const otherPatientUser = { _id: "u-patient-2", role: "patient" };
-const adminUser = { _id: "u-admin-1", role: "admin" };
+// PHASE 2-D: "admin" is no longer a valid role — the always-allowed
+// admin-tier participant in chatAuthorization.js is now exclusively
+// super_admin (see constants/roles.js's ADMIN_ROLES = [SUPER_ADMIN]).
+const adminUser = { _id: "u-admin-1", role: "super_admin" };
 
 await asyncTest("same user cannot chat with themself", async () => {
   assert.equal(await usersCanChat(doctorUser, doctorUser), false);

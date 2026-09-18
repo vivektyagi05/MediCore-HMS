@@ -13,6 +13,7 @@ import {
 import { ROLES } from "../constants/roles.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import { requireApprovedDoctor } from "../middleware/doctorAccessMiddleware.js";
 import {
  getDoctorReviews,
  replyToReview,
@@ -61,6 +62,7 @@ router.get(
   "/patients",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getDoctorPatients,
 );
 
@@ -74,7 +76,6 @@ router.post(
   "/",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN,
   ),
   createDoctor,
@@ -84,7 +85,6 @@ router.put(
   "/:id",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN,
   ),
   updateDoctor,
@@ -94,7 +94,6 @@ router.delete(
   "/:id",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN,
   ),
   deleteDoctor,
@@ -104,7 +103,6 @@ router.get(
   "/pending",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN
   ),
   getPendingDoctors
@@ -114,7 +112,6 @@ router.put(
   "/:id/approve",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN
   ),
   approveDoctor
@@ -124,7 +121,6 @@ router.put(
   "/:id/reject",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN
   ),
   rejectDoctor
@@ -134,7 +130,6 @@ router.put(
   "/:doctorId/documents/:documentId/verify",
   protect,
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN
   ),
   verifyDoctorDocument
@@ -143,28 +138,25 @@ router.put(
 router.get(
  "/reviews",
  protect,
- authorizeRoles(
-   ROLES.DOCTOR
- ),
- getDoctorReviews
+ authorizeRoles(ROLES.DOCTOR),
+ requireApprovedDoctor,
+  getDoctorReviews
 );
 
 router.patch(
   "/reviews/:id/reply",
   protect,
-  authorizeRoles(
-    ROLES.DOCTOR
-  ),
+  authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   replyToReview
 );
 
 router.get(
 "/earnings",
 protect,
-authorizeRoles(
-ROLES.DOCTOR
-),
-getDoctorEarnings
+authorizeRoles(ROLES.DOCTOR),
+requireApprovedDoctor,
+  getDoctorEarnings
 );
 
 // PHASE DOC-09 — Financial Control Center additions. Each endpoint
@@ -175,6 +167,7 @@ router.get(
   "/payouts",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getDoctorPayouts
 );
 
@@ -182,6 +175,7 @@ router.get(
   "/earnings/attention",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getDoctorFinancialAttention
 );
 
@@ -189,6 +183,7 @@ router.get(
   "/earnings/reconciliation",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getDoctorReconciliation
 );
 
@@ -196,6 +191,7 @@ router.get(
   "/earnings/position",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getDoctorFinancialPosition
 );
 
@@ -206,6 +202,7 @@ router.get(
   "/withdrawals/balance",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getWithdrawalBalance
 );
 
@@ -213,6 +210,7 @@ router.post(
   "/withdrawals",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   requestWithdrawal
 );
 
@@ -220,6 +218,7 @@ router.get(
   "/withdrawals",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getMyWithdrawals
 );
 
@@ -227,24 +226,23 @@ router.get(
   "/withdrawals/:id",
   protect,
   authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getWithdrawalDetail
 );
 
 router.patch(
   "/reviews/:id/pin",
   protect,
-  authorizeRoles(
-    ROLES.DOCTOR
-  ),
+  authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   togglePinReview
 );
 
 router.get(
   "/business/overview",
   protect,
-  authorizeRoles(
-    ROLES.DOCTOR
-  ),
+  authorizeRoles(ROLES.DOCTOR),
+  requireApprovedDoctor,
   getDoctorBusinessOverview
 );
 export default router;

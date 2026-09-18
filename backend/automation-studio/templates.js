@@ -34,7 +34,7 @@ export const AUTOMATION_TEMPLATES = Object.freeze([
     triggerType: TRIGGER_TYPES.REFUND_REQUESTED,
     conditions: null,
     actions: [
-      { id: "a1", type: "notify_role", label: "Alert admins", config: { role: "admin", title: "New refund request", message: "A refund of {{amount}} was requested: {{reason}}", severity: "warning" } },
+      { id: "a1", type: "notify_role", label: "Alert admins", config: { role: "super_admin", title: "New refund request", message: "A refund of {{amount}} was requested: {{reason}}", severity: "warning" } },
       { id: "a2", type: "activity_log", label: "Log for audit", config: { action: "automation.refund_flow", resourceType: "RefundRequest" } },
     ],
   },
@@ -46,7 +46,7 @@ export const AUTOMATION_TEMPLATES = Object.freeze([
     triggerType: TRIGGER_TYPES.INSURANCE_SUBMITTED,
     conditions: null,
     actions: [
-      { id: "a1", type: "notify_role", label: "Alert insurance team", config: { role: "admin", title: "Insurance claim submitted", message: "A new {{provider}} claim was submitted for review.", severity: "info" } },
+      { id: "a1", type: "notify_role", label: "Alert insurance team", config: { role: "super_admin", title: "Insurance claim submitted", message: "A new {{provider}} claim was submitted for review.", severity: "info" } },
     ],
   },
   {
@@ -100,7 +100,7 @@ export const AUTOMATION_TEMPLATES = Object.freeze([
     triggerType: TRIGGER_TYPES.DOCTOR_VERIFIED,
     conditions: null,
     actions: [
-      { id: "a1", type: "notify_role", label: "Alert operations", config: { role: "admin", title: "Doctor verified", message: "Dr. {{name}} ({{specialization}}) is now verified and live.", severity: "info" } },
+      { id: "a1", type: "notify_role", label: "Alert operations", config: { role: "super_admin", title: "Doctor verified", message: "Dr. {{name}} ({{specialization}}) is now verified and live.", severity: "info" } },
     ],
   },
 ]);

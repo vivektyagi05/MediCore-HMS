@@ -49,6 +49,15 @@ import {
 import { ROLES } from "../../constants/roles.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { authorizeRoles } from "../../middleware/roleMiddleware.js";
+import { requireApprovedDoctor } from "../../middleware/doctorAccessMiddleware.js";
+
+// PHASE 2-B — Section 8: every doctor-role route below is real clinical/
+// practice functionality (prescriptions, schedule, certificates,
+// analytics, ...) and requires an approved doctor. The /documents* routes
+// are deliberately excluded below (see doctorAccessMiddleware.js) since
+// uploading verification documents is part of the pending application
+// itself, not a post-approval feature.
+const authorizeApprovedDoctor = [authorizeRoles(ROLES.DOCTOR), requireApprovedDoctor];
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -81,75 +90,75 @@ router.use(protect);
 
 router.get(
   "/prescriptions",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   listPrescriptions
 );
 
 router.post(
   "/prescriptions",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   createPrescription
 );
 
 router.put(
   "/prescriptions/:id",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   updatePrescription
 );
 
 router.get(
   "/prescriptions/:id/download",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   downloadPrescription
 );
 
 router.get(
   "/notes",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   listMedicalNotes
 );
 
 router.post(
   "/notes",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   createMedicalNote
 );
 
 router.get(
   "/history",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getConsultationHistory
 );
 
 router.get(
   "/schedule",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getSchedule
 );
 
 router.get(
   "/schedule/day",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getScheduleDay
 );
 
 // Phase DOC-07 final pass — Week/Month view intelligence (bounded range).
 router.get(
   "/schedule/range",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getScheduleRange
 );
 
 // Phase DOC-07 final pass — Follow-up → Real Scheduling.
 router.post(
   "/patients/:patientId/schedule-follow-up",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   scheduleFollowUpAppointment
 );
 
 router.put(
   "/schedule",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   updateSchedule
 );
 
@@ -157,7 +166,6 @@ router.get(
   "/leaves",
   authorizeRoles(
     ROLES.DOCTOR,
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN
   ),
   listLeaves
@@ -172,7 +180,6 @@ router.post(
 router.put(
   "/leaves/:id/status",
   authorizeRoles(
-    ROLES.ADMIN,
     ROLES.SUPER_ADMIN
   ),
   updateLeaveStatus
@@ -205,125 +212,125 @@ router.get(
 
 router.get(
   "/analytics",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getDoctorAnalytics
 );
 
 router.get(
   "/exports",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   exportDoctorData
 );
 
 // ── Prescription Intelligence ──
 router.post(
   "/prescriptions/check",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   checkPrescriptionSafety
 );
 
 router.get(
   "/medicine-templates",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   listMedicineTemplates
 );
 
 router.post(
   "/medicine-templates",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   createMedicineTemplate
 );
 
 router.delete(
   "/medicine-templates/:id",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   deleteMedicineTemplate
 );
 
 router.get(
   "/favourite-medicines",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   listFavouriteMedicines
 );
 
 router.post(
   "/favourite-medicines",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   addFavouriteMedicine
 );
 
 router.delete(
   "/favourite-medicines/:id",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   removeFavouriteMedicine
 );
 
 // ── Certificate Generator ──
 router.get(
   "/certificates",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   listCertificates
 );
 
 router.post(
   "/certificates",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   createCertificate
 );
 
 router.get(
   "/certificates/:id/download",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   downloadCertificate
 );
 
 router.put(
   "/certificates/:id/revoke",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   revokeCertificate
 );
 
 // ── Scheduling Intelligence: Session Templates ──
 router.get(
   "/schedule/templates",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   listScheduleTemplates
 );
 
 router.post(
   "/schedule/templates",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   saveScheduleTemplate
 );
 
 router.delete(
   "/schedule/templates/:id",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   deleteScheduleTemplate
 );
 
 router.post(
   "/schedule/templates/:id/apply",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   applyScheduleTemplate
 );
 
 // ── Patient Clinical Snapshot / Reports (Clinical Workspace) ──
 router.get(
   "/patients/:patientId/clinical-profile",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getPatientClinicalProfile
 );
 
 router.get(
   "/patients/:patientId/reports",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   getPatientReportsForDoctor
 );
 
 router.get(
   "/patients/:patientId/reports/:reportId/download",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   downloadPatientReportForDoctor
 );
 
@@ -331,7 +338,7 @@ router.get(
 // a second, correctly-scoped entry point rather than a duplicate engine).
 router.patch(
   "/patients/:patientId/reports/:reportId/review",
-  authorizeRoles(ROLES.DOCTOR),
+  ...authorizeApprovedDoctor,
   markPatientReportReviewed
 );
 

@@ -1,16 +1,21 @@
 import { Router } from "express";
-import { login, register } from "../controllers/authController.js";
+import { getMe, login, register } from "../controllers/authController.js";
 import {
   forgotPassword,
   verifyPasswordResetOtp,
   resetPassword,
 } from "../controllers/passwordRecoveryController.js";
 import { accountRateLimit, normalizeEmailKey } from "../middleware/accountRateLimit.js";
+import { protect } from "../middleware/authMiddleware.js";
 
 const router = Router();
 
 router.post("/register", register);
 router.post("/login", login);
+// PHASE 2-A — real session-restoration endpoint. `protect` re-verifies the
+// token (expiry, isActive, securityVersion) on every call, so a stale or
+// revoked cached session is rejected here rather than trusted client-side.
+router.get("/me", protect, getMe);
 
 // Phase P15 — password recovery. All three routes already sit behind the
 // app-wide IP-based authLimiter (app.js). These add a second, account-keyed

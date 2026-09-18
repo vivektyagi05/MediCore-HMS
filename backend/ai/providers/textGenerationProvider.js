@@ -12,15 +12,15 @@
 
 import { getPrompt } from "../promptLibrary.js";
 import { templateProvider } from "./templateProvider.js";
+import { openaiProvider } from "./openaiProvider.js";
 
 const PROVIDERS = {
   template: templateProvider,
-  // openai: openaiProvider,       // future: implement and register
-  // anthropic: anthropicProvider, // future: implement and register
+  openai: openaiProvider,
 };
 
 function resolveProvider() {
-  const key = process.env.AI_TEXT_PROVIDER || "template";
+  const key = process.env.AI_TEXT_PROVIDER || (process.env.NODE_ENV === "production" ? "openai" : "template");
   const provider = PROVIDERS[key];
   if (!provider) {
     throw new Error(
@@ -47,7 +47,7 @@ export async function generateText({ promptKey, context }) {
 // a real generation. Reuses the exact same resolveProvider() every real
 // request already goes through — no separate/duplicated resolution logic.
 export function getAIProviderStatus() {
-  const configuredKey = process.env.AI_TEXT_PROVIDER || "template";
+  const configuredKey = process.env.AI_TEXT_PROVIDER || (process.env.NODE_ENV === "production" ? "openai" : "template");
   try {
     const provider = resolveProvider();
     return { healthy: true, activeProvider: provider.name, configuredKey };

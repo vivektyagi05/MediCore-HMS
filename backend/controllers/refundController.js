@@ -506,7 +506,7 @@ export const reportPaymentProblem = asyncHandler(async (req, res) => {
 });
 
 export const listRefundRequests = asyncHandler(async (req, res) => {
-  const filter = req.user.role === ROLES.ADMIN || req.user.role === ROLES.SUPER_ADMIN
+  const filter = req.user.role === ROLES.SUPER_ADMIN
     ? {}
     : { requestedBy: req.user._id };
 
@@ -801,7 +801,7 @@ export const getRefundRequestDetail = asyncHandler(async (req, res) => {
   if (!refundRequest) throw new AppError("Refund request not found", 404);
 
   const isOwner = refundRequest.requestedBy?._id?.toString() === req.user._id.toString();
-  const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role);
+  const isAdmin = [ROLES.SUPER_ADMIN].includes(req.user.role);
   if (!isOwner && !isAdmin) throw new AppError("You are not authorized to view this refund request", 403);
 
   const currentIndex = REFUND_STATE_ORDER.indexOf(refundRequest.refundState);

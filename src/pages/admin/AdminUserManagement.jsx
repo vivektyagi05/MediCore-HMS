@@ -25,7 +25,7 @@ import AdminTable from "../../components/admin/AdminTable";
 // mutations (updateUser/toggleUserStatus/deleteUser) for their rows. This
 // page is deliberately NOT a third view of doctors or patients — it is
 // the one place that was missing: a searchable directory across every
-// role (admin/super_admin/receptionist accounts have no dedicated page
+// role (super_admin/receptionist accounts have no dedicated page
 // anywhere), with basic account actions available uniformly. Doctor and
 // patient rows deep-link to their real specialized workspace instead of
 // duplicating it.
@@ -36,8 +36,8 @@ import AdminTable from "../../components/admin/AdminTable";
 // filtering. Nothing here re-implements that filtering client-side.
 // ─────────────────────────────────────────────────────────────────────────
 
-const ROLE_OPTIONS = ["super_admin", "admin", "doctor", "receptionist", "patient"];
-const ROLE_TONE = { super_admin: "violet", admin: "sky", doctor: "info", receptionist: "neutral", patient: "success" };
+const ROLE_OPTIONS = ["super_admin", "doctor", "receptionist", "patient"];
+const ROLE_TONE = { super_admin: "violet", doctor: "info", receptionist: "neutral", patient: "success" };
 
 function roleLabel(role) {
   return role.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
@@ -357,7 +357,7 @@ function UserDetailModal({ user, onClose }) {
             </section>
           )}
 
-          {(full.role === "admin" || full.role === "super_admin") && (
+          {full.role === "super_admin" && (
             <section>
               <h3 className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 <UserCog size={13} /> Access

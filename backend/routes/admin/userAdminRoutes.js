@@ -18,7 +18,6 @@ const router = Router();
 router.use(
 protect,
 authorizeRoles(
-ROLES.ADMIN,
 ROLES.SUPER_ADMIN
 )
 );

@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Withdrawal, { WITHDRAWAL_STATUS } from "../../models/Withdrawal.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
-import { appendWithdrawalTransition } from "../../payments/withdrawalStateMachine.js";
+import { assertWithdrawalTransition } from "../../payments/withdrawalStateMachine.js";
 import { computeDoctorWithdrawableBalance } from "../../services/finance/withdrawalService.js";
 import { clampPagination, buildPaginationMeta } from "../../utils/paginationValidation.js";
 import { writeAdminLog } from "../../utils/adminAudit.js";
@@ -47,41 +47,76 @@ export const getWithdrawalDetailAdmin = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { withdrawal, currentBalance }, message: "Withdrawal detail fetched successfully" });
 });
 
-// Shared transition applier — every admin action below funnels through
-// this so no route can assign an arbitrary status directly.
+// PHASE 2-C — Section 16/33 bugfix: this was a load -> mutate in memory ->
+// save() sequence with no atomicity between the read and the write. Two
+// concurrent admin actions on the same withdrawal (double-click "Complete",
+// or "Complete" racing "Fail" from two admin tabs) could both load the same
+// `from` status, both pass appendWithdrawalTransition's in-memory
+// assertWithdrawalTransition check, and both write -- doubling the
+// financial mutation this guards (a withdrawal marked both completed AND
+// failed, or processedAmount/completedAt set twice by two different
+// admins). Fixed the same way as the doctor approval race (Section 8/9):
+// the transition's `from` status becomes part of the atomic
+// findOneAndUpdate filter itself, so only the one request that observes
+// the expected current status in the database ever applies its side
+// effects; every other concurrent caller gets an honest 409 instead of a
+// silently-doubled mutation.
 const applyTransition = async ({ req, res, to, reasonFallback }) => {
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new AppError("Invalid withdrawal id", 400);
-  const withdrawal = await Withdrawal.findById(req.params.id);
-  if (!withdrawal) throw new AppError("Withdrawal not found", 404);
 
-  appendWithdrawalTransition(withdrawal, to, {
-    actorId: req.user._id,
-    source: "admin",
-    reason: req.body.reason || reasonFallback,
-  });
+  const existing = await Withdrawal.findById(req.params.id);
+  if (!existing) throw new AppError("Withdrawal not found", 404);
 
+  const from = existing.status || "requested";
+  // Validate the transition shape up front (also throws the friendly 409
+  // if the currently-known status already forbids it) before touching the
+  // database, exactly as the prior single-document flow did.
+  assertWithdrawalTransition(from, to);
+
+  const reason = req.body.reason || reasonFallback;
+  const setFields = {
+    status: to,
+  };
   if (to === WITHDRAWAL_STATUS.PROCESSING) {
-    withdrawal.approvedAmount = req.body.approvedAmount ? Number(req.body.approvedAmount) : withdrawal.requestedAmount;
-    withdrawal.processedBy = req.user._id;
+    setFields.approvedAmount = req.body.approvedAmount ? Number(req.body.approvedAmount) : existing.requestedAmount;
+    setFields.processedBy = req.user._id;
   }
   if (to === WITHDRAWAL_STATUS.COMPLETED) {
-    withdrawal.processedAmount = withdrawal.approvedAmount || withdrawal.requestedAmount;
-    withdrawal.completedAt = new Date();
-    withdrawal.processedBy = req.user._id;
+    setFields.processedAmount = existing.approvedAmount || existing.requestedAmount;
+    setFields.completedAt = new Date();
+    setFields.processedBy = req.user._id;
   }
   if (to === WITHDRAWAL_STATUS.FAILED) {
-    withdrawal.failureReason = req.body.reason || "Withdrawal could not be completed";
-    withdrawal.processedBy = req.user._id;
+    setFields.failureReason = req.body.reason || "Withdrawal could not be completed";
+    setFields.processedBy = req.user._id;
   }
 
-  await withdrawal.save();
+  const withdrawal = await Withdrawal.findOneAndUpdate(
+    { _id: req.params.id, status: from },
+    {
+      $set: setFields,
+      $push: { stateHistory: { from, to, actorId: req.user._id, source: "admin", reason, at: new Date() } },
+    },
+    { new: true },
+  );
+
+  if (!withdrawal) {
+    // Lost the race: someone else's request already moved this withdrawal
+    // out of the `from` status we validated against. Re-read for an
+    // honest response instead of a false "moved to X" success.
+    const current = await Withdrawal.findById(req.params.id).lean();
+    throw new AppError(
+      `Withdrawal is no longer in "${from}" status (current status: ${current?.status || "unknown"})`,
+      409,
+    );
+  }
 
   await writeAdminLog({
     actorId: req.user._id,
     action: `withdrawal:${to}`,
     entityType: "withdrawal",
     entityId: withdrawal._id,
-    details: { to, reason: req.body.reason || reasonFallback },
+    details: { to, reason },
   }).catch(() => {});
 
   res.status(200).json({ success: true, data: { withdrawal }, message: `Withdrawal moved to ${to}` });

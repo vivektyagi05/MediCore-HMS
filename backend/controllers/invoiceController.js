@@ -19,7 +19,7 @@ import { AppError } from "../middleware/errorMiddleware.js";
 // scoped to their own doctorId rather than a patient's userId. Nothing
 // about the admin or patient branches changes.
 const ownershipFilter = async (req) => {
-  if ([ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role)) return {};
+  if ([ROLES.SUPER_ADMIN].includes(req.user.role)) return {};
   if (req.user.role === ROLES.DOCTOR) {
     const doctor = await Doctor.findOne({ userId: req.user._id }).select("_id").lean();
     if (!doctor) throw new AppError("Doctor profile not found", 404);
@@ -53,7 +53,7 @@ export const getInvoices = asyncHandler(async (req, res) => {
   // it already hard-scopes a patient to their own userId) — honoring an
   // arbitrary client-supplied doctorId for a doctor caller here would let
   // them widen that scope to any other doctor's invoices.
-  if (req.query.doctorId && [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role)) {
+  if (req.query.doctorId && [ROLES.SUPER_ADMIN].includes(req.user.role)) {
     filter.doctorId = req.query.doctorId;
   }
   if (req.query.from || req.query.to) {
@@ -68,7 +68,7 @@ export const getInvoices = asyncHandler(async (req, res) => {
   // their own userId, so a patient passing this param cannot widen their
   // own view.
   if (req.query.status && ["issued", "void"].includes(req.query.status)) filter.status = req.query.status;
-  if (req.query.userId && [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role)) filter.userId = req.query.userId;
+  if (req.query.userId && [ROLES.SUPER_ADMIN].includes(req.user.role)) filter.userId = req.query.userId;
   if (req.query.appointmentId) filter.appointmentId = req.query.appointmentId;
   if (req.query.paymentId) filter.paymentId = req.query.paymentId;
   if (req.query.minAmount || req.query.maxAmount) {

@@ -2,16 +2,16 @@ import apiClient from "./axios";
 
 export const withdrawalApi = {
   getBalance() {
-    return apiClient.get("/doctor/withdrawals/balance").then((res) => res.data);
+    return apiClient.get("/doctors/withdrawals/balance").then((res) => res.data);
   },
   request(payload) {
-    return apiClient.post("/doctor/withdrawals", payload).then((res) => res.data);
+    return apiClient.post("/doctors/withdrawals", payload).then((res) => res.data);
   },
   getMine(params = {}) {
-    return apiClient.get("/doctor/withdrawals", { params }).then((res) => res.data);
+    return apiClient.get("/doctors/withdrawals", { params }).then((res) => res.data);
   },
   getDetail(id) {
-    return apiClient.get(`/doctor/withdrawals/${id}`).then((res) => res.data);
+    return apiClient.get(`/doctors/withdrawals/${id}`).then((res) => res.data);
   },
 };
 

@@ -30,12 +30,22 @@ const GENERIC_OTP_INVALID_MESSAGE = "That code is invalid or has expired.";
 const GENERIC_OTP_LOCKED_MESSAGE = "Too many incorrect attempts. Please request a new code.";
 const GENERIC_RESET_INVALID_MESSAGE = "This verification session is invalid or has expired.";
 
-const recoveryUnavailable = (res) => {
+const recoveryUnavailable = (res, error = undefined) => {
   res.set("Cache-Control", "no-store");
+  const statusCategory = error?.statusCategory;
+  const code = statusCategory === "credential"
+    ? "EMAIL_PROVIDER_CREDENTIAL_ERROR"
+    : statusCategory === "rate_limit"
+      ? "EMAIL_PROVIDER_RATE_LIMITED"
+      : statusCategory === "network"
+        ? "EMAIL_PROVIDER_UNREACHABLE"
+        : statusCategory === "provider_5xx"
+          ? "EMAIL_PROVIDER_UNAVAILABLE"
+          : "PASSWORD_RECOVERY_UNAVAILABLE";
 
   res.status(503).json({
     success: false,
-    code: "PASSWORD_RECOVERY_UNAVAILABLE",
+    code,
     message: RECOVERY_UNAVAILABLE_MESSAGE,
   });
 };
@@ -55,10 +65,10 @@ export const forgotPassword = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email, isActive: true });
 
   if (!user) {
-    res.status(404).json({
-      success: false,
-      code: "ACCOUNT_NOT_FOUND",
-      message: "No account exists with this email address.",
+    res.set("Cache-Control", "no-store");
+    res.status(200).json({
+      success: true,
+      message: GENERIC_REQUEST_MESSAGE,
     });
     return;
   }

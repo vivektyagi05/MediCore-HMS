@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { ShieldAlert } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import Button from "../components/ui/Button";
+import Loader from "../components/ui/Loader";
 
 function Unauthorized() {
   return (
@@ -21,11 +22,20 @@ function Unauthorized() {
 }
 
 function PrivateRoute({ allowedRoles }) {
-  const { isAuthenticated, role } = useAuth();
+  // PHASE 2-A — Part 2/3 (session restoration): read `user` from the
+  // AuthContext state rather than re-parsing localStorage directly, so a
+  // freshly-verified /auth/me response (see AuthContext.refreshUser)
+  // actually reaches this routing decision instead of a snapshot frozen at
+  // last login. `initializing` covers the brief window on page
+  // load/browser restart while that verification is still in flight — a
+  // stale cached doctorOnboardingStatus must never make a routing decision
+  // before the real one is known.
+  const { isAuthenticated, role, user, initializing } = useAuth();
   const location = useLocation();
-  const user = JSON.parse(
-      localStorage.getItem("hms_user") || "{}"
-    );
+
+  if (initializing) {
+    return <Loader label="Restoring your session..." />;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;

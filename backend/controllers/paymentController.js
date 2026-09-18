@@ -782,7 +782,7 @@ export const getPayments = asyncHandler(async (req, res) => {
   const page = Math.max(Number(req.query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
   const skip = (page - 1) * limit;
-  const filter = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role) ? {} : { userId: req.user._id };
+  const filter = [ROLES.SUPER_ADMIN].includes(req.user.role) ? {} : { userId: req.user._id };
 
   // Advanced filters (Payment Center: status/date-range/doctor/amount/search)
   // applied server-side so pagination stays correct across filtered result
@@ -940,7 +940,7 @@ export const getFinancialSummary = asyncHandler(async (_req, res) => {
 // expense-summary feature can reuse the exact same real aggregates instead
 // of re-querying or approximating them.
 export const buildPaymentAnalyticsData = async (user) => {
-  const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(user.role);
+  const isAdmin = [ROLES.SUPER_ADMIN].includes(user.role);
   const ownerMatch = isAdmin ? {} : { userId: user._id };
   const capturedMatch = { ...ownerMatch, status: { $in: [PAYMENT_STATUS.CAPTURED, PAYMENT_STATUS.PARTIALLY_REFUNDED, PAYMENT_STATUS.REFUNDED] } };
 

@@ -84,11 +84,13 @@ afterAll(async () => {
 
 describe("HMS backend API", () => {
   it("registers users and returns safe auth payloads", async () => {
+    // PHASE 2-D: "admin" is no longer a valid role (see constants/roles.js) —
+    // this fixture now creates a super_admin, the only admin-tier role left.
     const adminUser = await User.create({
       name: "Admin User",
       email: "admin@hms.test",
       password: "Password123",
-      role: "admin",
+      role: "super_admin",
     });
     adminToken = generateToken(adminUser);
 

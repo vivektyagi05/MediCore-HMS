@@ -95,6 +95,18 @@ async function webhookStatus() {
   };
 }
 
+// PHASE 2-D — see emailService.verifyBrevoCredentials for why "configured"
+// (env vars present) and "healthy" (key actually accepted by Brevo) are
+// now reported separately instead of collapsing both into one boolean.
+async function emailStatus() {
+  const configured = emailService.isConfigured();
+  if (!configured) {
+    return { healthy: false, configured: false, reason: "not_configured" };
+  }
+  const credentialCheck = await emailService.verifyBrevoCredentials();
+  return { healthy: credentialCheck.healthy, configured: true, reason: credentialCheck.reason };
+}
+
 // ── Infrastructure Status ───────────────────────────────────────────────
 // Every entry here reflects real, currently-queryable backend state.
 export const buildInfrastructureStatus = async () => {
@@ -113,7 +125,7 @@ export const buildInfrastructureStatus = async () => {
       model: "external trigger (OS/container scheduler) + on-demand API — no in-process queue",
       jobs: cronJobs,
     },
-    email: { healthy: emailService.isConfigured(), configured: emailService.isConfigured() },
+    email: await emailStatus(),
     sms: { healthy: false, configured: false, note: "No SMS provider is integrated in this codebase" },
     storage: await storageStatus(),
     webhook,

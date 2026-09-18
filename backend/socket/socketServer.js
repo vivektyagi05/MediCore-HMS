@@ -22,6 +22,21 @@ export const initSocketServer = (httpServer) => {
 
   io.use(socketAuth);
 
+  // PHASE 2-D — Socket.IO diagnostics bugfix (see socketAuth.js for the
+  // handshake-rejection half of this). engine.io's own "connection_error"
+  // event fires for transport-level failures that never reach io.use()
+  // at all (a CORS origin mismatch on the handshake request, a malformed
+  // upgrade request, etc.) and was previously not observed anywhere --
+  // another way the reported "connection closes before establishment"
+  // symptom could happen with zero server-side trace of why.
+  io.engine.on("connection_error", (err) => {
+    logger.warn("Socket.IO transport-level connection error", {
+      code: err.code,
+      message: err.message,
+      context: err.context,
+    });
+  });
+
   io.on("connection", wrapAsyncConnectionHandler(async (socket) => {
     const rooms = await roomManager.defaultRoomsForUser(socket.user);
     await Promise.all(rooms.map((room) => socket.join(room)));

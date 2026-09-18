@@ -24,8 +24,8 @@ router.post("/test/complete", protect, authorizeRoles(ROLES.PATIENT), completeTe
 // patient-scoped route in this file.
 router.get("/status/:appointmentId", protect, authorizeRoles(ROLES.PATIENT), getPaymentStatus);
 router.post("/:id/retry", protect, authorizeRoles(ROLES.PATIENT), retryPayment);
-router.get("/", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), getPayments);
-router.get("/summary", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), getFinancialSummary);
-router.get("/analytics", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), getPaymentAnalytics);
+router.get("/", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), getPayments);
+router.get("/summary", protect, authorizeRoles(ROLES.SUPER_ADMIN), getFinancialSummary);
+router.get("/analytics", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), getPaymentAnalytics);
 
 export default router;

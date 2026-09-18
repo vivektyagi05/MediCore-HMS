@@ -4,8 +4,13 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
-dotenv.config();
+// dotenv@17 prints unstructured "tip" lines to stdout by default (unrelated
+// promotional/CLI hints, not from this application). Left unsilenced, these
+// interleave with the app's structured JSON log lines on every boot, making
+// production logs harder to parse mechanically. `quiet: true` disables only
+// those tip lines; it does not affect .env loading behavior or error output.
+dotenv.config({ path: path.resolve(__dirname, "../.env"), quiet: true });
+dotenv.config({ quiet: true });
 
 const requiredEnv = ["MONGO_URI", "JWT_SECRET"];
 
@@ -27,6 +32,8 @@ if (isProduction) {
     "RAZORPAY_KEY_ID",
     "RAZORPAY_KEY_SECRET",
     "RAZORPAY_WEBHOOK_SECRET",
+    "BREVO_API_KEY",
+    "BREVO_SENDER_EMAIL",
   ];
   const missing = requiredInProduction.filter((key) => !process.env[key]);
   if (missing.length) {
@@ -34,6 +41,16 @@ if (isProduction) {
   }
   if (process.env.JWT_SECRET.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters in production");
+  }
+  if ((process.env.PAYMENT_GATEWAY_MODE || "razorpay") === "test") {
+    throw new Error("PAYMENT_GATEWAY_MODE=test is not allowed in production");
+  }
+  const configuredAiProvider = process.env.AI_TEXT_PROVIDER || "openai";
+  if (configuredAiProvider === "template") {
+    throw new Error("AI_TEXT_PROVIDER=template is not allowed in production; configure a real AI provider");
+  }
+  if (configuredAiProvider === "openai" && !process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required when AI_TEXT_PROVIDER=openai in production");
   }
 }
 
@@ -45,7 +62,9 @@ export const env = Object.freeze({
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
   corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
-  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 100),
+  rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 2500),
+  publicRateLimitWindowMs: Number(process.env.PUBLIC_RATE_LIMIT_WINDOW_MS || 60 * 1000),
+  publicRateLimitMax: Number(process.env.PUBLIC_RATE_LIMIT_MAX || 180),
   bcryptSaltRounds: Number(process.env.BCRYPT_SALT_ROUNDS || 12),
   razorpayKeyId: process.env.RAZORPAY_KEY_ID,
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
@@ -69,6 +88,12 @@ export const env = Object.freeze({
     senderEmail: process.env.BREVO_SENDER_EMAIL || "",
     senderName: process.env.BREVO_SENDER_NAME || "MediCore",
     otpTemplateId: process.env.BREVO_OTP_TEMPLATE_ID || "",
+  },
+  ai: {
+    provider: process.env.AI_TEXT_PROVIDER || (isProduction ? "openai" : "template"),
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    openaiModel: process.env.OPENAI_MODEL || "gpt-5.6-luna",
+    timeoutMs: Number(process.env.OPENAI_TIMEOUT_MS || 30_000),
   },
   frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
   seoSiteUrl: process.env.SEO_SITE_URL || process.env.FRONTEND_URL || "",

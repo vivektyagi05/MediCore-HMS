@@ -81,7 +81,7 @@ import {
 {
   const payment = { totalAmount: 1000, refundedAmount: 0 };
   const appointment = { status: "completed" };
-  const result = evaluateRefundEligibility({ payment, appointment, actorRole: "admin", requestedAmount: 500 });
+  const result = evaluateRefundEligibility({ payment, appointment, actorRole: "super_admin", requestedAmount: 500 });
   assert.strictEqual(result.eligible, true, "an admin-initiated refund on a completed appointment is an authorized override");
   console.log("PASS: admin actor can still process a refund on a completed appointment (authorized override)");
 }

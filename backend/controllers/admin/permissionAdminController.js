@@ -44,19 +44,48 @@ export const updateRolePermissions = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { permission }, message: "Permissions updated successfully" });
 });
 
+// PHASE 2-D: "admin" is no longer a valid role at all (see
+// constants/roles.js — the hard constraint this phase enforces). The
+// "Admin Hierarchy" this endpoint pair backs used to manage two tiers
+// (admin/super_admin) with a rank-based promote/demote model; with only
+// one admin-tier role left, listAdmins is now simply the super-admin
+// roster, and updateAdminRole is now strictly a one-way promotion of an
+// existing non-admin user (doctor or patient) to super_admin. It can no
+// longer create, demote, or otherwise manage a second admin tier, because
+// none exists.
 export const listAdmins = asyncHandler(async (_req, res) => {
-  const admins = await User.find({ role: { $in: ["super_admin", "admin"] } }).select("-password").sort({ role: 1, createdAt: -1 }).lean();
-  res.status(200).json({ success: true, data: { admins }, message: "Admins fetched successfully" });
+  const admins = await User.find({ role: "super_admin" }).select("-password").sort({ createdAt: -1 }).lean();
+  res.status(200).json({ success: true, data: { admins }, message: "Super admins fetched successfully" });
 });
 
+// PHASE 2-C — Section 3 bugfix (kept, still applicable): assertCanManageRole
+// rejects whenever ROLE_RANK[actor] <= ROLE_RANK[target] — correct for
+// acting on an EXISTING account, but was previously misapplied against the
+// REQUESTED role too, making super-admin grants impossible. PHASE 2-D
+// narrows the whole operation to a single legal transition: promoting an
+// existing non-super-admin user to super_admin. There is no "admin" role to
+// grant or revoke anymore, and demoting a super_admin isn't offered here
+// (no valid target role for it is defined by the current product spec) —
+// disclosed rather than invented.
 export const updateAdminRole = asyncHandler(async (req, res) => {
   const { role } = req.body;
-  if (!["super_admin", "admin"].includes(role)) throw new AppError("Invalid admin role", 400);
+  if (role !== "super_admin") {
+    throw new AppError("Invalid role. Only promotion to super_admin is supported.", 400);
+  }
 
   const target = await User.findById(req.params.id);
-  if (!target) throw new AppError("Admin user not found", 404);
+  if (!target) throw new AppError("User not found", 404);
+
+  if (target._id.toString() === req.user._id.toString()) {
+    throw new AppError("You cannot change your own role", 403);
+  }
+
+  if (target.role === "super_admin") {
+    throw new AppError("This user is already a super admin", 400);
+  }
+
+  // Only an existing super admin may grant super admin access.
   assertCanManageRole(req.user.role, target.role);
-  assertCanManageRole(req.user.role, role);
 
   const previousRole = target.role;
   target.role = role;
@@ -70,5 +99,5 @@ export const updateAdminRole = asyncHandler(async (req, res) => {
     newRole: role,
   });
 
-  res.status(200).json({ success: true, data: { admin: target.toJSON() }, message: "Admin hierarchy updated successfully" });
+  res.status(200).json({ success: true, data: { admin: target.toJSON() }, message: "User promoted to super admin" });
 });

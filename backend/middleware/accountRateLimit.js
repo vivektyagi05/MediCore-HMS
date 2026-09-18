@@ -15,6 +15,20 @@ const buckets = new Map();
 
 const prune = (timestamps, windowMs, now) => timestamps.filter((ts) => now - ts < windowMs);
 
+// The limiter is intentionally process-local for the current single-instance
+// deployment, but its key space must still be bounded. Previously an attacker
+// could submit many distinct email addresses and leave one Map entry behind
+// for each address until process restart. Sweep expired buckets periodically.
+const SWEEP_INTERVAL_MS = 60_000;
+const sweepTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamps] of buckets) {
+    const latest = timestamps[timestamps.length - 1];
+    if (!latest || now - latest >= 15 * 60 * 1000) buckets.delete(key);
+  }
+}, SWEEP_INTERVAL_MS);
+sweepTimer.unref?.();
+
 /**
  * @param {object} options
  * @param {number} options.windowMs

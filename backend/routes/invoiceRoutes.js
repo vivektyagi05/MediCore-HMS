@@ -14,9 +14,9 @@ const router = Router();
 // PHASE DOC-09: doctors gained real, ownership-scoped read access to this
 // existing invoice engine (see invoiceController.js's ownershipFilter) —
 // additive role only, admin/patient behavior is unchanged.
-router.get("/", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getInvoices);
-router.get("/summary", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getInvoiceSummary);
-router.get("/:id", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getInvoiceById);
-router.get("/:id/download", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), downloadInvoice);
+router.get("/", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getInvoices);
+router.get("/summary", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getInvoiceSummary);
+router.get("/:id", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getInvoiceById);
+router.get("/:id/download", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), downloadInvoice);
 
 export default router;

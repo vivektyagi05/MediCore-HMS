@@ -15,7 +15,8 @@
     "migrate:doctor-profiles": "npm --prefix backend run migrate:doctor-profiles",
     "migrate:consultation-mode": "npm --prefix backend run migrate:consultation-mode",
     "migrate:content-lifecycle": "npm --prefix backend run migrate:content-lifecycle",
-    "audit:integrity": "npm --prefix backend run audit:integrity"
+    "audit:integrity": "npm --prefix backend run audit:integrity",
+    "smoke:production": "node scripts/production-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "latest",

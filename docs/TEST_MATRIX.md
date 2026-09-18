@@ -121,7 +121,7 @@
 
 | # | Test Case | Expected | Status |
 |---|-----------|----------|--------|
-| RL-01 | > 100 req/15min on general API | 429 | ✅ |
+| RL-01 | > 2500 req/15min on general API | 429 | ✅ |
 | RL-02 | > 20 req/15min on /api/auth | 429 | ✅ FIXED |
 | RL-03 | 60 req/min on /api/realtime (normal dashboard) | 200 — not blocked | ✅ FIXED |
 | RL-04 | > 120 req/min on /api/realtime | 429 | ✅ FIXED |

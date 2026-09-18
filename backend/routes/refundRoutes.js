@@ -20,20 +20,20 @@ const router = Router();
 // Read/create stay role-based — patients need these too (list their own
 // requests, request a refund on their own payment); ownership itself is
 // enforced inside the controllers, not by this gate.
-router.get("/", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), listRefundRequests);
+router.get("/", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), listRefundRequests);
 // P23 (Section 10/12/14) — eligibility (drives the frontend's Case A-D
 // branching) and single-request detail (drives the refund tracker). Both
 // pure reads; ownership enforced inside the controllers.
-router.get("/eligibility/:paymentId", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), getRefundEligibility);
-router.get("/requests/:id/detail", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), getRefundRequestDetail);
-router.post("/requests/:paymentId", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), createRefundRequest);
+router.get("/eligibility/:paymentId", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), getRefundEligibility);
+router.get("/requests/:id/detail", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), getRefundRequestDetail);
+router.post("/requests/:paymentId", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), createRefundRequest);
 
 // P23 (Section 5/7) — the only refund-adjacent action available to a
 // patient once the consultation is already complete. Same ownership rule
 // as createRefundRequest (enforced inside the controller), deliberately a
 // distinct route so the frontend can route a completed appointment here
 // without ever calling the cancellation-refund endpoint.
-router.post("/report-problem/:paymentId", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT), reportPaymentProblem);
+router.post("/report-problem/:paymentId", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT), reportPaymentProblem);
 
 // AUDIT FINDING (Phase UI-6): these four are the actual money-moving admin
 // actions and were previously gated by role alone (any admin/super_admin),

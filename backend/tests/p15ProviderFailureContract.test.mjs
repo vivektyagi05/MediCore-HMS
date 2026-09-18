@@ -12,7 +12,17 @@ const model = readFileSync(path.join(root, "backend/models/PasswordReset.js"), "
 
 assert.ok(controller.includes('if (!isBrevoConfigured())'), "forgot-password must gate provider availability before account-specific recovery");
 assert.ok(controller.includes('res.status(503).json({'), "provider failure must return controlled HTTP 503");
-assert.ok(controller.includes('code: "PASSWORD_RECOVERY_UNAVAILABLE"'), "provider failure must expose a stable safe error code");
+// The controller distinguishes provider-failure categories (credential /
+// rate_limit / network / provider_5xx) and falls back to the generic
+// PASSWORD_RECOVERY_UNAVAILABLE code when no category is known. Assert the
+// full taxonomy plus the safe default, rather than a single literal
+// "code: "..."" string (the code is computed dynamically, not inlined).
+assert.ok(controller.includes('"PASSWORD_RECOVERY_UNAVAILABLE"'), "provider failure must expose a stable safe default error code");
+assert.ok(controller.includes('"EMAIL_PROVIDER_CREDENTIAL_ERROR"'), "credential failures must expose a stable safe error code");
+assert.ok(controller.includes('"EMAIL_PROVIDER_RATE_LIMITED"'), "rate-limited failures must expose a stable safe error code");
+assert.ok(controller.includes('"EMAIL_PROVIDER_UNREACHABLE"'), "network failures must expose a stable safe error code");
+assert.ok(controller.includes('"EMAIL_PROVIDER_UNAVAILABLE"'), "5xx provider failures must expose a stable safe error code");
+assert.ok(/res\.status\(503\)\.json\(\{\s*success:\s*false,\s*code,/.test(controller), "the 503 response must send the computed error code, not a hardcoded literal");
 assert.ok(!controller.includes("fakeRecoveryId"), "fake recovery IDs are forbidden");
 assert.ok(!controller.includes("Math.random"), "Math.random must not be used in password recovery");
 assert.ok(!controller.includes('res.status(200).json({\n      success: true,\n      message: GENERIC_REQUEST_MESSAGE,\n      data: { recoveryId: fakeRecoveryId()'), "provider failure must never return fake success");

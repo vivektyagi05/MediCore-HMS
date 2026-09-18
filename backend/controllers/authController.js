@@ -15,6 +15,28 @@ const buildAuthResponse = (user) => ({
   token: generateToken(user),
 });
 
+// PHASE 2-B — Section 1 bugfix: registration passed the client-supplied
+// `doctorProfile` object straight into ensureDoctorProfileForUser(), whose
+// overrides also accept `rating`. Since this only ever runs on the doctor's
+// very first profile creation ($setOnInsert), a self-registering doctor
+// could send `doctorProfile: { rating: 5 }` in the raw API request and get
+// a fabricated starting rating with zero real reviews behind it -- the
+// frontend registration form never sends this field, so the hole was only
+// reachable via a direct API call, but it was live and exploitable exactly
+// the way Section 24's "client changes role/userId/doctorId" checks are
+// meant to catch. `rating` must only ever be derived from real review
+// aggregation (see reviewRating.test.mjs), never client input at signup.
+const SELF_REGISTRATION_DOCTOR_PROFILE_FIELDS = ["specialization", "experience", "fees", "availability"];
+
+export const pickSelfRegistrationDoctorProfile = (input) => {
+  if (!input || typeof input !== "object") return undefined;
+  const picked = {};
+  for (const field of SELF_REGISTRATION_DOCTOR_PROFILE_FIELDS) {
+    if (input[field] !== undefined) picked[field] = input[field];
+  }
+  return picked;
+};
+
 export const register = asyncHandler(async (req, res) => {
   // Phase A5.3 — Executive Action Center "Pause Registrations" quick action.
   // Reuses the existing generic FeatureToggle store; absent/disabled means
@@ -53,7 +75,7 @@ const user = await User.create({
 });
 
   if (user.role === ROLES.DOCTOR) {
-    await ensureDoctorProfileForUser(user, req.body.doctorProfile);
+    await ensureDoctorProfileForUser(user, pickSelfRegistrationDoctorProfile(req.body.doctorProfile));
   }
 
   // Phase A6.2.3 — Automation Studio real trigger.
@@ -67,6 +89,27 @@ const user = await User.create({
     success: true,
     data: buildAuthResponse(user),
     message: "Registration successful",
+  });
+});
+
+// PHASE 2-A — Part 2 (session restoration). The frontend previously had no
+// way to re-verify a cached session against the backend: AuthContext just
+// trusted whatever `hms_user` JSON was written to localStorage at the last
+// login/register call, forever. That user object goes stale the moment
+// anything about the account changes server-side after the token was
+// issued — the concrete, reproducible case being a doctor's
+// `doctorOnboardingStatus` flipping from "pending" to "approved" once an
+// admin approves them: PrivateRoute reads the stale cached status and keeps
+// redirecting the now-approved doctor back to /doctor/onboarding on every
+// refresh/browser restart until they log out and back in. This endpoint
+// gives the frontend a real login -> JWT -> /me -> authenticated-state path:
+// `protect` has already verified the token (including the
+// securityVersion/isActive checks) and attached the fresh user document, so
+// this simply returns it.
+export const getMe = asyncHandler(async (req, res) => {
+  res.status(200).json({
+    success: true,
+    data: { user: req.user.toJSON() },
   });
 });
 

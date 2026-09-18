@@ -7,7 +7,7 @@ import { useRealtime } from "../../context/RealtimeContext";
 import { useAuth } from "../../context/AuthContext";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
-import Select from "../../components/ui/Select";
+import Input from "../../components/ui/Input";
 import Badge from "../../components/ui/Badge";
 import Checkbox from "../../components/ui/Checkbox";
 import Loader from "../../components/ui/Loader";
@@ -28,7 +28,7 @@ import Tabs from "../../components/ui/Tabs";
 // Never a second permission system, never a fabricated matrix cell.
 // ─────────────────────────────────────────────────────────────────────────
 
-const ROLE_TONE = { super_admin: "violet", admin: "sky", doctor: "info", receptionist: "neutral", patient: "success" };
+const ROLE_TONE = { super_admin: "violet", doctor: "info", receptionist: "neutral", patient: "success" };
 
 function roleLabel(role) {
   return role.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
@@ -55,7 +55,17 @@ function AdminAccessControl() {
   const [admins, setAdmins] = useState([]);
   const [loadingAdmins, setLoadingAdmins] = useState(true);
   const [adminsError, setAdminsError] = useState(null);
-  const [roleBusyId, setRoleBusyId] = useState(null);
+
+  // PHASE 2-D: there is no "admin" role to demote a super_admin to (see
+  // constants/roles.js), so the old per-row promote/demote dropdown is
+  // replaced with a one-way promotion flow: search an existing user, then
+  // promote them to super_admin. This is the only mutation
+  // updateAdminRole still supports.
+  const [promoteQuery, setPromoteQuery] = useState("");
+  const [promoteResults, setPromoteResults] = useState([]);
+  const [promoteLoading, setPromoteLoading] = useState(false);
+  const [promoteError, setPromoteError] = useState(null);
+  const [promoteBusyId, setPromoteBusyId] = useState(null);
 
   useEffect(() => {
     loadPermissions();
@@ -104,17 +114,36 @@ function AdminAccessControl() {
     }
   }
 
-  async function changeAdminRole(admin, nextRole) {
-    if (nextRole === admin.role) return;
-    setRoleBusyId(admin._id);
+  async function searchPromotable(query) {
+    setPromoteQuery(query);
+    setPromoteError(null);
+    if (!query.trim()) {
+      setPromoteResults([]);
+      return;
+    }
+    setPromoteLoading(true);
     try {
-      await adminApi.updateAdminRole(admin._id, nextRole);
-      toast.success(`${admin.name} is now ${roleLabel(nextRole)}.`);
+      const res = await adminApi.getUsers({ search: query.trim(), pageSize: 5 });
+      const candidates = (res.data?.users || []).filter((u) => u.role !== "super_admin");
+      setPromoteResults(candidates);
+    } catch (err) {
+      setPromoteError(getApiErrorMessage(err));
+    } finally {
+      setPromoteLoading(false);
+    }
+  }
+
+  async function promoteUser(user) {
+    setPromoteBusyId(user._id);
+    try {
+      await adminApi.updateAdminRole(user._id, "super_admin");
+      toast.success(`${user.name} is now a Super Admin.`);
+      setPromoteResults((prev) => prev.filter((u) => u._id !== user._id));
       await loadAdmins();
     } catch (err) {
       toast.error(getApiErrorMessage(err));
     } finally {
-      setRoleBusyId(null);
+      setPromoteBusyId(null);
     }
   }
 
@@ -192,7 +221,43 @@ function AdminAccessControl() {
       )}
 
       {tab === "hierarchy" && (
-        <Card title={<span className="flex items-center gap-2"><Users2 size={17} className="text-royal-600" /> Admin Hierarchy</span>}>
+        <div className="space-y-6">
+          <Card title={<span className="flex items-center gap-2"><Users2 size={17} className="text-royal-600" /> Promote to Super Admin</span>}>
+            <p className="mb-3 text-sm text-slate-500">
+              There is no intermediate admin tier — search for an existing user and grant them Super Admin directly.
+            </p>
+            <Input
+              placeholder="Search by name or email…"
+              value={promoteQuery}
+              onChange={(e) => searchPromotable(e.target.value)}
+            />
+            {promoteError && (
+              <p className="mt-2 text-xs font-semibold text-rose-600">{promoteError}</p>
+            )}
+            {promoteLoading ? (
+              <div className="mt-3"><Loader /></div>
+            ) : promoteResults.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {promoteResults.map((u) => (
+                  <div key={u._id} className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-slate-200 p-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-bold text-slate-900">{u.name}</p>
+                      <p className="truncate text-xs text-slate-500">{u.email} · <Badge tone={ROLE_TONE[u.role] || "neutral"}>{roleLabel(u.role)}</Badge></p>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      isLoading={promoteBusyId === u._id}
+                      onClick={() => promoteUser(u)}
+                    >
+                      Promote to Super Admin
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </Card>
+
+          <Card title={<span className="flex items-center gap-2"><Users2 size={17} className="text-royal-600" /> Super Admins</span>}>
           {loadingAdmins ? (
             <Loader />
           ) : adminsError ? (
@@ -211,17 +276,8 @@ function AdminAccessControl() {
                     </div>
                     <div className="flex items-center gap-3">
                       <Badge tone={ROLE_TONE[admin.role] || "neutral"}>{roleLabel(admin.role)}</Badge>
-                      {isSelf ? (
-                        <span className="text-xs font-semibold text-slate-400">You cannot change your own role</span>
-                      ) : (
-                        <Select
-                          value={admin.role}
-                          disabled={roleBusyId === admin._id}
-                          onChange={(e) => changeAdminRole(admin, e.target.value)}
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="super_admin">Super Admin</option>
-                        </Select>
+                      {isSelf && (
+                        <span className="text-xs font-semibold text-slate-400">This is you</span>
                       )}
                     </div>
                   </div>
@@ -229,7 +285,8 @@ function AdminAccessControl() {
               })}
             </div>
           )}
-        </Card>
+          </Card>
+        </div>
       )}
     </div>
   );

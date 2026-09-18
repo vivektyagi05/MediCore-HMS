@@ -167,7 +167,9 @@ export const evaluateRefundEligibility = ({ payment, appointment, actorRole, req
     };
   }
 
-  const isAdminActor = actorRole === "admin" || actorRole === "super_admin";
+  // PHASE 2-D: "admin" is no longer a valid role (see constants/roles.js) —
+  // the admin-initiated override path now checks super_admin only.
+  const isAdminActor = actorRole === "super_admin";
   const isPostConsultation = POST_CONSULTATION_STATUSES.includes(appointment?.status);
 
   if (isPostConsultation && !isAdminActor) {

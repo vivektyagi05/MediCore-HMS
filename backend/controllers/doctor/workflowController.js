@@ -297,11 +297,32 @@ export const checkPrescriptionSafety = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { warnings }, message: "Safety check complete" });
 });
 
+// SECURITY BUGFIX (Phase 2-B audit, Section 14/24): this previously did
+// `Prescription.findOneAndUpdate({ _id, doctorId }, req.body, ...)` with NO
+// field whitelist. The `{ doctorId: doctor._id }` match clause stops a
+// doctor from reaching another doctor's prescription, but nothing stopped
+// them from sending `{ doctorId: <someone else's id>, patientId: <any
+// patient>, appointmentId: <any appointment>, status: "void" }` in the body
+// of a request against their OWN prescription -- silently reassigning a
+// real clinical record to a different doctor/patient/appointment, or
+// forging its lifecycle status. Only the fields a prescription edit
+// legitimately needs are allowed through now; identity/lifecycle fields
+// stay backend-authoritative.
+const PRESCRIPTION_EDITABLE_FIELDS = ["diagnosis", "medicines", "notes", "followUpDate"];
+
+export const pickPrescriptionEditableFields = (body) => {
+  const picked = {};
+  for (const field of PRESCRIPTION_EDITABLE_FIELDS) {
+    if (body[field] !== undefined) picked[field] = body[field];
+  }
+  return picked;
+};
+
 export const updatePrescription = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   const prescription = await Prescription.findOneAndUpdate(
     { _id: req.params.id, doctorId: doctor._id },
-    req.body,
+    pickPrescriptionEditableFields(req.body),
     { returnDocument: "after", runValidators: true },
   );
   if (!prescription) throw new AppError("Prescription not found", 404);
@@ -543,7 +564,7 @@ export const listLeaves = asyncHandler(async (req, res) => {
 });
 
 export const updateLeaveStatus = asyncHandler(async (req, res) => {
-  if (![ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role)) throw new AppError("Admin access is required", 403);
+  if (![ROLES.SUPER_ADMIN].includes(req.user.role)) throw new AppError("Admin access is required", 403);
   const leave = await LeaveRequest.findById(req.params.id);
   if (!leave) throw new AppError("Leave request not found", 404);
   leave.status = req.body.status;

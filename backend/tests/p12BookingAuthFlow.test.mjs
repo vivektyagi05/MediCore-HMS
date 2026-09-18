@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const read = (file) => fs.readFileSync(path.resolve(process.cwd(), file), "utf8");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const read = (file) => fs.readFileSync(
+  file.startsWith("../src/") ? path.resolve(__dirname, "..", "..", file.slice(3)) : path.resolve(__dirname, "..", file),
+  "utf8",
+);
 
 const appointmentRoutes = read("routes/appointmentRoutes.js");
 const appointmentController = read("controllers/appointmentController.js");

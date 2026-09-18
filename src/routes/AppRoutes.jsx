@@ -189,7 +189,7 @@ function AppRoutes() {
           <Route path="/data-rights" element={<DataRights />} />
         </Route>
 
-      <Route element={<PrivateRoute allowedRoles={["admin", "super_admin"]} />}>
+      <Route element={<PrivateRoute allowedRoles={["super_admin"]} />}>
         <Route path="/admin" element={<DashboardLayout />}>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route
@@ -417,13 +417,13 @@ function AppRoutes() {
         </Route>
       </Route>
 
-      <Route element={<PrivateRoute allowedRoles={["admin", "super_admin", "patient"]} />}>
+      <Route element={<PrivateRoute allowedRoles={["super_admin", "patient"]} />}>
         <Route element={<DashboardLayout />}>
           <Route path="/invoices/:invoiceId" element={<InvoicePreview />} />
         </Route>
       </Route>
 
-      <Route element={<PrivateRoute allowedRoles={["admin", "super_admin", "doctor", "patient"]} />}>
+      <Route element={<PrivateRoute allowedRoles={["super_admin", "doctor", "patient"]} />}>
         <Route element={<DashboardLayout />}>
           <Route path="/chat/:userId" element={<ChatWorkspace />} />
         </Route>

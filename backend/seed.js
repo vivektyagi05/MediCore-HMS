@@ -68,11 +68,8 @@ const seed = async () => {
   }
 
   await Promise.all([
-    Permission.findOneAndUpdate(
-      { role: "admin" },
-      { permissions: allPermissions, isSystemRole: true, updatedBy: superAdmin._id },
-      { upsert: true, returnDocument: "after" },
-    ),
+    // PHASE 2-D: the "admin" role no longer exists (see constants/roles.js) —
+    // no Permission row is seeded for it anymore.
     Permission.findOneAndUpdate(
       { role: "super_admin" },
       { permissions: allPermissions, isSystemRole: true, updatedBy: superAdmin._id },

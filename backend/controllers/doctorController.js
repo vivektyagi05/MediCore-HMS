@@ -16,6 +16,7 @@ import { emitAutomationTrigger } from "../automation-studio/automationEventBus.j
 import { TRIGGER_TYPES } from "../automation-studio/triggerRegistry.js";
 import { clampPagination, buildPaginationMeta } from "../utils/paginationValidation.js";
 import { roomManager } from "../socket/roomManager.js";
+import { emailService } from "../services/emailService.js";
 import {
   computeRiskLevel,
   resolveFollowUpState,
@@ -591,40 +592,96 @@ export const getPendingDoctors = asyncHandler(
   }
 );
 
+// PHASE 2-B — Section 5/6/18 bugfix: this endpoint previously had no
+// idempotency guard at all. Clicking "Approve" twice (double-click, retry
+// after a slow response, two admin tabs) re-pushed a second
+// verificationHistory "approved" entry, re-emitted the realtime
+// notification, and re-fired the DOCTOR_VERIFIED automation trigger every
+// time -- and would have sent a second real approval email once that was
+// wired in below. An already-approved doctor is now a safe, idempotent
+// no-op: the business state doesn't change, and none of the one-time
+// side effects (notification/automation/email) fire a second time.
+//
+// PHASE 2-C — Section 8/9 bugfix: the Phase 2-B idempotency check above was
+// a check-then-act race, not a real concurrency guard. Two concurrent
+// approve requests (or an approve racing a reject) could both load the
+// document while verificationStatus was still "pending", both pass the
+// in-memory idempotency check, and both save -- doubling every one-time
+// side effect (history entry, notification, automation trigger, approval
+// email) and, in the approve-vs-reject case, leaving the final DB state and
+// the side effects it triggered pointing at different terminal outcomes.
+// Fixed by making the pending->approved transition itself the atomic guard:
+// findOneAndUpdate only succeeds for the one request that observes
+// verificationStatus:"pending" at the database level, so exactly one
+// request ever owns the one-time side effects below, regardless of how the
+// two requests interleave.
 export const approveDoctor = asyncHandler(
   async (req, res) => {
 
-    const doctor =
+    const existing =
       await Doctor.findById(
         req.params.id
       );
 
-    if (!doctor) {
+    if (!existing) {
       throw new AppError(
         "Doctor not found",
         404
       );
     }
 
-    doctor.verificationStatus =
-      "approved";
+    if (existing.verificationStatus === "approved") {
+      return res.status(200).json({
+        success: true,
+        message: "Doctor is already approved",
+        data: existing,
+      });
+    }
 
-    doctor.isVerified = true;
+    const doctor = await Doctor.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        verificationStatus: "pending",
+      },
+      {
+        $set: {
+          verificationStatus: "approved",
+          isVerified: true,
+          verifiedBy: req.user._id,
+          verifiedAt: new Date(),
+        },
+        $push: {
+          verificationHistory: {
+            status: "approved",
+            notes: req.body.notes || "",
+            changedBy: req.user._id,
+            changedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
 
-    doctor.verifiedBy =
-      req.user._id;
+    if (!doctor) {
+      // Lost the race (or the doctor was already rejected by someone else
+      // between our existence check and the atomic update above): re-read
+      // the current state so the caller gets an accurate, honest response
+      // instead of a false "approved successfully".
+      const current = await Doctor.findById(req.params.id);
 
-    doctor.verifiedAt =
-      new Date();
+      if (current?.verificationStatus === "approved") {
+        return res.status(200).json({
+          success: true,
+          message: "Doctor is already approved",
+          data: current,
+        });
+      }
 
-    doctor.verificationHistory.push({
-      status: "approved",
-      notes: req.body.notes || "",
-      changedBy: req.user._id,
-      changedAt: new Date(),
-    });
-
-    await doctor.save();
+      throw new AppError(
+        `Doctor is no longer pending (current status: ${current?.verificationStatus || "unknown"})`,
+        409
+      );
+    }
 
     await User.findByIdAndUpdate(
       doctor.userId,
@@ -648,8 +705,33 @@ export const approveDoctor = asyncHandler(
       logger.warn("practiceEmitter.verificationStatusChanged failed", { message: error?.message });
     }
 
+    const verifiedUser = await User.findById(doctor.userId).select("name email").lean();
+
+    // PHASE 2-B — Section 6: real approval email through the existing Brevo
+    // abstraction. Business state (the approval itself, already saved
+    // above) is never rolled back just because email delivery fails --
+    // provider failure is logged/observable, matching the exact
+    // try/catch-non-blocking pattern already used for
+    // sendAppointmentConfirmation/sendPaymentReceipt elsewhere in this
+    // codebase. Never a fake/console.log "email sent".
+    if (verifiedUser?.email) {
+      try {
+        await emailService.sendDoctorApprovalEmail({
+          toEmail: verifiedUser.email,
+          toName: verifiedUser.name,
+          specialization: doctor.specialization,
+        });
+      } catch (error) {
+        logger.error("Doctor approval email failed", {
+          event: "doctor_approval_email_failed",
+          doctorId: doctor._id.toString(),
+          errorName: error?.name,
+          message: error?.message,
+        });
+      }
+    }
+
     // Phase A6.2.3 — Automation Studio real trigger.
-    const verifiedUser = await User.findById(doctor.userId).select("name").lean();
     await emitAutomationTrigger(TRIGGER_TYPES.DOCTOR_VERIFIED, {
       doctorId: doctor._id,
       userId: doctor.userId,
@@ -665,43 +747,85 @@ export const approveDoctor = asyncHandler(
   }
 );
 
+// PHASE 2-C — Section 8/9 bugfix: same atomic-transition fix as
+// approveDoctor above. The Phase 2-B idempotency check here was also
+// check-then-act; a reject racing another reject (or an approve) could
+// both observe "pending" before either write landed. findOneAndUpdate's
+// {_id, verificationStatus:"pending"} filter is now the sole point of
+// truth for who "wins" a pending doctor's terminal transition, so exactly
+// one request's side effects fire no matter how approve/reject interleave.
 export const rejectDoctor = asyncHandler(
   async (req, res) => {
 
-    const doctor =
+    const reason = req.body.reason || "";
+
+    const existing =
       await Doctor.findById(
         req.params.id
       );
 
-    if (!doctor) {
+    if (!existing) {
       throw new AppError(
         "Doctor not found",
         404
       );
     }
 
-    doctor.verificationStatus =
-      "rejected";
+    // PHASE 2-B — Section 7/18: same idempotency reasoning as approveDoctor.
+    // A doctor already in the "rejected" state with the same reason is a
+    // no-op -- no duplicate history entry, notification, or email. If an
+    // admin submits a genuinely different reason for an already-rejected
+    // doctor, that IS a new administrative action (e.g. correcting the
+    // recorded reason) and is allowed to proceed normally.
+    if (existing.verificationStatus === "rejected" && existing.verificationNotes === reason) {
+      return res.status(200).json({
+        success: true,
+        message: "Doctor is already rejected",
+        data: existing,
+      });
+    }
 
-    doctor.isVerified = false;
+    const doctor = await Doctor.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        verificationStatus: "pending",
+      },
+      {
+        $set: {
+          verificationStatus: "rejected",
+          isVerified: false,
+          verificationNotes: reason,
+          verifiedBy: req.user._id,
+          verifiedAt: new Date(),
+        },
+        $push: {
+          verificationHistory: {
+            status: "rejected",
+            notes: reason,
+            changedBy: req.user._id,
+            changedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
 
-    doctor.verificationNotes =
-      req.body.reason || "";
+    if (!doctor) {
+      const current = await Doctor.findById(req.params.id);
 
-    doctor.verifiedBy =
-      req.user._id;
+      if (current?.verificationStatus === "rejected" && current.verificationNotes === reason) {
+        return res.status(200).json({
+          success: true,
+          message: "Doctor is already rejected",
+          data: current,
+        });
+      }
 
-    doctor.verifiedAt =
-      new Date();
-
-    doctor.verificationHistory.push({
-      status: "rejected",
-      notes: req.body.reason || "",
-      changedBy: req.user._id,
-      changedAt: new Date(),
-    });
-
-    await doctor.save();
+      throw new AppError(
+        `Doctor is no longer pending (current status: ${current?.verificationStatus || "unknown"})`,
+        409
+      );
+    }
 
     await User.findByIdAndUpdate(
       doctor.userId,
@@ -720,6 +844,26 @@ export const rejectDoctor = asyncHandler(
       });
     } catch (error) {
       logger.warn("practiceEmitter.verificationStatusChanged failed", { message: error?.message });
+    }
+
+    // PHASE 2-B — Section 7: real rejection email, same non-blocking
+    // provider-failure handling as approveDoctor above.
+    const rejectedUser = await User.findById(doctor.userId).select("name email").lean();
+    if (rejectedUser?.email) {
+      try {
+        await emailService.sendDoctorRejectionEmail({
+          toEmail: rejectedUser.email,
+          toName: rejectedUser.name,
+          reason,
+        });
+      } catch (error) {
+        logger.error("Doctor rejection email failed", {
+          event: "doctor_rejection_email_failed",
+          doctorId: doctor._id.toString(),
+          errorName: error?.name,
+          message: error?.message,
+        });
+      }
     }
 
     res.status(200).json({

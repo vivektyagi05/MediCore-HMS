@@ -292,7 +292,6 @@ function DoctorEarnings() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" disabled>Withdrawal Coming Soon</Button>
           <Button onClick={loadEarnings}>Refresh</Button>
         </div>
       </div>

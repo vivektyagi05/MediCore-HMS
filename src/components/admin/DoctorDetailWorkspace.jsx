@@ -41,6 +41,13 @@ function DoctorDetailWorkspace({ doctorId, onChanged }) {
   const [actionLoading, setActionLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [verifyingDocId, setVerifyingDocId] = useState(null);
+  // PHASE 2-D — public asset ENOENT bugfix: a profilePhotoUrl pointing at
+  // a file that no longer exists on disk (see storage/doctor-profile
+  // notes) previously rendered as a broken <img> with no fallback. The
+  // backend already returns a controlled 404 for a missing file; this is
+  // the matching frontend half -- fall back to the initials avatar
+  // instead of a broken image icon.
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   const loadDetail = async () => {
     setLoading(true);
@@ -56,6 +63,7 @@ function DoctorDetailWorkspace({ doctorId, onChanged }) {
   };
 
   useEffect(() => {
+    setPhotoFailed(false);
     loadDetail();
   }, [doctorId]);
 
@@ -157,8 +165,13 @@ function DoctorDetailWorkspace({ doctorId, onChanged }) {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          {doctor.profilePhotoUrl ? (
-            <img src={doctor.profilePhotoUrl} alt={doctor.userId?.name || ""} className="h-16 w-16 rounded-2xl object-cover ring-1 ring-slate-200" />
+          {doctor.profilePhotoUrl && !photoFailed ? (
+            <img
+              src={doctor.profilePhotoUrl}
+              alt={doctor.userId?.name || ""}
+              className="h-16 w-16 rounded-2xl object-cover ring-1 ring-slate-200"
+              onError={() => setPhotoFailed(true)}
+            />
           ) : (
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-lg font-black text-slate-400">
               {(doctor.userId?.name || "D").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}

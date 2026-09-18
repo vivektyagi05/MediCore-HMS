@@ -568,6 +568,22 @@ export const getDoctorPublicReviews = asyncHandler(async (req, res) => {
     throw new AppError("Invalid doctor ID", 400);
   }
 
+  // AUDIT FIX (Phase 2-D, public surface): this previously queried reviews
+  // by doctorId alone, with no check that the doctor is actually a publicly
+  // discoverable (verified/approved/active) doctor — unlike every sibling
+  // endpoint here (getDoctorPublicProfile, compareDoctors, getSimilarDoctors
+  // all gate on isVerified+verificationStatus+isActive). That meant a
+  // pending or rejected doctor's reviews were reachable by ID even though
+  // their profile itself correctly 404s, letting an unauthenticated caller
+  // confirm a non-public doctor exists and read reviews naming them.
+  const doctor = await Doctor.findOne({
+    _id: req.params.id,
+    isVerified: true,
+    verificationStatus: "approved",
+    isActive: true,
+  }).select("_id").lean();
+  if (!doctor) throw new AppError("Doctor not found or not available", 404);
+
   const { page, limit, skip } = getPagination(req.query);
 
   const [reviews, total] = await Promise.all([
@@ -657,7 +673,12 @@ export const getSimilarDoctors = asyncHandler(async (req, res) => {
     throw new AppError("Invalid doctor ID", 400);
   }
 
-  const source = await Doctor.findById(req.params.id).select("specialization city").lean();
+  const source = await Doctor.findOne({
+    _id: req.params.id,
+    isVerified: true,
+    verificationStatus: "approved",
+    isActive: true,
+  }).select("specialization city").lean();
   if (!source) throw new AppError("Doctor not found", 404);
 
   const baseFilter = {

@@ -118,7 +118,7 @@ export const getPlans = asyncHandler(async (_req, res) => {
 });
 
 export const getSubscriptions = asyncHandler(async (req, res) => {
-  const filter = req.user.role === ROLES.ADMIN || req.user.role === ROLES.SUPER_ADMIN ? {} : { userId: req.user._id };
+  const filter = req.user.role === ROLES.SUPER_ADMIN ? {} : { userId: req.user._id };
   const subscriptions = await Subscription.find(filter).sort({ createdAt: -1 }).lean();
 
   res.status(200).json({
@@ -190,7 +190,7 @@ export const createSubscription = asyncHandler(async (req, res) => {
 
 export const cancelSubscription = asyncHandler(async (req, res) => {
   assertObjectId(req.params.id, "subscription id");
-  const filter = req.user.role === ROLES.ADMIN || req.user.role === ROLES.SUPER_ADMIN
+  const filter = req.user.role === ROLES.SUPER_ADMIN
     ? { _id: req.params.id }
     : { _id: req.params.id, userId: req.user._id };
 
@@ -221,7 +221,7 @@ export const cancelSubscription = asyncHandler(async (req, res) => {
 
 export const getLedger = asyncHandler(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);
-  const filter = req.user.role === ROLES.ADMIN || req.user.role === ROLES.SUPER_ADMIN ? {} : { userId: req.user._id };
+  const filter = req.user.role === ROLES.SUPER_ADMIN ? {} : { userId: req.user._id };
 
   if (req.query.type) filter.type = req.query.type;
   if (req.query.status) filter.status = req.query.status;

@@ -46,7 +46,7 @@ Never read "Implemented" here as "production-verified" — see
 | Family member management | Implemented (`PatientFamily.jsx`, `FamilyMember` model) |
 | Insurance | Partial — `Insurance` model and `PatientInsurance.jsx` exist; depth of the feature not independently audited this pass |
 | Health journey / consultation history | Implemented |
-| AI assistant (patient-facing) | Implemented — verification limited (`PatientAIAssistant.jsx`, `aiController.js`, `SymptomSession` model exist; response quality/accuracy is not something this pass evaluated) |
+| AI assistant (patient-facing) | Implemented — real provider required in production (`AI_TEXT_PROVIDER=openai` + `OPENAI_API_KEY`); clinical responses remain informational and are not autonomous diagnosis |
 
 ## Doctor
 
@@ -92,7 +92,7 @@ Never read "Implemented" here as "production-verified" — see
 | Integration hub | Implemented — scope of actual third-party integrations beyond Razorpay/Brevo not audited this pass |
 | Export center | Implemented |
 | Feature management (feature toggles) | Implemented (`FeatureToggle` model) |
-| AI insights (admin-facing) | Implemented — verification limited |
+| AI insights (admin-facing) | Implemented — real provider required in production (`AI_TEXT_PROVIDER=openai` + `OPENAI_API_KEY`) |
 | Notifications | Implemented |
 | Settings | Implemented |
 

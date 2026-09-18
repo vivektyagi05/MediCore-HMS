@@ -61,7 +61,18 @@ export function RealtimeProvider({ children }) {
       loadPresence();
     };
     const onDisconnect = () => setConnectionStatus("offline");
-    const onConnectError = () => setConnectionStatus("error");
+    // PHASE 2-D — previously swallowed the reason entirely, so a rejected
+    // handshake (expired token, server-side auth failure, CORS mismatch)
+    // was invisible here and only ever showed up as "connection closes
+    // before establishment" in the browser's network panel with no
+    // indication why. Surfacing err.message makes the actual cause
+    // visible during development/debugging without changing behavior.
+    const onConnectError = (err) => {
+      setConnectionStatus("error");
+      if (!import.meta.env.PROD) {
+        console.warn("Realtime socket connection failed:", err?.message);
+      }
+    };
     const onNotification = (notification) => {
       setNotifications((current) => [notification, ...current.filter((item) => item._id !== notification._id)].slice(0, 25));
       setUnreadCount((current) => current + 1);

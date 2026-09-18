@@ -79,25 +79,68 @@ const sanitizeValue = (value) => {
   return value;
 };
 
+// PHASE 2-D — Section 1 bugfix (root cause of the reported 500 on
+// PUT /api/doctors/:id/approve, doctorController.js "Cannot read
+// properties of undefined (reading 'notes')"):
+//
+// express.json()/express.urlencoded() only populate req.body when the
+// request actually carries a body-shaped Content-Type header. Any request
+// that omits Content-Type entirely (a bare `fetch`/`curl`/`axios` call with
+// no data and no explicit header, a proxy or client that strips it, an
+// automated test hitting the route directly) reaches every controller
+// with req.body left as `undefined`, not `{}`. Every controller in this
+// codebase (approveDoctor's `req.body.notes`, rejectDoctor's
+// `req.body.reason`, and dozens of others) was written assuming req.body
+// is always an object -- a reasonable contract for an API, but one that
+// was never actually enforced anywhere. This is the real, systemic
+// contract mismatch: not a bug in approveDoctor specifically, but a
+// missing invariant that every mutating controller silently depended on.
+//
+// Fixed once, here, at the single place that already normalizes
+// req.body for every request (mass-assignment/NoSQL-operator
+// sanitization), instead of scattering `req.body?.x` defensive checks
+// across every controller that happens to read the body.
 const sanitizeRequest = (req, _res, next) => {
-  req.body = sanitizeValue(req.body);
+  req.body = sanitizeValue(req.body ?? {});
   req.params = sanitizeValue(req.params);
   next();
 };
 
-// Default limiter for all API routes
+// General API limiter. Auth and public discovery have their own policies so
+// a burst of public page reads can never consume the auth/security bucket.
+// /health is also excluded because platform health probes must remain
+// available even when application traffic is throttled.
 const apiLimiter = rateLimit({
   windowMs: env.rateLimitWindowMs,
   limit: env.rateLimitMax,
   standardHeaders: "draft-8",
   legacyHeaders: false,
+  skip: (req) =>
+    req.path === "/health" ||
+    req.path.startsWith("/auth/") ||
+    req.path.startsWith("/public/"),
   message: {
     success: false,
     message: "Too many requests, please try again later",
   },
 });
 
-// Strict limiter for auth endpoints (login, register, password reset)
+// Public discovery gets a generous short-window limit. These endpoints are
+// intentionally outside the general API bucket because the public homepage
+// can legitimately make many reads during a single navigation.
+const publicLimiter = rateLimit({
+  windowMs: env.publicRateLimitWindowMs,
+  limit: env.publicRateLimitMax,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many public requests, please try again later",
+  },
+});
+
+// Strict limiter for auth endpoints (login, register, password reset). This is
+// intentionally separate from the general API bucket above.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   limit: 20,
@@ -159,7 +202,9 @@ app.use(sanitizeRequest);
 app.use(requestLogger);
 app.use("/api", apiLimiter);
 
-// Auth endpoints get a stricter limiter on top of the base one
+// Public and auth routes are excluded from the general bucket above and get
+// their own purpose-specific policies.
+app.use("/api/public", publicLimiter);
 app.use("/api/auth", authLimiter);
 
 // Real-time/polling endpoints get a relaxed limiter

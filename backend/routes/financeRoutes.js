@@ -27,28 +27,28 @@ import {
 const router = Router();
 
 router.post("/coupons/validate", protect, authorizeRoles(ROLES.PATIENT), validateCoupon);
-router.get("/coupons", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), listCoupons);
-router.post("/coupons", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), createCoupon);
-router.patch("/coupons/:id", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), updateCoupon);
+router.get("/coupons", protect, authorizeRoles(ROLES.SUPER_ADMIN), listCoupons);
+router.post("/coupons", protect, authorizeRoles(ROLES.SUPER_ADMIN), createCoupon);
+router.patch("/coupons/:id", protect, authorizeRoles(ROLES.SUPER_ADMIN), updateCoupon);
 
-router.get("/subscriptions/plans", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR), getPlans);
-router.get("/subscriptions", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR), getSubscriptions);
+router.get("/subscriptions/plans", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getPlans);
+router.get("/subscriptions", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getSubscriptions);
 router.post("/subscriptions", protect, authorizeRoles(ROLES.DOCTOR), createSubscription);
-router.patch("/subscriptions/:id/cancel", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.DOCTOR), cancelSubscription);
+router.patch("/subscriptions/:id/cancel", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), cancelSubscription);
 
-router.get("/ledger", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getLedger);
+router.get("/ledger", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getLedger);
 router.post("/wallet/recharge/orders", protect, authorizeRoles(ROLES.PATIENT), createWalletRechargeOrder);
 router.post("/wallet/recharge/verify", protect, authorizeRoles(ROLES.PATIENT), verifyWalletRecharge);
 router.post("/wallet/recharge/cancel", protect, authorizeRoles(ROLES.PATIENT), cancelWalletRecharge);
 router.get("/wallet/recharge/history", protect, authorizeRoles(ROLES.PATIENT), listWalletRecharges);
 router.get("/wallet/recharge/:gatewayOrderId/status", protect, authorizeRoles(ROLES.PATIENT), getWalletRechargeStatus);
 
-router.post("/payments/retry-due", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), retryDuePayments);
-router.get("/reconciliation", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), getReconciliationReport);
-router.post("/reconciliation/repair", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), repairIncompletePayments);
+router.post("/payments/retry-due", protect, authorizeRoles(ROLES.SUPER_ADMIN), retryDuePayments);
+router.get("/reconciliation", protect, authorizeRoles(ROLES.SUPER_ADMIN), getReconciliationReport);
+router.post("/reconciliation/repair", protect, authorizeRoles(ROLES.SUPER_ADMIN), repairIncompletePayments);
 
 // Doctor payout settlement (admin only)
-router.get("/payouts", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), listDoctorPayouts);
-router.patch("/payouts/:id/settle", protect, authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), settleDoctorPayout);
+router.get("/payouts", protect, authorizeRoles(ROLES.SUPER_ADMIN), listDoctorPayouts);
+router.patch("/payouts/:id/settle", protect, authorizeRoles(ROLES.SUPER_ADMIN), settleDoctorPayout);
 
 export default router;

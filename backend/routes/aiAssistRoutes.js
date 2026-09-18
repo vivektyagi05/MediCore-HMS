@@ -97,9 +97,9 @@ router.post("/drafts/:draftId/approve", approveDraft);
 router.get("/drafts", listDrafts);
 
 // Admin AI Assistant
-router.get("/admin/brief", authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), getExecutiveBrief);
-router.get("/admin/review-sentiment", authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), getReviewSentiment);
-router.get("/admin/patients/:patientId/operational-summary", authorizeRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), getPatientOperationalSummaryAdmin);
+router.get("/admin/brief", authorizeRoles(ROLES.SUPER_ADMIN), getExecutiveBrief);
+router.get("/admin/review-sentiment", authorizeRoles(ROLES.SUPER_ADMIN), getReviewSentiment);
+router.get("/admin/patients/:patientId/operational-summary", authorizeRoles(ROLES.SUPER_ADMIN), getPatientOperationalSummaryAdmin);
 
 // Workflow Intelligence (role-aware — admin/doctor/patient)
 router.get("/workflow/suggestions", getWorkflowSuggestions);

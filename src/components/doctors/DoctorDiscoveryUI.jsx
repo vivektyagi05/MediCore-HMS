@@ -111,7 +111,23 @@ export function DoctorCard({
       <Link to={href} className="flex items-start gap-4 focus:outline-none">
         <div className="relative flex-shrink-0">
           {doctor.profilePhoto
-            ? <img src={doctor.profilePhoto} alt={doctor.name} className="h-16 w-16 rounded-2xl object-cover" />
+            ? (
+              <>
+                {/* PHASE 2-D — public asset ENOENT bugfix: fall back to the
+                    initials avatar instead of a broken image icon when the
+                    stored photo URL no longer resolves to a file on disk. */}
+                <img
+                  src={doctor.profilePhoto}
+                  alt={doctor.name}
+                  className="h-16 w-16 rounded-2xl object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                    if (e.currentTarget.nextElementSibling) e.currentTarget.nextElementSibling.style.display = "flex";
+                  }}
+                />
+                <span className="hidden h-16 w-16 items-center justify-center rounded-2xl bg-slate-950 text-lg font-black text-white" style={{ display: "none" }}>{initials}</span>
+              </>
+            )
             : <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-950 text-lg font-black text-white">{initials}</span>
           }
           {doctor.isVerified && (

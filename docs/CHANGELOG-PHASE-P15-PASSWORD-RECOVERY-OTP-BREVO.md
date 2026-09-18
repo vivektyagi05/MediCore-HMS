@@ -45,12 +45,12 @@ Verifying the OTP does **not** itself authorize a password change. It
 mints a second, independent secret — a 32-byte `crypto.randomBytes`
 reset token, hashed with sha256 (fast hash is fine here: 256 bits of
 entropy makes offline brute force infeasible regardless of hash speed) —
-with its own 10-minute expiry and one-time consumption. `reset-password`
+with its own 15-minute expiry and one-time consumption. `reset-password`
 only accepts this token, never the OTP itself.
 
 ## 4. Expiry, attempts, one-time use
 
-- OTP: 10-minute expiry, 5 max incorrect attempts, both re-checked at the
+- OTP: 15-minute expiry and reset-token: 15-minute expiry, with 5 max incorrect attempts, both re-checked at the
   application layer on every verify call (never trusted to Mongo TTL
   alone).
 - Every "use it once" transition (attempt increment, OTP verification,
@@ -124,8 +124,7 @@ touches the one account being reset.
 Layered on top of the existing IP-based `authLimiter` in `app.js`
 (unchanged): `backend/middleware/accountRateLimit.js` adds an in-process,
 account-keyed sliding-window limiter —
-- `forgot-password`: 1 request / 60s per email (this **is** the resend
-  cooldown) + 5 requests / 15 min per email.
+- `forgot-password`: up to 10 requests / 60s per email + 60 requests / 15 min per email. A separate IP limiter allows up to 60 recovery requests / 60s from a network without sharing the login/register bucket.
 - `verify-password-reset-otp`: 15 attempts / 15 min per `recoveryId`.
 
 This is a second layer, not a replacement, and uses the same in-process
@@ -178,7 +177,7 @@ package.
   below.**
 - Controller-level integration behavior (enumeration parity end-to-end,
   atomic one-time-use under concurrent requests, attempt-limit lockout,
-  multiple-OTP-request invalidation, resend cooldown, full reset →
+  multiple-OTP-request invalidation, resend throttling, full reset →
   session-invalidation → re-login cycle) is **not** covered by an
   executed test in this delivery. The controller talks to real Mongoose
   models directly (`User`, `PasswordReset`) rather than through injected

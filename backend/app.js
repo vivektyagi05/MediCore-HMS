@@ -139,16 +139,35 @@ const publicLimiter = rateLimit({
   },
 });
 
-// Strict limiter for auth endpoints (login, register, password reset). This is
-// intentionally separate from the general API bucket above.
+// Strict limiter for auth endpoints (login, register, password reset).
+// Forgot-password has its own, more suitable policy below so one user's
+// recovery traffic does not consume the same 15-minute IP bucket as login
+// and registration traffic.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
+  skip: (req) => req.path === "/forgot-password",
   message: {
     success: false,
     message: "Too many authentication attempts, please try again in 15 minutes",
+  },
+});
+
+// Password recovery gets a dedicated IP limiter instead of sharing the
+// login/register bucket. This avoids a false 429 for users behind the same
+// NAT/proxy while the account-keyed limiter in authRoutes still protects a
+// single email address. The email-keyed limit remains the primary recovery
+// protection; this IP limit is the second anti-abuse layer.
+const forgotPasswordIpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many password recovery requests from this network. Please slow down.",
   },
 });
 
@@ -205,6 +224,7 @@ app.use("/api", apiLimiter);
 // Public and auth routes are excluded from the general bucket above and get
 // their own purpose-specific policies.
 app.use("/api/public", publicLimiter);
+app.use("/api/auth/forgot-password", forgotPasswordIpLimiter);
 app.use("/api/auth", authLimiter);
 
 // Real-time/polling endpoints get a relaxed limiter

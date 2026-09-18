@@ -1,11 +1,7 @@
-// Phase P15 — the project already has IP-based rate limiting on every
-// /api/auth route (see app.js's authLimiter: 20 requests / 15 min / IP).
-// That alone doesn't stop one attacker email-bombing a single victim's
-// inbox from many IPs, or a distributed brute force against one victim's
-// OTP. This adds a second, account-keyed limiter on top — it does NOT
-// replace the IP limiter, and it does NOT create a second incompatible
-// rate-limiting system (no new library, no new store): same in-process
-// sliding-window approach the rest of small internal throttles use.
+// Phase P15 — password recovery uses two layers: a dedicated IP limiter
+// in app.js and this account-keyed limiter. The account layer stops one
+// email address from being hammered across many client IPs, while the IP
+// layer limits overall recovery traffic from one network.
 //
 // NOTE: this is in-memory and per-process, matching the project's existing
 // authLimiter (also in-memory, via express-rate-limit's default store).
@@ -45,7 +41,14 @@ export const accountRateLimit = ({ windowMs, max, keyFn, message }) => (req, res
   const existing = prune(buckets.get(key) || [], windowMs, now);
 
   if (existing.length >= max) {
-    res.status(429).json({ success: false, message });
+    const oldest = existing[0];
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
+    res.set("Retry-After", String(retryAfterSeconds));
+    res.status(429).json({
+      success: false,
+      message,
+      retryAfterSeconds,
+    });
     return;
   }
 

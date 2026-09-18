@@ -18,8 +18,8 @@ import {
 } from "../services/emailService.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const OTP_TTL_MS = 10 * 60 * 1000;
-const RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
+const OTP_TTL_MS = 15 * 60 * 1000;
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 
 const GENERIC_REQUEST_MESSAGE =

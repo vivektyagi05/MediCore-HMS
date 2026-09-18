@@ -87,7 +87,24 @@ export const sendPasswordRecoveryOtpEmail = async ({ toEmail, toName, otp, expir
   }
   if (!response.ok) {
     const statusCategory = response.status === 401 || response.status === 403 ? "credential" : response.status === 429 ? "rate_limit" : response.status >= 500 ? "provider_5xx" : "rejected";
-    logger.error("Brevo rejected the password recovery email", { event: "password_recovery_email_send_failed", statusCode: response.status, statusCategory });
+    const providerBody = await response.text().catch(() => "");
+    let providerError;
+    try {
+      providerError = providerBody ? JSON.parse(providerBody) : undefined;
+    } catch {
+      providerError = undefined;
+    }
+
+    // Brevo's provider error code/message is safe to log and is essential for
+    // diagnosing 400 responses (sender, template, recipient, account policy,
+    // etc.). Never log the API key, OTP, or HTML email body.
+    logger.error("Brevo rejected the password recovery email", {
+      event: "password_recovery_email_send_failed",
+      statusCode: response.status,
+      statusCategory,
+      providerCode: providerError?.code,
+      providerMessage: providerError?.message,
+    });
     throw new BrevoDeliveryError("The email provider rejected the request.", statusCategory);
   }
   const data = await response.json().catch(() => ({}));

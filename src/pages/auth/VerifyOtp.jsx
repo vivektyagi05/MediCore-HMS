@@ -10,7 +10,7 @@ import { authApi } from "../../api/authApi";
 import { useI18n } from "../../i18n/I18nContext";
 import { useToast } from "../../context/ToastContext";
 
-const RESEND_COOLDOWN_SECONDS = 60;
+const RESEND_COOLDOWN_SECONDS = 6;
 
 const maskEmail = (email) => {
   const [local, domain] = String(email || "").split("@");
@@ -33,7 +33,7 @@ function VerifyOtp() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResending, setIsResending] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(location.state?.expiresInSeconds || 600);
+  const [secondsLeft, setSecondsLeft] = useState(location.state?.expiresInSeconds || 900);
   const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN_SECONDS);
   const tickRef = useRef(null);
 
@@ -97,7 +97,7 @@ function VerifyOtp() {
         throw new Error("Recovery session was not created.");
       }
       setRecoveryId(response.data.recoveryId);
-      setSecondsLeft(response.data.expiresInSeconds || 600);
+      setSecondsLeft(response.data.expiresInSeconds || 900);
       setResendCooldown(RESEND_COOLDOWN_SECONDS);
       setOtp("");
       toast.success(t("p15.verifyOtp.codeResent"));

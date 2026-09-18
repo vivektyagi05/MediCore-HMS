@@ -72,11 +72,25 @@ export const sendPasswordRecoveryOtpEmail = async ({ toEmail, toName, otp, expir
     to: [{ email: toEmail, ...(toName ? { name: toName } : {}) }],
     subject: "Password recovery verification code",
   };
-  if (env.brevo.otpTemplateId) {
-    payload.templateId = Number(env.brevo.otpTemplateId);
+  // Brevo supports either a valid transactional templateId or inline HTML.
+  // Treat the env value as template mode only when it is a real positive integer.
+  // This prevents an invalid/placeholder BREVO_OTP_TEMPLATE_ID from producing a
+  // request with neither usable templateId nor htmlContent (Brevo 400:
+  // missing_parameter / Either of htmlContent or textContent is required).
+  const parsedTemplateId = env.brevo.otpTemplateId
+    ? Number.parseInt(String(env.brevo.otpTemplateId).trim(), 10)
+    : NaN;
+
+  if (Number.isInteger(parsedTemplateId) && parsedTemplateId > 0) {
+    payload.templateId = parsedTemplateId;
     payload.params = { OTP: otp, EXPIRY_MINUTES: expiryMinutes, NAME: toName || "" };
   } else {
-    payload.htmlContent = passwordRecoveryEmail({ name: toName || "there", otp, expiryMinutes, hospitalName: env.hospital.name });
+    payload.htmlContent = passwordRecoveryEmail({
+      name: toName || "there",
+      otp,
+      expiryMinutes,
+      hospitalName: env.hospital.name,
+    });
   }
   let response;
   try {

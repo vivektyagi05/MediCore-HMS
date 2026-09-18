@@ -42,6 +42,16 @@ if (isProduction) {
   if (process.env.JWT_SECRET.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters in production");
   }
+  if ((process.env.PAYMENT_GATEWAY_MODE || "razorpay") === "test") {
+    throw new Error("PAYMENT_GATEWAY_MODE=test is not allowed in production");
+  }
+  const configuredAiProvider = process.env.AI_TEXT_PROVIDER || "openai";
+  if (configuredAiProvider === "template") {
+    throw new Error("AI_TEXT_PROVIDER=template is not allowed in production; configure a real AI provider");
+  }
+  if (configuredAiProvider === "openai" && !process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required when AI_TEXT_PROVIDER=openai in production");
+  }
 }
 
 export const env = Object.freeze({
@@ -78,6 +88,12 @@ export const env = Object.freeze({
     senderEmail: process.env.BREVO_SENDER_EMAIL || "",
     senderName: process.env.BREVO_SENDER_NAME || "MediCore",
     otpTemplateId: process.env.BREVO_OTP_TEMPLATE_ID || "",
+  },
+  ai: {
+    provider: process.env.AI_TEXT_PROVIDER || (isProduction ? "openai" : "template"),
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    openaiModel: process.env.OPENAI_MODEL || "gpt-5.6-luna",
+    timeoutMs: Number(process.env.OPENAI_TIMEOUT_MS || 30_000),
   },
   frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
   seoSiteUrl: process.env.SEO_SITE_URL || process.env.FRONTEND_URL || "",

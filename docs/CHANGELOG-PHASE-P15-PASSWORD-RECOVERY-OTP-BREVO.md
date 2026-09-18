@@ -232,3 +232,7 @@ package.
   should be re-run end-to-end before this is called PASS.
 - **Full controller-level OTP integration tests (no live MongoDB
   reachable): BLOCKED**, for the reasons in §13 above.
+
+## Production fix: invalid template configuration fallback
+
+The password-recovery sender now uses inline HTML when `BREVO_OTP_TEMPLATE_ID` is blank or not a positive numeric ID. This prevents Brevo `missing_parameter` failures caused by an invalid template environment value.

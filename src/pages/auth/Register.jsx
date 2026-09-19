@@ -80,7 +80,7 @@ function Register() {
         return;
       }
       toast.success(t("auth.register.success"));
-      navigate(redirectTo || roleDashboardPath(user.role), { replace: true });
+      navigate(`/verify-email?email=${encodeURIComponent(user.email)}`, { replace: true });
     } catch (error) {
       const message = getAuthErrorMessage(error, t, "register");
       setServerError(message);

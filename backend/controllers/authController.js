@@ -9,6 +9,10 @@ import FeatureToggle from "../models/FeatureToggle.js";
 import { emitAutomationTrigger } from "../automation-studio/automationEventBus.js";
 import { TRIGGER_TYPES } from "../automation-studio/triggerRegistry.js";
 import { LEGAL_DOCUMENTS } from "../../shared/legalDocuments.js";
+import { emailService } from "../services/emailService.js";
+import { issueEmailVerification, verifyEmailToken, canResendVerification, verificationCooldownMs } from "../services/emailVerificationService.js";
+import { notificationEmitter } from "../realtime/notificationEmitter.js";
+import { logger } from "../utils/logger.js";
 
 const buildAuthResponse = (user) => ({
   user: user.toJSON(),
@@ -72,23 +76,133 @@ const user = await User.create({
     req.body.role === ROLES.DOCTOR
       ? "not_started"
       : undefined,
+  emailVerified: false,
 });
 
   if (user.role === ROLES.DOCTOR) {
     await ensureDoctorProfileForUser(user, pickSelfRegistrationDoctorProfile(req.body.doctorProfile));
   }
 
-  // Phase A6.2.3 — Automation Studio real trigger.
+  let verificationEmailSent = false;
+  try {
+    await issueEmailVerification(user);
+    verificationEmailSent = true;
+  } catch (error) {
+    logger.error("Registration verification email failed", {
+      event: "registration_verification_email_failed",
+      userId: user._id.toString(),
+      errorName: error?.name,
+      message: error?.message,
+    });
+  }
+
+  // Persisted + realtime admin notification. Email delivery is independent
+  // from registration state and must never roll the account creation back.
+  try {
+    await notificationEmitter.emitToAdmins({
+      type: "user_registered",
+      title: "New user registration",
+      message: `${user.name} registered a new ${user.role === ROLES.DOCTOR ? "doctor" : "user"} account.`,
+      entityType: "User",
+      entityId: user._id,
+      severity: "info",
+      eventKey: `user-registration:${user._id}`,
+    });
+  } catch (error) {
+    logger.warn("New user registration notification failed", {
+      message: error?.message,
+      userId: user._id.toString(),
+    });
+  }
+
+  // The existing automation trigger remains unchanged; it is not the
+  // notification source of truth for this phase.
   await emitAutomationTrigger(TRIGGER_TYPES.REGISTRATION, {
     userId: user._id,
     role: user.role,
     name: user.name,
   });
 
+  if (user.role !== ROLES.DOCTOR) {
+    try {
+      await emailService.sendWelcomeEmail({ toEmail: user.email, toName: user.name });
+    } catch (error) {
+      logger.warn("Registration welcome email failed", {
+        message: error?.message,
+        userId: user._id.toString(),
+      });
+    }
+  }
+
   res.status(201).json({
     success: true,
-    data: buildAuthResponse(user),
-    message: "Registration successful",
+    data: {
+      user: user.toJSON(),
+      verificationRequired: true,
+      verificationEmailSent,
+    },
+    message: verificationEmailSent
+      ? "Account created successfully. Please verify your email before continuing."
+      : "Account created successfully, but the verification email could not be sent. Please request a new verification email.",
+  });
+});
+
+export const verifyEmail = asyncHandler(async (req, res) => {
+  const result = await verifyEmailToken(req.body?.token);
+  const user = await User.findById(result.user._id).select("-password");
+
+  res.status(200).json({
+    success: true,
+    data: { user },
+    message: result.alreadyVerified
+      ? "Email is already verified."
+      : "Email verified successfully. You can now log in.",
+  });
+});
+
+export const resendVerification = asyncHandler(async (req, res) => {
+  const email = String(req.body?.email || "").toLowerCase().trim();
+  if (!email) {
+    return res.status(200).json({
+      success: true,
+      message: "If an account exists, a verification email will be sent.",
+    });
+  }
+
+  const user = await User.findOne({ email, isActive: true }).select("+emailVerificationTokenHash +emailVerificationExpiresAt +emailVerificationSentAt");
+  if (!user || user.emailVerified) {
+    return res.status(200).json({
+      success: true,
+      message: "If an unverified account exists, a verification email will be sent.",
+    });
+  }
+
+  if (!canResendVerification(user)) {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((verificationCooldownMs - (Date.now() - new Date(user.emailVerificationSentAt).getTime())) / 1000),
+    );
+    res.set("Retry-After", String(retryAfter));
+    return res.status(429).json({
+      success: false,
+      message: `Please wait ${retryAfter} seconds before requesting another verification email.`,
+    });
+  }
+
+  try {
+    await issueEmailVerification(user);
+  } catch (error) {
+    logger.warn("Verification resend failed", {
+      event: "email_verification_resend_failed",
+      errorName: error?.name,
+      message: error?.message,
+    });
+    // Keep enumeration resistance: the client gets a generic success shape.
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: "If an unverified account exists, a verification email will be sent.",
   });
 });
 
@@ -125,6 +239,10 @@ export const login = asyncHandler(async (req, res) => {
 
   if (!user || !(await user.comparePassword(req.body.password))) {
     throw new AppError("Invalid email or password", 401);
+  }
+
+  if (user.role !== ROLES.SUPER_ADMIN && !user.emailVerified) {
+    throw new AppError("Please verify your email before logging in.", 403);
   }
 
   if (user.role === ROLES.DOCTOR) {

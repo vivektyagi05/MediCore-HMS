@@ -55,6 +55,8 @@ const notificationDeliverySchema = new mongoose.Schema(
         // Phase 17 — public Contact Lead notification delivered through the
         // existing NotificationDelivery + Socket.IO pipeline.
         "lead",
+        "user_registered",
+        "doctor_application",
       ],
       required: true,
       index: true,

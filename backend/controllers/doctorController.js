@@ -686,8 +686,10 @@ export const approveDoctor = asyncHandler(
     await User.findByIdAndUpdate(
       doctor.userId,
       {
-        doctorOnboardingStatus:
-          "approved",
+        doctorOnboardingStatus: "approved",
+        "doctorVerification.reviewedAt": new Date(),
+        "doctorVerification.reviewedBy": req.user._id,
+        "doctorVerification.rejectionReason": "",
       }
     );
 
@@ -830,8 +832,10 @@ export const rejectDoctor = asyncHandler(
     await User.findByIdAndUpdate(
       doctor.userId,
       {
-        doctorOnboardingStatus:
-          "rejected",
+        doctorOnboardingStatus: "rejected",
+        "doctorVerification.reviewedAt": new Date(),
+        "doctorVerification.reviewedBy": req.user._id,
+        "doctorVerification.rejectionReason": reason,
       }
     );
 

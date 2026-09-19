@@ -7,6 +7,12 @@ export const authApi = {
   register(payload) {
     return apiClient.post("/auth/register", payload).then((res) => res.data);
   },
+  verifyEmail(token) {
+    return apiClient.post("/auth/verify-email", { token }).then((res) => res.data);
+  },
+  resendVerification(email) {
+    return apiClient.post("/auth/resend-verification", { email }).then((res) => res.data);
+  },
   // Phase P15 — password recovery. Also used as the "resend code" action:
   // calling it again with the same email simply supersedes the previous
   // OTP (see backend CHANGELOG-PHASE-P15).

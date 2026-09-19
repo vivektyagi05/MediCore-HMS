@@ -21,6 +21,7 @@ import Loader from "../../components/ui/Loader";
 
 import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
+import { useAuth } from "../../context/AuthContext";
 
 
 const initialForm = {
@@ -197,6 +198,7 @@ const uploadDocument =
 };
   const toast = useToast();
   const { t } = useI18n();
+  const { refreshUser } = useAuth();
 
   useEffect(() => {
     loadProfile();
@@ -244,25 +246,9 @@ const uploadDocument =
         payload
       );
 
-      toast.success(
-        t("ui.profileSubmitted")
-      );
-
+      toast.success("Application submitted successfully. Your profile is now under review.");
       setStatus("pending");
-
-      const user = JSON.parse(
-        localStorage.getItem(
-          "hms_user"
-        ) || "{}"
-      );
-
-      user.doctorOnboardingStatus =
-        "pending";
-
-      localStorage.setItem(
-        "hms_user",
-        JSON.stringify(user)
-      );
+      await refreshUser();
     } catch (error) {
       toast.error(
         getApiErrorMessage(error)
@@ -299,8 +285,20 @@ const uploadDocument =
 
       {status === "pending" && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-700">
-          Verification Pending.
-          Admin review is required.
+          Application submitted successfully. Your profile is now under review.
+          We will notify you when a decision is made.
+        </div>
+      )}
+
+      {status === "approved" && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
+          Your doctor application is approved. Your approved-only clinical workspace is now available.
+        </div>
+      )}
+
+      {status === "rejected" && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-700">
+          Your application was rejected. Update the information below and submit again for review.
         </div>
       )}
 
@@ -549,8 +547,9 @@ const uploadDocument =
         <Button
           type="submit"
           isLoading={saving}
+          disabled={saving || status === "pending" || status === "approved"}
         >
-          Submit For Verification
+          {status === "pending" ? "Application Under Review" : status === "approved" ? "Application Approved" : "Submit For Verification"}
         </Button>
 
       </form>

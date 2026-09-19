@@ -1,9 +1,12 @@
 import Doctor from "../models/Doctor.js";
-import User from "../models/User.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
 import { practiceEmitter } from "../realtime/practiceEmitter.js";
 import { logger } from "../utils/logger.js";
+import { notificationEmitter } from "../realtime/notificationEmitter.js";
+import { emailService } from "../services/emailService.js";
+import { ROLES } from "../constants/roles.js";
+import User from "../models/User.js";
 
 // SECURITY BUGFIX: both submitOnboarding and updateOnboarding used
 // `Object.assign(doctor, req.body)` with NO field whitelist — a classic mass
@@ -74,22 +77,96 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
     throw new AppError("Doctor profile not found", 404);
   }
 
-  Object.assign(doctor, pickOnboardingFields(req.body));
+  if (doctor.verificationStatus === "pending") {
+    throw new AppError("Your application is already under review.", 409);
+  }
 
+  if (doctor.verificationStatus === "approved") {
+    throw new AppError("Your doctor application is already approved.", 409);
+  }
+
+  const submittedAt = new Date();
+  Object.assign(doctor, pickOnboardingFields(req.body));
   doctor.verificationStatus = "pending";
+  doctor.isVerified = false;
+  doctor.verificationNotes = "";
+  doctor.verificationHistory.push({
+    status: "pending",
+    notes: "Doctor onboarding application submitted.",
+    changedBy: req.user._id,
+    changedAt: submittedAt,
+  });
 
   await doctor.save();
 
   await User.findByIdAndUpdate(req.user._id, {
     doctorOnboardingStatus: "pending",
     doctorVerification: {
-      submittedAt: new Date(),
+      submittedAt,
+      reviewedAt: null,
+      reviewedBy: null,
+      rejectionReason: "",
     },
   });
 
+  const adminPayload = {
+    type: "doctor_application",
+    title: "New doctor verification application",
+    message: `${req.user.name} submitted a doctor verification application.`,
+    entityType: "Doctor",
+    entityId: doctor._id,
+    severity: "info",
+    eventKey: `doctor-application:${doctor._id}:${submittedAt.getTime()}`,
+    metadata: { doctorUserId: doctor.userId },
+  };
+
+  try {
+    await notificationEmitter.emitToRole(ROLES.SUPER_ADMIN, adminPayload);
+  } catch (error) {
+    logger.warn("Doctor application notification failed", {
+      doctorId: doctor._id.toString(),
+      message: error?.message,
+    });
+  }
+
+  try {
+    const admins = await User.find({
+      role: ROLES.SUPER_ADMIN,
+      isActive: true,
+    }).select("email name").lean();
+
+    const reviewUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/doctors`;
+    await Promise.allSettled(
+      admins
+        .filter((admin) => admin.email)
+        .map((admin) =>
+          emailService.sendNewDoctorApplicationAdminNotification({
+            toEmail: admin.email,
+            toName: admin.name,
+            reviewUrl,
+          }).catch((error) => {
+            logger.warn("Doctor application admin email failed", {
+              adminId: admin._id.toString(),
+              errorName: error?.name,
+              message: error?.message,
+            });
+          }),
+        ),
+    );
+  } catch (error) {
+    logger.warn("Doctor application admin recipient lookup failed", {
+      message: error?.message,
+    });
+  }
+
   res.status(200).json({
     success: true,
-    message: "Onboarding submitted successfully",
+    data: {
+      doctor,
+      verificationStatus: doctor.verificationStatus,
+      submittedAt,
+    },
+    message: "Application submitted successfully. Your profile is now under review.",
   });
 });
 

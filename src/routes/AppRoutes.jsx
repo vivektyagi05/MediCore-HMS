@@ -26,6 +26,7 @@ const Login = lazy(() => import("../pages/auth/Login"));
 const Register = lazy(() => import("../pages/auth/Register"));
 const ForgotPassword = lazy(() => import("../pages/auth/ForgotPassword"));
 const VerifyOtp = lazy(() => import("../pages/auth/VerifyOtp"));
+const VerifyEmail = lazy(() => import("../pages/auth/VerifyEmail"));
 const ResetPassword = lazy(() => import("../pages/auth/ResetPassword"));
 const LegalDocumentPage = lazy(() => import("../components/legal/LegalDocumentPage"));
 const PrivacyPreferences = lazy(() => import("../pages/public/PrivacyPreferences"));
@@ -180,6 +181,7 @@ function AppRoutes() {
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/privacy-policy" element={<LegalDocumentPage documentKey="privacy" />} />
           <Route path="/terms" element={<LegalDocumentPage documentKey="terms" />} />

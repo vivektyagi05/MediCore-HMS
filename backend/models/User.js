@@ -54,6 +54,35 @@ securityVersion: {
     termsAcceptedAt: Date,
     termsVersion: String,
     privacyPolicyVersion: String,
+
+    // New registrations start unverified. Existing accounts are preserved by
+    // the default=true compatibility value; registration explicitly sets false.
+    emailVerified: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    emailVerificationSentAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    emailVerificationLastUsedHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
   doctorOnboardingStatus: {
       type: String,
       enum: [

@@ -7,14 +7,10 @@
 // site that referenced it has been repointed at SUPER_ADMIN only (see
 // permissionAdminController.js, adminMiddleware.js, doctorRoutes.js,
 // workflowRoutes.js, userAdminRoutes.js, and the frontend admin pages).
-// RECEPTIONIST is left untouched: it is genuinely dead (grep-confirmed no
-// route, controller or UI path can ever assign it to a user), unrelated to
-// the ADMIN violation this pass targets, and removing unused-but-harmless
-// enum members isn't part of the audited defect set for this phase.
+// PATIENT is the codebase's runtime name for the product's USER account.
 export const ROLES = Object.freeze({
   SUPER_ADMIN: "super_admin",
   DOCTOR: "doctor",
-  RECEPTIONIST: "receptionist",
   PATIENT: "patient",
 });
 
@@ -31,6 +27,5 @@ export const ADMIN_ROLES = Object.freeze([ROLES.SUPER_ADMIN]);
 export const ROLE_RANK = Object.freeze({
   [ROLES.SUPER_ADMIN]: 100,
   [ROLES.DOCTOR]: 50,
-  [ROLES.RECEPTIONIST]: 40,
   [ROLES.PATIENT]: 10,
 });

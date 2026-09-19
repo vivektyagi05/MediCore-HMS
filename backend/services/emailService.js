@@ -5,6 +5,7 @@ import { logger } from "../utils/logger.js";
 import fs from "fs/promises";
 import { passwordRecoveryEmail } from "../emails/passwordRecoveryEmail.js";
 import { doctorApprovalEmail, doctorRejectionEmail } from "../emails/doctorVerificationEmail.js";
+import { emailVerificationEmail } from "../emails/emailVerificationEmail.js";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
 
@@ -254,6 +255,43 @@ export const emailService = {
       to: patient.email,
       subject: "Refund processed",
       html: refundEmail({ patient, amount, currency }),
+    });
+  },
+
+  sendEmailVerification({ toEmail, toName, verificationUrl, expiryMinutes }) {
+    return sendMail({
+      to: toEmail,
+      subject: `Verify your ${env.hospital.name} account`,
+      html: emailVerificationEmail({
+        name: toName,
+        verificationUrl,
+        expiryMinutes,
+        hospitalName: env.hospital.name,
+      }),
+    });
+  },
+
+  sendWelcomeEmail({ toEmail, toName }) {
+    return sendMail({
+      to: toEmail,
+      subject: `Welcome to ${env.hospital.name}`,
+      html: `<p>Hello ${escapeHtml(toName || "there")},</p><p>Your ${escapeHtml(env.hospital.name)} account has been created successfully. Please verify your email address before continuing.</p>`,
+    });
+  },
+
+  sendNewUserAdminNotification({ toEmail, toName, role }) {
+    return sendMail({
+      to: toEmail,
+      subject: "New user registration requires attention",
+      html: `<p>A new ${escapeHtml(role === "doctor" ? "doctor" : "user")} account has been registered.</p><p>Name: ${escapeHtml(toName || "Unknown")}</p><p>Email: ${escapeHtml(toEmail)}</p>`,
+    });
+  },
+
+  sendNewDoctorApplicationAdminNotification({ toEmail, toName, reviewUrl }) {
+    return sendMail({
+      to: toEmail,
+      subject: "New doctor verification application",
+      html: `<p>A new doctor verification application is ready for review.</p><p>Doctor: ${escapeHtml(toName || "Unknown")}</p>${reviewUrl ? `<p><a href="${escapeHtml(reviewUrl)}">Open doctor review</a></p>` : ""}`,
     });
   },
 

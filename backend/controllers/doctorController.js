@@ -80,12 +80,20 @@ export const getDoctors = asyncHandler(async (req, res) => {
     filter.specialization = new RegExp(req.query.specialization, "i");
   }
 
-  if (
-    req.user &&
-    req.user.role === ROLES.PATIENT
-  ) {
+  // This route is mounted at /api/doctors and is reachable without auth.
+  // Public/doctor-role callers must receive only publishable doctors; the
+  // SUPER_ADMIN management surface uses the dedicated admin endpoint and is
+  // intentionally the only role allowed to see pending/rejected records here.
+  if (req.user?.role !== ROLES.SUPER_ADMIN) {
+    const publicDoctorUsers = await User.find({
+      role: ROLES.DOCTOR,
+      isActive: true,
+    }).select("_id").lean();
+
+    filter.userId = { $in: publicDoctorUsers.map((user) => user._id) };
     filter.isVerified = true;
     filter.verificationStatus = "approved";
+    filter.isActive = true;
   }
 
   const [doctors, total] = await Promise.all([

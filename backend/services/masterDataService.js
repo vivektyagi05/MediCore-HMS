@@ -42,10 +42,12 @@ const getMasterById = async (id, kind) => {
   return item;
 };
 
-const getMasterByName = async (value, kind) => {
+const getMasterByName = async (value, kind, parentId = undefined) => {
   const text = normalize(value);
   if (!text) return null;
-  return MasterData.findOne({ kind, normalizedName: normalizedName(text), active: true }).lean();
+  const filter = { kind, normalizedName: normalizedName(text), active: true };
+  if (parentId !== undefined) filter.parentId = parentId || null;
+  return MasterData.findOne(filter).lean();
 };
 
 const resolveMasterSelection = async (field, payload, options = {}) => {
@@ -53,12 +55,32 @@ const resolveMasterSelection = async (field, payload, options = {}) => {
   const type = String(payload?.[config.typeField] || "").toUpperCase();
   const id = payload?.[config.idField];
   const legacyValue = payload?.[field];
+  const otherValue = payload?.[config.otherField];
+
+  if (type === OTHER_VALUE && field === "city" && options.parentId) {
+    const candidate = otherValue || legacyValue;
+    const canonicalCity = await getMasterByName(candidate, config.kind, options.parentId);
+    if (canonicalCity) {
+      return {
+        type: "MASTER",
+        masterId: canonicalCity._id,
+        otherValue: "",
+        displayValue: canonicalCity.name,
+      };
+    }
+    return {
+      type: OTHER_VALUE,
+      masterId: null,
+      otherValue: assertValidOther(candidate, field),
+      displayValue: candidate,
+    };
+  }
 
   if (type === OTHER_VALUE) {
     return {
       type: OTHER_VALUE,
       masterId: null,
-      otherValue: assertValidOther(payload?.[config.otherField], field),
+      otherValue: assertValidOther(otherValue, field),
       displayValue: "Other",
     };
   }
@@ -73,7 +95,7 @@ const resolveMasterSelection = async (field, payload, options = {}) => {
     };
   }
 
-  const existing = await getMasterByName(legacyValue, config.kind);
+  const existing = await getMasterByName(legacyValue, config.kind, options.parentId);
   if (existing) {
     return {
       type: "MASTER",
@@ -88,7 +110,7 @@ const resolveMasterSelection = async (field, payload, options = {}) => {
       type: OTHER_VALUE,
       masterId: null,
       otherValue: assertValidOther(legacyValue, field),
-      displayValue: "Other",
+      displayValue: legacyValue,
     };
   }
 
@@ -125,7 +147,11 @@ export const resolveDoctorMasterData = async (payload = {}, options = {}) => {
     const c = FIELD_CONFIG[field];
     const present = payload[field] !== undefined || payload[c.idField] !== undefined || payload[c.typeField] !== undefined || payload[c.otherField] !== undefined;
     if (!present) continue;
-    resolved[field] = await resolveMasterSelection(field, payload, options);
+    const parentId =
+      field === "district" && resolved.state?.type === "MASTER" ? resolved.state.masterId :
+      field === "city" && resolved.district?.type === "MASTER" ? resolved.district.masterId :
+      undefined;
+    resolved[field] = await resolveMasterSelection(field, payload, { ...options, parentId });
   }
 
   if (resolved.city?.type === "MASTER" && !resolved.district) {

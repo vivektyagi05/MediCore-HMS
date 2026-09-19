@@ -1,44 +1,24 @@
-# --- Backend production image -------------------------------------------
-# Build from repository root so backend can use the shared/ directory
-# without changing the source-code structure.
-
-FROM node:20-alpine AS deps
-
-WORKDIR /app/backend
-
-COPY backend/package*.json ./
-
-RUN npm ci --omit=dev --no-audit --no-fund
-
-
-FROM node:20-alpine AS runner
-
+# --- Frontend production image -------------------------------------------
+# Build stage: compile the Vite SPA.
+FROM node:20-alpine AS build
 WORKDIR /app
+COPY package*.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+# VITE_API_BASE_URL is baked in at build time (Vite env vars are compile-time,
+# not runtime) -- override via --build-arg when building for a specific
+# environment.
+ARG VITE_API_BASE_URL=/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm run build
 
-# Run as a non-root user.
-RUN addgroup -S hms && adduser -S hms -G hms
+# Serve stage: a minimal Nginx image serving the static build output.
+FROM nginx:1.27-alpine AS runner
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-ENV NODE_ENV=production
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:80/ || exit 1
 
-# Backend dependencies
-COPY --from=deps /app/backend/node_modules ./backend/node_modules
-
-# Backend application
-COPY backend/package*.json ./backend/
-COPY backend/ ./backend/
-
-# Shared application code used by backend controllers/services.
-COPY shared/ ./shared/
-
-# Uploaded files are written to backend/storage.
-RUN mkdir -p /app/backend/storage && \
-    chown -R hms:hms /app
-
-USER hms
-
-EXPOSE 5000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-
-CMD ["node", "backend/server.js"]
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

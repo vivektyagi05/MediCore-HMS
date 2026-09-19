@@ -134,8 +134,8 @@ function AdminDoctors() {
         if (!active) return;
         setMaster((current) => ({
           ...current,
-          specializations: specializations.data || [],
-          states: states.data || [],
+          specializations: Array.isArray(specializations) ? specializations : [],
+          states: Array.isArray(states) ? states : [],
         }));
         setMasterError("");
       })
@@ -159,7 +159,7 @@ function AdminDoctors() {
     masterDataApi.getDistricts(filters.state)
       .then((response) => {
         if (!active) return;
-        setMaster((current) => ({ ...current, districts: response.data || [], cities: [] }));
+        setMaster((current) => ({ ...current, districts: Array.isArray(response) ? response : [], cities: [] }));
         setMasterError("");
       })
       .catch((error) => {
@@ -182,7 +182,7 @@ function AdminDoctors() {
     masterDataApi.getCities(filters.district)
       .then((response) => {
         if (!active) return;
-        setMaster((current) => ({ ...current, cities: response.data || [] }));
+        setMaster((current) => ({ ...current, cities: Array.isArray(response) ? response : [] }));
         setMasterError("");
       })
       .catch((error) => {

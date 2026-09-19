@@ -169,7 +169,7 @@ export default function DoctorProfessionalProfile() {
 
   useEffect(() => {
     Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
-      .then(([specializations, states]) => setMaster((current) => ({ ...current, specializations: specializations.data || [], states: states.data || [] })))
+      .then(([specializations, states]) => setMaster((current) => ({ ...current, specializations: Array.isArray(specializations) ? specializations : [], states: Array.isArray(states) ? states : [] })))
       .catch(() => {});
   }, []);
 
@@ -178,7 +178,7 @@ export default function DoctorProfessionalProfile() {
       setMaster((current) => ({ ...current, districts: [], cities: [] }));
       return;
     }
-    masterDataApi.getDistricts(identity.stateMasterId).then((response) => setMaster((current) => ({ ...current, districts: response.data || [], cities: [] }))).catch(() => {});
+    masterDataApi.getDistricts(identity.stateMasterId).then((response) => setMaster((current) => ({ ...current, districts: Array.isArray(response) ? response : [], cities: [] }))).catch(() => {});
   }, [identity.stateMasterId]);
 
   useEffect(() => {
@@ -186,7 +186,7 @@ export default function DoctorProfessionalProfile() {
       setMaster((current) => ({ ...current, cities: [] }));
       return;
     }
-    masterDataApi.getCities(identity.districtMasterId).then((response) => setMaster((current) => ({ ...current, cities: response.data || [] }))).catch(() => {});
+    masterDataApi.getCities(identity.districtMasterId).then((response) => setMaster((current) => ({ ...current, cities: Array.isArray(response) ? response : [] }))).catch(() => {});
   }, [identity.districtMasterId]);
 
   useEffect(() => { load(); }, [load]);
@@ -325,7 +325,7 @@ export default function DoctorProfessionalProfile() {
               {field("licenseNumber")}{field("medicalCouncil")}{field("hospitalName")}
               <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("state")}</span><select value={identity.stateType === "OTHER" ? "__other__" : identity.stateMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("state") : selectMaster("state", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Select state</option>{master.states.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.stateType === "OTHER" && <input value={identity.stateOther} onChange={(e) => setIdentity((v) => ({ ...v, stateOther: e.target.value }))} placeholder="Other state" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
               <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("district")}</span><select disabled={identity.stateType !== "MASTER" || !identity.stateMasterId} value={identity.districtType === "OTHER" ? "__other__" : identity.districtMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("district") : selectMaster("district", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"><option value="">Select district</option>{master.districts.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.districtType === "OTHER" && <input value={identity.districtOther} onChange={(e) => setIdentity((v) => ({ ...v, districtOther: e.target.value }))} placeholder="Other district" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
-              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("city")}</span><select disabled={identity.districtType !== "MASTER" || !identity.districtMasterId} value={identity.cityType === "OTHER" ? "__other__" : identity.cityMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("city") : selectMaster("city", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"><option value="">Select city</option>{master.cities.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.cityType === "OTHER" && <input value={identity.cityOther} onChange={(e) => setIdentity((v) => ({ ...v, cityOther: e.target.value }))} placeholder="Other city" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
+              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("city")}</span><input type="text" disabled={identity.districtType !== "MASTER" || !identity.districtMasterId} value={identity.city || ""} onChange={(e) => setIdentity((v) => ({ ...v, city: e.target.value, cityMasterId: "", cityType: "OTHER", cityOther: e.target.value }))} placeholder="Enter city" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />{identity.districtType === "MASTER" && identity.districtMasterId && <p className="mt-1 text-xs text-slate-500">Exact canonical matches are resolved automatically within the selected district.</p>}</label>
             </div>
             <label className="mt-4 block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("bio")}</span><textarea rows={6} value={identity.bio} onChange={(e) => setIdentity((v) => ({ ...v, bio: e.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" /></label>
             <div className="mt-4"><TagListEditor title={p("languages")} tags={languages} setTags={setLanguages} placeholder={p("languagePlaceholder")} addLabel={p("add")} removeLabel={p("remove")} /></div>

@@ -85,7 +85,7 @@ export default function DoctorSearch() {
       .then(([metaResponse, specializations, states]) => {
         if (!active) return;
         setMeta({ languages: metaResponse.data?.languages || [] });
-        setMaster((current) => ({ ...current, specializations, states }));
+        setMaster((current) => ({ ...current, specializations: Array.isArray(specializations) ? specializations : [], states: Array.isArray(states) ? states : [] }));
         setMetaError("");
       })
       .catch(() => { if (active) setMetaError(t("p11.shared.filtersLoadError")); });

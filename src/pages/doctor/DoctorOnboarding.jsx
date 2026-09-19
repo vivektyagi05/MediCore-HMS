@@ -222,7 +222,7 @@ const uploadDocument =
     let active = true;
     Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
       .then(([specializations, states]) => {
-        if (active) setMaster((current) => ({ ...current, specializations: specializations.data || [], states: states.data || [] }));
+        if (active) setMaster((current) => ({ ...current, specializations: Array.isArray(specializations) ? specializations : [], states: Array.isArray(states) ? states : [] }));
       })
       .catch(() => {})
       .finally(() => { if (active) setMasterLoading(false); });
@@ -236,7 +236,7 @@ const uploadDocument =
       return;
     }
     masterDataApi.getDistricts(form.stateMasterId).then((response) => {
-      setMaster((current) => ({ ...current, districts: response.data || [], cities: [] }));
+      setMaster((current) => ({ ...current, districts: Array.isArray(response) ? response : [], cities: [] }));
     }).catch(() => {});
   }, [form.stateMasterId]);
 
@@ -246,7 +246,7 @@ const uploadDocument =
       return;
     }
     masterDataApi.getCities(form.districtMasterId).then((response) => {
-      setMaster((current) => ({ ...current, cities: response.data || [] }));
+      setMaster((current) => ({ ...current, cities: Array.isArray(response) ? response : [] }));
     }).catch(() => {});
   }, [form.districtMasterId]);
 
@@ -489,12 +489,23 @@ const uploadDocument =
 
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">City</span>
-              <select disabled={form.districtType !== "MASTER" || !form.districtMasterId} value={form.cityType === "OTHER" ? "__other__" : form.cityMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("city") : selectMaster("city", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm disabled:bg-slate-100">
-                <option value="">Select city</option>
-                {master.cities.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
-                <option value="__other__">Other</option>
-              </select>
-              {form.cityType === "OTHER" && <Input label="Other city" name="cityOther" value={form.cityOther} onChange={updateField} />}
+              <Input
+                label=""
+                name="city"
+                value={form.city || ""}
+                disabled={form.districtType !== "MASTER" || !form.districtMasterId}
+                placeholder="Enter city"
+                onChange={(e) => setForm((current) => ({
+                  ...current,
+                  city: e.target.value,
+                  cityMasterId: "",
+                  cityType: "OTHER",
+                  cityOther: e.target.value,
+                }))}
+              />
+              {form.districtType === "MASTER" && form.districtMasterId && (
+                <p className="mt-1 text-xs text-slate-500">If the city exactly matches a canonical city in the selected district, it will be saved as MasterData; otherwise it will be saved as Other.</p>
+              )}
             </label>
 
           </div>

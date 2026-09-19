@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { adminApi } from "../../api/adminApi";
 import { doctorApi } from "../../api/doctorApi";
+import { masterDataApi } from "../../api/masterDataApi";
 import { getApiErrorMessage } from "../../api/axios";
 import AdminModal from "../../components/admin/AdminModal";
 import AdminTable from "../../components/admin/AdminTable";
@@ -43,6 +44,8 @@ const SORT_OPTIONS = [
 ];
 
 const verificationTone = { pending: "warning", approved: "success", rejected: "danger" };
+const emptyMaster = { specializations: [], states: [], districts: [], cities: [] };
+const isObjectId = (value) => /^[a-f0-9]{24}$/i.test(String(value || ""));
 
 function AdminDoctors() {
   const toast = useToast();
@@ -54,6 +57,9 @@ function AdminDoctors() {
     verificationStatus: searchParams.get("verificationStatus") || "",
     status: searchParams.get("status") || "",
     specialization: searchParams.get("specialization") || "",
+    state: searchParams.get("state") || "",
+    district: searchParams.get("district") || "",
+    city: searchParams.get("city") || "",
   });
   const [sort, setSort] = useState(searchParams.get("sort") || "newest");
 
@@ -79,6 +85,12 @@ function AdminDoctors() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [detailDoctorId, setDetailDoctorId] = useState(null);
+
+  const [master, setMaster] = useState(emptyMaster);
+  const [masterLoading, setMasterLoading] = useState(true);
+  const [districtLoading, setDistrictLoading] = useState(false);
+  const [cityLoading, setCityLoading] = useState(false);
+  const [masterError, setMasterError] = useState("");
 
   const query = useMemo(
     () => Object.fromEntries([...searchParams.entries()].filter(([, value]) => value)),
@@ -112,6 +124,87 @@ function AdminDoctors() {
   useEffect(() => {
     loadDoctors();
   }, [searchParams, sort]);
+
+  useEffect(() => {
+    let active = true;
+    setMasterLoading(true);
+    setMasterError("");
+    Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
+      .then(([specializations, states]) => {
+        if (!active) return;
+        setMaster((current) => ({
+          ...current,
+          specializations: specializations.data || [],
+          states: states.data || [],
+        }));
+        setMasterError("");
+      })
+      .catch((error) => {
+        if (active) setMasterError(getApiErrorMessage(error));
+      })
+      .finally(() => {
+        if (active) setMasterLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!isObjectId(filters.state)) {
+      setDistrictLoading(false);
+      setMaster((current) => ({ ...current, districts: [], cities: [] }));
+      return undefined;
+    }
+    let active = true;
+    setDistrictLoading(true);
+    masterDataApi.getDistricts(filters.state)
+      .then((response) => {
+        if (!active) return;
+        setMaster((current) => ({ ...current, districts: response.data || [], cities: [] }));
+        setMasterError("");
+      })
+      .catch((error) => {
+        if (active) setMasterError(getApiErrorMessage(error));
+      })
+      .finally(() => {
+        if (active) setDistrictLoading(false);
+      });
+    return () => { active = false; };
+  }, [filters.state]);
+
+  useEffect(() => {
+    if (!isObjectId(filters.district)) {
+      setCityLoading(false);
+      setMaster((current) => ({ ...current, cities: [] }));
+      return undefined;
+    }
+    let active = true;
+    setCityLoading(true);
+    masterDataApi.getCities(filters.district)
+      .then((response) => {
+        if (!active) return;
+        setMaster((current) => ({ ...current, cities: response.data || [] }));
+        setMasterError("");
+      })
+      .catch((error) => {
+        if (active) setMasterError(getApiErrorMessage(error));
+      })
+      .finally(() => {
+        if (active) setCityLoading(false);
+      });
+    return () => { active = false; };
+  }, [filters.district]);
+
+  useEffect(() => {
+    setFilters({
+      search: searchParams.get("search") || "",
+      verificationStatus: searchParams.get("verificationStatus") || "",
+      status: searchParams.get("status") || "",
+      specialization: searchParams.get("specialization") || "",
+      state: searchParams.get("state") || "",
+      district: searchParams.get("district") || "",
+      city: searchParams.get("city") || "",
+    });
+  }, [searchParams]);
 
   useEffect(() => {
     loadStats();
@@ -228,7 +321,7 @@ function AdminDoctors() {
   };
 
   const hasActiveFilters = Boolean(
-    filters.search || filters.verificationStatus || filters.status || filters.specialization,
+    filters.search || filters.verificationStatus || filters.status || filters.specialization || filters.state || filters.district || filters.city,
   );
 
   const columns = [
@@ -367,17 +460,27 @@ function AdminDoctors() {
           <option value="active">Active</option>
           <option value="inactive">Deactivated</option>
         </Select>
-        <Select name="state" value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value, district: "", city: "" }))}>
+        <Select name="state" value={filters.state} disabled={masterLoading} onChange={(event) => {
+          const stateId = event.target.value;
+          setFilters((current) => ({ ...current, state: stateId, district: "", city: "" }));
+          setMaster((current) => ({ ...current, districts: [], cities: [] }));
+          setMasterError("");
+        }}>
           <option value="">All states</option>
-          {master.states.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+          {master.states.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
         </Select>
-        <Select name="district" value={filters.district} disabled={!filters.state} onChange={(event) => setFilters((current) => ({ ...current, district: event.target.value, city: "" }))}>
+        <Select name="district" value={filters.district} disabled={masterLoading || districtLoading || !isObjectId(filters.state)} onChange={(event) => {
+          const districtId = event.target.value;
+          setFilters((current) => ({ ...current, district: districtId, city: "" }));
+          setMaster((current) => ({ ...current, cities: [] }));
+          setMasterError("");
+        }}>
           <option value="">All districts</option>
-          {master.districts.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+          {master.districts.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
         </Select>
-        <Select name="city" value={filters.city} disabled={!filters.district} onChange={(event) => setFilters((current) => ({ ...current, city: event.target.value }))}>
+        <Select name="city" value={filters.city} disabled={masterLoading || cityLoading || !isObjectId(filters.district)} onChange={(event) => setFilters((current) => ({ ...current, city: event.target.value }))}>
           <option value="">All cities</option>
-          {master.cities.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+          {master.cities.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
         </Select>
         <Select value={sort} onChange={(event) => changeSort(event.target.value)}>
           {SORT_OPTIONS.map((option) => (
@@ -387,6 +490,10 @@ function AdminDoctors() {
           ))}
         </Select>
       </FilterBar>
+
+      {masterError && (
+        <p className="text-sm font-medium text-rose-600">Master data could not be loaded: {masterError}</p>
+      )}
 
       {loadError ? (
         <ErrorState description={loadError} onRetry={loadDoctors} />
@@ -438,25 +545,26 @@ function AdminDoctors() {
           <Select
             label="Specialization"
             required
-            value={form.specialization}
             error={formErrors.specialization}
+            value={form.specializationType === "OTHER" ? "__other__" : form.specializationMasterId}
+            disabled={masterLoading}
             onChange={(e) => {
               const value = e.target.value;
-              const item = master.specializations.find((entry) => entry.name === value);
+              const item = master.specializations.find((entry) => String(entry._id) === String(value));
               setForm({
                 ...form,
-                specialization: value,
+                specialization: item?.name || "Other",
                 specializationMasterId: item?._id || "",
                 specializationType: item ? "MASTER" : "OTHER",
-                specializationOther: item ? "" : "",
+                specializationOther: item ? "" : form.specializationOther,
               });
             }}
           >
             <option value="">Select specialization…</option>
-            {master.specializations.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
-            <option value="Other">Other</option>
+            {master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+            <option value="__other__">Other</option>
           </Select>
-          {form.specialization === "Other" && <Input label="Other specialization" required value={form.specializationOther || ""} onChange={(e) => setForm({ ...form, specializationOther: e.target.value })} />}
+          {form.specializationType === "OTHER" && <Input label="Other specialization" required value={form.specializationOther || ""} onChange={(e) => setForm({ ...form, specializationOther: e.target.value })} />}
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Experience (years)"

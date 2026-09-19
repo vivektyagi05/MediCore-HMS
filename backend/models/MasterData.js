@@ -12,7 +12,7 @@ const masterDataSchema = new mongoose.Schema(
     normalizedName: { type: String, required: true, trim: true, lowercase: true },
     parentId: { type: mongoose.Schema.Types.ObjectId, ref: "MasterData", default: null, index: true },
     active: { type: Boolean, default: true, index: true },
-    source: { type: String, enum: ["seed", "legacy"], default: "legacy", index: true },
+    source: { type: String, enum: ["seed", "lgd", "legacy"], default: "legacy", index: true },
   },
   { timestamps: true },
 );

@@ -13,7 +13,8 @@
     "audit:integrity": "node migrations/auditDatabaseIntegrity.js",
     "test": "node tests/run-all.mjs",
     "test:p20-seo": "node tests/p20SeoInfrastructure.test.mjs && node tests/p20SeoStaticContract.test.mjs && node tests/p20SeoValidation.test.mjs",
-    "migrate:master-data": "node migrations/004_master_data_backfill.js"
+    "migrate:master-data": "node migrations/004_master_data_backfill.js",
+    "migrate:master-data:lgd": "node migrations/005_import_lgd_master_data.js"
   },
   "dependencies": {
     "bcrypt": "latest",

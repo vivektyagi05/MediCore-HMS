@@ -9,8 +9,8 @@ export const publicApi = {
   getFeaturedDoctors: () =>
     apiClient.get("/public/featured-doctors", { cacheTtlMs: 30000 }).then((r) => r.data),
 
-  getSearchMeta: () =>
-    apiClient.get("/public/search-meta", { cacheTtlMs: 60000 }).then((r) => r.data),
+  getSearchMeta: (params = {}) =>
+    apiClient.get("/public/search-meta", { params, cacheTtlMs: 60000 }).then((r) => r.data),
 
   getDoctorCoverage: (params = {}) =>
     apiClient.get("/public/doctor-coverage", { params, cacheTtlMs: 120000 }).then((r) => r.data),

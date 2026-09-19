@@ -18,8 +18,12 @@ assert.match(search, /buildDoctorGeographicFilter\(req\.query\)/, "doctor search
 assert.match(search, /buildLocationAggregationMatch\(req\.query\)/, "coverage must use the same geographic semantics");
 assert.match(search, /getPublicDoctorAvailability/, "discovery availability must have a batch endpoint");
 assert.match(search, /slice\(0, 24\)/, "public batch availability must be bounded");
-assert.match(search, /locationStagesWithFilter = locationFilterStage \? \[\.\.\.locationStages, locationFilterStage\]/, "coverage filter must be appended to original location stages");
+assert.match(search, /const coverageLocationStages = \[/, "coverage must construct shared location stages");
+assert.match(search, /\.\.\.\(locationFilterStage \? \[locationFilterStage\] : \[\]\)/, "coverage filter must be appended to original location stages");
 assert.match(search, /getPublicDoctorAvailability/, "doctor discovery must expose batched availability");
 assert.match(model, /doctorSchema\.index\(\{ location: "2dsphere" \}\)/, "doctor location must have a 2dsphere index");
-assert.match(search, /isVerified:\s*true,\s*verificationStatus:\s*"approved",\s*isActive:\s*true/, "public discovery must enforce eligibility");
+assert.match(search, /const PUBLIC_DOCTOR_BASE = Object\.freeze\(/, "public discovery must centralize publication eligibility");
+assert.match(search, /verificationStatus: "approved"/);
+assert.match(search, /isVerified: true/);
+assert.match(search, /isActive: true/);
 console.log("P12 geographic consistency contract checks passed");

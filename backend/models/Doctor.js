@@ -550,6 +550,8 @@ const doctorSchema = new mongoose.Schema(
 );
 
 doctorSchema.index({ specialization: 1, rating: -1 });
+doctorSchema.index({ verificationStatus: 1, isVerified: 1, isActive: 1, rating: -1 });
+doctorSchema.index({ userId: 1, verificationStatus: 1, isVerified: 1, isActive: 1 });
 doctorSchema.index({ location: "2dsphere" });
 
 doctorSchema.pre("validate", async function validateDoctorUser() {

@@ -27,6 +27,16 @@ const cmsPageSchema = new mongoose.Schema(
     author: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     category: { type: String, trim: true, maxlength: 80, default: "", index: true },
     tags: { type: [String], default: [] },
+    references: {
+      type: [
+        {
+          title: { type: String, trim: true, maxlength: 180 },
+          url: { type: String, trim: true, maxlength: 500 },
+          organization: { type: String, trim: true, maxlength: 120 },
+        },
+      ],
+      default: [],
+    },
     relatedServices: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     relatedSpecialties: { type: [String], default: [] },
     relatedDoctors: [{ type: mongoose.Schema.Types.ObjectId, ref: "Doctor" }],

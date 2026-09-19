@@ -20,7 +20,7 @@ assert.match(service, /cityMasterId.*null/);
 assert.match(service, /deactivatedUntrustedMasterData/);
 assert.match(service, /source: "legacy"/);
 assert.doesNotMatch(service, /MasterData\.create\(\{\s*kind,\s*parentId,\s*name: value/);
-assert.match(model, /source: \{ type: String, enum: \["seed", "legacy"\]/);
+assert.match(model, /source: \{ type: String, enum: \["seed", "lgd", "legacy"\]/);
 assert.match(model, /kind: 1, parentId: 1, normalizedName: 1/);
 assert.match(migration, /bootstrapMasterDataFromDoctors/);
 

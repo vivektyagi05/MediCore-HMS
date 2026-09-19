@@ -20,6 +20,11 @@ const buildPayload = (body, partial = false) => {
   set("author", mongoose.Types.ObjectId.isValid(body.author) ? body.author : undefined);
   set("category", String(body.category ?? "").trim());
   set("tags", stringArray(body.tags));
+  set("references", Array.isArray(body.references) ? body.references.map((item) => ({
+    title: String(item?.title || "").trim().slice(0, 180),
+    url: String(item?.url || "").trim().slice(0, 500),
+    organization: String(item?.organization || "").trim().slice(0, 120),
+  })).filter((item) => item.title && /^https?:\/\//i.test(item.url)).slice(0, 10) : []);
   set("relatedServices", objectIdArray(body.relatedServices));
   set("relatedSpecialties", stringArray(body.relatedSpecialties));
   set("relatedDoctors", objectIdArray(body.relatedDoctors));

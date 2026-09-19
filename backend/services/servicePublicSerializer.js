@@ -32,11 +32,15 @@ export const serializeServicePublic = (service, req, locale = "en") => {
     price: service.price,
     category: service.category,
     relatedSpecialties: service.relatedSpecialties || [],
-    relatedDoctors: (service.relatedDoctors || []).map((doctor) => {
+    relatedDoctors: (service.relatedDoctors || [])
+      .filter((doctor) => doctor?.verificationStatus === "approved" && doctor?.isActive !== false && doctor?.userId?.role === "doctor" && doctor?.userId?.isActive !== false)
+      .map((doctor) => {
       const profile = serializeDoctorPublicProfile(doctor, req);
       return { id: profile.id, name: profile.name, specialization: profile.specialization, qualification: profile.qualification, city: profile.city, state: profile.state, profilePhoto: profile.profilePhoto };
     }),
-    relatedServices: (service.relatedServices || []).map((item) => ({ id: item._id, title: item.title, slug: item.slug || "" })),
+    relatedServices: (service.relatedServices || [])
+      .filter((item) => item?.status === "published" && item?.visibility === "public" && item?.isActive !== false)
+      .map((item) => ({ id: item._id, title: item.title, slug: item.slug || "" })),
     image: absoluteUrl(service.image, req),
     icon: service.icon || "",
     featured: Boolean(service.featured),

@@ -34,6 +34,9 @@
 //      exist as a cross-cutting concern anywhere else in this codebase.
 // ─────────────────────────────────────────────────────────────────────────
 import Review from "../../models/Review.js";
+import Doctor from "../../models/Doctor.js";
+import Service from "../../models/Service.js";
+import CMSPage from "../../models/CMSPage.js";
 import { buildExecutiveDashboardData, buildSmartAlerts } from "../../controllers/admin/missionControlAdminController.js";
 import { buildExecutiveTimeline } from "../../controllers/admin/executiveActionController.js";
 import { _internal as operationsInternal } from "../../controllers/admin/operationsAdminController.js";
@@ -141,6 +144,38 @@ async function buildReputationSnapshot() {
   };
 }
 
+
+async function buildDoctorAndContentSnapshot() {
+  const [
+    doctorTotal, doctorPending, doctorApproved, doctorRejected, doctorActive, doctorInactive,
+    serviceTotal, serviceDraft, serviceReview, servicePublished, serviceArchived,
+    articleTotal, articleDraft, articleReview, articlePublished, articleArchived,
+  ] = await Promise.all([
+    Doctor.countDocuments({}),
+    Doctor.countDocuments({ verificationStatus: "pending" }),
+    Doctor.countDocuments({ verificationStatus: "approved" }),
+    Doctor.countDocuments({ verificationStatus: "rejected" }),
+    Doctor.countDocuments({ isActive: true }),
+    Doctor.countDocuments({ isActive: false }),
+    Service.countDocuments({}),
+    Service.countDocuments({ status: "draft" }),
+    Service.countDocuments({ status: "review" }),
+    Service.countDocuments({ status: "published", visibility: "public", isActive: true }),
+    Service.countDocuments({ status: "archived" }),
+    CMSPage.countDocuments({ contentType: "article" }),
+    CMSPage.countDocuments({ contentType: "article", status: "draft" }),
+    CMSPage.countDocuments({ contentType: "article", status: "review" }),
+    CMSPage.countDocuments({ contentType: "article", status: "published", visibility: "public", isPublished: true }),
+    CMSPage.countDocuments({ contentType: "article", status: "archived" }),
+  ]);
+
+  return {
+    doctors: { total: doctorTotal, pending: doctorPending, approved: doctorApproved, rejected: doctorRejected, active: doctorActive, inactive: doctorInactive },
+    services: { total: serviceTotal, draft: serviceDraft, review: serviceReview, published: servicePublished, archived: serviceArchived },
+    articles: { total: articleTotal, draft: articleDraft, review: articleReview, published: articlePublished, archived: articleArchived },
+  };
+}
+
 // ── Top-level composition ───────────────────────────────────────────────
 // permissions: { canViewFinance, canViewOps } — computed by the controller
 // from the existing userHasPermission() gate (manage_payments / manage_
@@ -149,11 +184,12 @@ async function buildReputationSnapshot() {
 // completely omitted — never returned as a fabricated zero — when the
 // requesting admin lacks the permission that already gates its own page.
 export async function buildCommandCenterData({ canViewFinance, canViewOps }) {
-  const [executiveSection, needsAttentionSection, activitySection, reputationSection] = await Promise.all([
+  const [executiveSection, needsAttentionSection, activitySection, reputationSection, contentSection] = await Promise.all([
     safeSection(async () => ({ executive: await buildExecutiveDashboardData() })),
     safeSection(async () => ({ needsAttention: await buildNeedsAttention() })),
     safeSection(async () => ({ activity: await buildExecutiveTimeline(20) })),
     safeSection(async () => ({ reputation: await buildReputationSnapshot() })),
+    safeSection(async () => ({ content: await buildDoctorAndContentSnapshot() })),
   ]);
 
   const financeSection = canViewFinance
@@ -184,6 +220,9 @@ export async function buildCommandCenterData({ canViewFinance, canViewOps }) {
 
     reputation: reputationSection.available ? reputationSection.reputation : null,
     reputationError: reputationSection.available ? null : reputationSection.error,
+
+    content: contentSection.available ? contentSection.content : null,
+    contentError: contentSection.available ? null : contentSection.error,
 
     finance: financeSection.available ? financeSection.finance : null,
     financeError: financeSection.permissionDenied ? null : financeSection.error,

@@ -178,8 +178,13 @@ export const getAvailableSlots = asyncHandler(async (req, res) => {
     throw new AppError("A valid date is required", 400);
   }
 
-  const doctor = await Doctor.findById(doctorId).lean();
-  if (!doctor) throw new AppError("Doctor profile not found", 404);
+  const doctor = await Doctor.findById(doctorId)
+    .populate({ path: "userId", select: "role isActive", match: { role: ROLES.DOCTOR, isActive: true } })
+    .lean();
+  if (!doctor || !doctor.userId) throw new AppError("Doctor profile not found", 404);
+  if (!doctor.isVerified || doctor.verificationStatus !== "approved" || !doctor.isActive) {
+    throw new AppError("Doctor is not approved for appointments", 403);
+  }
 
   const date = normalizeDate(dateParam);
   const today = new Date();
@@ -357,10 +362,12 @@ export const createAppointment = asyncHandler(async (req, res) => {
     }
   }
 
-  const doctor = await Doctor.findById(req.body.doctorId).lean();
-  if (!doctor) throw new AppError("Doctor profile not found", 404);
+  const doctor = await Doctor.findById(req.body.doctorId)
+    .populate({ path: "userId", select: "role isActive", match: { role: ROLES.DOCTOR, isActive: true } })
+    .lean();
+  if (!doctor || !doctor.userId) throw new AppError("Doctor profile not found", 404);
 
-  if (!doctor.isVerified || doctor.verificationStatus !== "approved") {
+  if (!doctor.isVerified || doctor.verificationStatus !== "approved" || !doctor.isActive) {
     throw new AppError("Doctor is not approved for appointments", 403);
   }
 

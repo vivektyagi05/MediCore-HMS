@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, BadgeCheck, Bookmark, BookmarkCheck, Calendar, Filter, History, MapPin, Search, ShieldCheck, SlidersHorizontal, Star, X } from "lucide-react";
 import { publicApi } from "../../api/publicApi";
+import { masterDataApi } from "../../api/masterDataApi";
 import { useAuth } from "../../context/AuthContext";
 import BookingAuthGate from "../../components/public/BookingAuthGate";
 import PublicPageFrame, { PublicCard, PublicSection } from "../../components/public/PublicPageFrame";
@@ -25,7 +26,8 @@ export default function DoctorSearch() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [doctors, setDoctors] = useState([]);
-  const [meta, setMeta] = useState({ specializations: [], cities: [], states: [], districts: [], languages: [] });
+  const [meta, setMeta] = useState({ languages: [] });
+  const [master, setMaster] = useState({ specializations: [], states: [], districts: [], cities: [] });
   const [coverage, setCoverage] = useState({ states: [], districts: [], cities: [], totalDoctors: 0 });
   const [pagination, setPagination] = useState({ page: 1, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
@@ -48,11 +50,25 @@ export default function DoctorSearch() {
   const page = Number(params.get("page") || 1);
   const activeCount = Object.values(filters).filter(Boolean).length + (name ? 1 : 0);
 
+  const findMasterId = useCallback((items, value) => {
+    if (!value) return "";
+    return items.find((item) => String(item.name || "").toLowerCase() === String(value).toLowerCase())?._id || "";
+  }, []);
+
   const fetchDoctors = useCallback(async () => {
     const currentRequest = ++requestId.current;
     setLoading(true); setError("");
     try {
-      const res = await publicApi.searchDoctors({ ...filters, name: name || undefined, sort, page, limit: 12 });
+      const params = { ...filters, name: name || undefined, sort, page, limit: 12 };
+      const specializationId = findMasterId(master.specializations, filters.specialization);
+      const stateId = findMasterId(master.states, filters.state);
+      const districtId = findMasterId(master.districts, filters.district);
+      const cityId = findMasterId(master.cities, filters.city);
+      if (specializationId) { params.specializationMasterId = specializationId; delete params.specialization; }
+      if (stateId) { params.stateMasterId = stateId; delete params.state; }
+      if (districtId) { params.districtMasterId = districtId; delete params.district; }
+      if (cityId) { params.cityMasterId = cityId; delete params.city; }
+      const res = await publicApi.searchDoctors(params);
       if (currentRequest !== requestId.current) return;
       setDoctors(res.data?.doctors || []);
       setPagination(res.data?.pagination || { page: 1, total: 0, pages: 1 });
@@ -61,12 +77,17 @@ export default function DoctorSearch() {
     } finally {
       if (currentRequest === requestId.current) setLoading(false);
     }
-  }, [filters, name, sort, page, t]);
+  }, [filters, name, sort, page, t, master, findMasterId]);
 
   useEffect(() => {
     let active = true;
-    publicApi.getSearchMeta()
-      .then((r) => { if (active) { setMeta(r.data || {}); setMetaError(""); } })
+    Promise.all([publicApi.getSearchMeta({ masterData: "false" }), masterDataApi.getSpecializations(), masterDataApi.getStates()])
+      .then(([metaResponse, specializations, states]) => {
+        if (!active) return;
+        setMeta({ languages: metaResponse.data?.languages || [] });
+        setMaster((current) => ({ ...current, specializations, states }));
+        setMetaError("");
+      })
       .catch(() => { if (active) setMetaError(t("p11.shared.filtersLoadError")); });
     if (user?.role === "patient") {
       patientWorkflowApi.getSavedDoctors()
@@ -75,6 +96,32 @@ export default function DoctorSearch() {
     }
     return () => { active = false; };
   }, [user?.role, t]);
+
+  useEffect(() => {
+    let active = true;
+    const stateId = findMasterId(master.states, filters.state);
+    if (!stateId) {
+      setMaster((current) => ({ ...current, districts: [], cities: [] }));
+      return undefined;
+    }
+    masterDataApi.getDistricts(stateId)
+      .then((districts) => { if (active) setMaster((current) => ({ ...current, districts, cities: [] })); })
+      .catch(() => { if (active) setMetaError(t("p11.shared.filtersLoadError")); });
+    return () => { active = false; };
+  }, [filters.state, master.states, findMasterId, t]);
+
+  useEffect(() => {
+    let active = true;
+    const districtId = findMasterId(master.districts, filters.district);
+    if (!districtId) {
+      setMaster((current) => ({ ...current, cities: [] }));
+      return undefined;
+    }
+    masterDataApi.getCities(districtId)
+      .then((cities) => { if (active) setMaster((current) => ({ ...current, cities })); })
+      .catch(() => { if (active) setMetaError(t("p11.shared.filtersLoadError")); });
+    return () => { active = false; };
+  }, [filters.district, master.districts, findMasterId, t]);
 
   useEffect(() => {
     const currentRequest = ++coverageRequestId.current;
@@ -105,19 +152,9 @@ export default function DoctorSearch() {
   const book = (doctor) => { if (user?.role === "patient") window.location.href = `/patient/appointments/book?doctorId=${doctor.id}`; else setAuthGate({ open: true, doctor }); };
   const toggleSave = async (doctorId) => { if (user?.role !== "patient") return; const key = String(doctorId); try { if (savedIds.includes(key)) { await patientWorkflowApi.removeSavedDoctor(doctorId); setSavedIds((ids) => ids.filter((x) => x !== key)); } else { await patientWorkflowApi.saveDoctor({ doctorId }); setSavedIds((ids) => [...ids, key]); } } catch { /* keep current UI state when the server rejects the mutation */ } };
   const selectedDistrict = filters.district;
-  const stateDistricts = useMemo(
-    () => (coverage.districts || []).filter((item) => filters.state && String(item.state || "").toLowerCase() === filters.state.toLowerCase()),
-    [coverage.districts, filters.state],
-  );
-  const locationCities = useMemo(
-    () => filters.state
-      ? (coverage.cities || [])
-        .filter((item) => String(item.state || "").toLowerCase() === filters.state.toLowerCase() && (!filters.district || String(item.district || "").toLowerCase() === filters.district.toLowerCase()))
-        .map((item) => item.name)
-        .filter(Boolean)
-      : (meta.cities || []),
-    [coverage.cities, filters.state, filters.district, meta.cities],
-  );
+  const stateDistricts = master.districts;
+  const locationCities = master.cities;
+
   const updateLocation = (key, value) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
@@ -132,7 +169,7 @@ export default function DoctorSearch() {
     <section className="public-shell px-4 pb-7 pt-12 sm:px-6 lg:px-8 lg:pt-16"><div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.22em] text-orange-600">{t("p11.doctor_search.auto7")}</p><h1 className="mt-3 text-4xl font-black tracking-[-0.04em] text-slate-950 sm:text-5xl">{t("p11.doctor_search.auto8")}<span className="text-orange-600">{t("p11.doctor_search.auto9")}</span></h1><p className="mt-3 text-sm text-slate-500">{loading ? t("p12.search.searching") : t("p12.search.resultSummary", { count: pagination.total })}</p></div><div className="flex items-center gap-2"><div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-500 sm:flex"><ShieldCheck size={13} className="text-emerald-400"/>{t("p11.doctor_search.auto10")}</div><button onClick={() => setFiltersOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-black text-slate-500 lg:hidden"><SlidersHorizontal size={14} /> {t("p14.public.filters")} {activeCount ? `(${activeCount})` : ""}</button></div></div></section>
 
     <section className="public-shell px-4 sm:px-6 lg:px-8"><div className="grid gap-5 lg:grid-cols-[260px_1fr]">
-      <aside className={`${filtersOpen ? "block" : "hidden"} lg:block`}><PublicCard className="sticky top-24 p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><Filter size={14} className="text-orange-600"/><p className="text-xs font-black text-slate-950">{t("p11.doctor_search.auto11")}</p></div><button onClick={reset} className="text-xs font-black uppercase tracking-wider text-slate-600 hover:text-orange-600">{t("p11.doctor_search.auto12")}</button></div><div className="mt-5 space-y-4">{[["specialization",t("p12.search.specialization"),meta.specializations],["state",t("p12.search.state"),(coverage.states || []).map((item) => item.name)],["district",t("p12.search.district"),stateDistricts.map((item) => item.name)],["city",t("p12.search.city"),locationCities],["language",t("p12.search.language"),meta.languages]].map(([key,label,options]) => <label key={key} className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{label}</span><select value={filters[key]} disabled={key === "district" && !filters.state} onChange={(e) => key === "state" || key === "district" ? updateLocation(key, e.target.value) : update(key, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"><option value="" className="bg-white">{t("p12.search.all")} {label.toLowerCase()}s</option>{(options || []).map((x) => <option key={x} value={x} className="bg-white">{x}</option>)}</select></label>)}<label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto13")}</span><select value={filters.mode} onChange={(e) => update("mode", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none"><option value="" className="bg-white">{t("p11.doctor_search.auto14")}</option><option value="online" className="bg-white">{t("p11.doctor_search.auto15")}</option><option value="offline" className="bg-white">{t("p11.doctor_search.auto16")}</option><option value="home_visit" className="bg-white">{t("p11.doctor_search.auto17")}</option></select></label><label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto18")}</span><select value={filters.minExp} onChange={(e) => update("minExp", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none"><option value="" className="bg-white">{t("p11.doctor_search.auto19")}</option>{[5,10,15,20].map((x) => <option key={x} value={x} className="bg-white">{x}+ {t("p12.search.years")}</option>)}</select></label><label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto20")}</span><select value={filters.maxFees} onChange={(e) => update("maxFees", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none"><option value="" className="bg-white">{t("p11.doctor_search.auto21")}</option>{[500,1000,1500,2500,5000].map((x) => <option key={x} value={x} className="bg-white">{t("p12.search.upTo")} ₹{x}</option>)}</select></label><label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto22")}</span><div className="grid grid-cols-4 gap-1">{[3,3.5,4,4.5].map((x) => <button type="button" key={x} onClick={() => update("minRating", filters.minRating === String(x) ? "" : String(x))} className={`rounded-lg py-2 text-xs font-black ${filters.minRating === String(x) ? "bg-amber-500 text-slate-950" : "bg-slate-50 text-slate-600"}`}>{x}+</button>)}</div></label><div className="space-y-2 border-t border-slate-200 pt-4">{[["availableToday",t("p12.search.availableToday")],["availableTomorrow",t("p12.search.availableTomorrow")],["weekend",t("p12.search.weekend")],["emergency",t("p12.search.emergency")]].map(([key,label]) => <label key={key} className="flex items-center gap-2 text-xs font-semibold text-slate-500"><input type="checkbox" checked={filters[key] === "true"} onChange={() => update(key, filters[key] === "true" ? "" : "true")} className="accent-orange-500"/>{label}</label>)}</div></div></PublicCard></aside>
+      <aside className={`${filtersOpen ? "block" : "hidden"} lg:block`}><PublicCard className="sticky top-24 p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><Filter size={14} className="text-orange-600"/><p className="text-xs font-black text-slate-950">{t("p11.doctor_search.auto11")}</p></div><button onClick={reset} className="text-xs font-black uppercase tracking-wider text-slate-600 hover:text-orange-600">{t("p11.doctor_search.auto12")}</button></div><div className="mt-5 space-y-4">{[["specialization",t("p12.search.specialization"),master.specializations.map((item) => item.name)],["state",t("p12.search.state"),master.states.map((item) => item.name)],["district",t("p12.search.district"),stateDistricts.map((item) => item.name)],["city",t("p12.search.city"),locationCities.map((item) => item.name)],["language",t("p12.search.language"),meta.languages]].map(([key,label,options]) => <label key={key} className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{label}</span><select value={filters[key]} disabled={(key === "district" && !filters.state) || (key === "city" && !filters.district)} onChange={(e) => key === "state" || key === "district" ? updateLocation(key, e.target.value) : update(key, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"><option value="" className="bg-white">{t("p12.search.all")} {label.toLowerCase()}s</option>{(options || []).map((x) => <option key={x} value={x} className="bg-white">{x}</option>)}</select></label>)}<label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto13")}</span><select value={filters.mode} onChange={(e) => update("mode", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none"><option value="" className="bg-white">{t("p11.doctor_search.auto14")}</option><option value="online" className="bg-white">{t("p11.doctor_search.auto15")}</option><option value="offline" className="bg-white">{t("p11.doctor_search.auto16")}</option><option value="home_visit" className="bg-white">{t("p11.doctor_search.auto17")}</option></select></label><label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto18")}</span><select value={filters.minExp} onChange={(e) => update("minExp", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none"><option value="" className="bg-white">{t("p11.doctor_search.auto19")}</option>{[5,10,15,20].map((x) => <option key={x} value={x} className="bg-white">{x}+ {t("p12.search.years")}</option>)}</select></label><label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto20")}</span><select value={filters.maxFees} onChange={(e) => update("maxFees", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-950 outline-none"><option value="" className="bg-white">{t("p11.doctor_search.auto21")}</option>{[500,1000,1500,2500,5000].map((x) => <option key={x} value={x} className="bg-white">{t("p12.search.upTo")} ₹{x}</option>)}</select></label><label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-600">{t("p11.doctor_search.auto22")}</span><div className="grid grid-cols-4 gap-1">{[3,3.5,4,4.5].map((x) => <button type="button" key={x} onClick={() => update("minRating", filters.minRating === String(x) ? "" : String(x))} className={`rounded-lg py-2 text-xs font-black ${filters.minRating === String(x) ? "bg-amber-500 text-slate-950" : "bg-slate-50 text-slate-600"}`}>{x}+</button>)}</div></label><div className="space-y-2 border-t border-slate-200 pt-4">{[["availableToday",t("p12.search.availableToday")],["availableTomorrow",t("p12.search.availableTomorrow")],["weekend",t("p12.search.weekend")],["emergency",t("p12.search.emergency")]].map(([key,label]) => <label key={key} className="flex items-center gap-2 text-xs font-semibold text-slate-500"><input type="checkbox" checked={filters[key] === "true"} onChange={() => update(key, filters[key] === "true" ? "" : "true")} className="accent-orange-500"/>{label}</label>)}</div></div></PublicCard></aside>
 
       <div className="min-w-0">{metaError && <div role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-800">{metaError}</div>}<div className="flex flex-col gap-2 sm:flex-row"><label className="relative flex-1"><Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600"/><input value={searchValue} onChange={(e) => updateName(e.target.value)} placeholder={t("p11.doctor_search.auto37")} className="w-full rounded-xl border border-slate-200 bg-white py-3.5 pl-10 pr-10 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-500 focus:border-orange-400/30"/>{searchValue && <button onClick={() => updateName("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600"><X size={14}/></button>}</label><select value={sort} onChange={(e) => update("sort", e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3.5 text-xs font-bold text-slate-500 outline-none sm:w-48">{SORTS.map(([value,labelKey]) => <option key={value} value={value} className="bg-white">{t(labelKey)}</option>)}</select></div>
         {recent.length > 0 && <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1"><History size={13} className="shrink-0 text-slate-500"/>{recent.slice(0, 4).map((d) => <Link key={d.id} to={`/doctors/${d.id}`} className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:text-orange-600">{d.name}</Link>)}</div>}

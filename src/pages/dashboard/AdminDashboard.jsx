@@ -140,6 +140,7 @@ function AdminDashboard() {
   const growth = executive.growth || { patientsWeekOverWeek: null, doctorsWeekOverWeek: null };
   const platformHealth = executive.platformHealth || { score: null, breakdown: [] };
   const system = executive.system || { database: {}, socket: {}, channels: {} };
+  const content = data?.content;
 
   const needsAttention = data?.needsAttention;
   const activity = data?.activity || [];
@@ -243,6 +244,35 @@ function AdminDashboard() {
             tone="danger"
             caption={needsAttention ? `${needsAttention.counts.total} open item(s)` : undefined}
           />
+        </div>
+      )}
+
+      {content && (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <SectionHeader title="Doctor Workflow" subtitle="Live MongoDB counts" />
+            <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
+              {[["Total", content.doctors.total], ["Pending", content.doctors.pending], ["Approved", content.doctors.approved], ["Rejected", content.doctors.rejected], ["Active", content.doctors.active], ["Inactive", content.doctors.inactive]].map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                  <p className="mt-1 text-xl font-black text-slate-950">{value}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card>
+            <SectionHeader title="Content Workflow" subtitle="Services and articles from MongoDB" />
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {[["Services", content.services], ["Articles", content.articles]].map(([label, item]) => (
+                <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-black text-slate-950">{label} · {item.total}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600">
+                    <span>Draft {item.draft}</span><span>Review {item.review}</span><span>Published {item.published}</span><span>Archived {item.archived}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
         </div>
       )}
 

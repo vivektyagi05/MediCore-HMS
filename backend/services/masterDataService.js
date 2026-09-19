@@ -289,11 +289,11 @@ export const bootstrapMasterDataFromDoctors = async () => {
   }
 
   // Existing MasterData documents created by the old unsafe bootstrap are not
-  // authoritative. Deactivate only values outside the deterministic seed;
-  // they remain in the collection for auditability rather than being deleted.
+  // authoritative. Preserve authoritative LGD rows imported by the dedicated
+  // migration and deactivate only legacy rows outside the repository seed.
   const seededIds = [...seeded.values()].map((item) => item._id);
   const deactivated = await MasterData.updateMany(
-    { _id: { $nin: seededIds }, active: true },
+    { _id: { $nin: seededIds }, source: { $nin: ["lgd"] }, active: true },
     { $set: { active: false, source: "legacy" } },
   );
 

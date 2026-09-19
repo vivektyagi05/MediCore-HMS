@@ -10,6 +10,7 @@ import Doctor from "../models/Doctor.js";
 import Review from "../models/Review.js";
 import Service from "../models/Service.js";
 import CMSPage from "../models/CMSPage.js";
+import User from "../models/User.js";
 import HospitalSetting from "../models/HospitalSetting.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
@@ -26,6 +27,22 @@ import { listMasterData, MASTER_KINDS, resolveCanonicalFilterValue, validateCano
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 const safeDoctor = (doc, req, metrics = {}) => serializeDoctorPublicProfile(doc, req, metrics);
+const PUBLIC_DOCTOR_BASE = Object.freeze({
+  isVerified: true,
+  verificationStatus: "approved",
+  isActive: true,
+});
+
+const getPublicDoctorUserIds = async () => {
+  const users = await User.find({ role: "doctor", isActive: true }).select("_id").lean();
+  return users.map((user) => user._id);
+};
+
+const publicDoctorFilter = (userIds) => ({
+  ...PUBLIC_DOCTOR_BASE,
+  userId: { $in: userIds },
+});
+
 
 const safeReview = (r) => ({
   id: r._id,
@@ -81,26 +98,23 @@ export const getHospitalInfo = asyncHandler(async (_req, res) => {
 // ─── Home Page Stats ─────────────────────────────────────────────────────────
 
 export const getHomeStats = asyncHandler(async (_req, res) => {
+  const publicUserIds = await getPublicDoctorUserIds();
+  const publicDoctorBase = publicDoctorFilter(publicUserIds);
+  const publicDoctors = await Doctor.find(publicDoctorBase).select("_id").lean();
+  const publicDoctorIds = publicDoctors.map((doctor) => doctor._id);
   const [totalDoctors, verifiedDoctors, totalConsultations] = await Promise.all([
-    Doctor.countDocuments({ isActive: true }),
-    Doctor.countDocuments({ isVerified: true, verificationStatus: "approved", isActive: true }),
+    Promise.resolve(publicDoctors.length),
+    Promise.resolve(publicDoctors.length),
     Appointment.countDocuments({
+      doctorId: { $in: publicDoctorIds },
       status: { $in: ["completed", "review_eligible", "consultation_completed"] },
     }),
   ]);
 
-  const specializations = await Doctor.distinct("specialization", {
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
-  });
-
-  const cities = await Doctor.distinct("city", {
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
-    city: { $ne: "" },
-  });
+  const [specializations, cities] = await Promise.all([
+    Doctor.distinct("specialization", publicDoctorBase),
+    Doctor.distinct("city", { ...publicDoctorBase, city: { $ne: "" } }),
+  ]);
 
   res.status(200).json({
     success: true,
@@ -119,7 +133,7 @@ export const getHomeStats = asyncHandler(async (_req, res) => {
 // ─── Home Page: Featured / Top-Rated / Recently Verified ────────────────────
 
 export const getFeaturedDoctors = asyncHandler(async (req, res) => {
-  const baseFilter = { isVerified: true, verificationStatus: "approved", isActive: true };
+  const baseFilter = publicDoctorFilter(await getPublicDoctorUserIds());
 
   const [topRated, recentlyVerified] = await Promise.all([
     Doctor.find({ ...baseFilter, rating: { $gt: 0 } })
@@ -157,17 +171,15 @@ export const getFeaturedDoctors = asyncHandler(async (req, res) => {
 // ─── Home Page: Specializations + Cities for search dropdowns ───────────────
 
 export const getSearchMeta = asyncHandler(async (_req, res) => {
-  const baseFilter = { isVerified: true, verificationStatus: "approved", isActive: true };
+  const baseFilter = publicDoctorFilter(await getPublicDoctorUserIds());
 
-  const [specializationMaster, stateMaster, languageValues] = await Promise.all([
-    listMasterData({ kind: MASTER_KINDS.SPECIALIZATION }),
-    listMasterData({ kind: MASTER_KINDS.STATE }),
+  const includeMasterData = _req.query?.masterData !== "false";
+  const [specializationMaster, stateMaster, districtMaster, cityMaster, languageValues] = await Promise.all([
+    includeMasterData ? listMasterData({ kind: MASTER_KINDS.SPECIALIZATION }) : Promise.resolve([]),
+    includeMasterData ? listMasterData({ kind: MASTER_KINDS.STATE }) : Promise.resolve([]),
+    includeMasterData ? listMasterData({ kind: MASTER_KINDS.DISTRICT }) : Promise.resolve([]),
+    includeMasterData ? listMasterData({ kind: MASTER_KINDS.CITY }) : Promise.resolve([]),
     Doctor.distinct("languages", baseFilter),
-  ]);
-
-  const [districtMaster, cityMaster] = await Promise.all([
-    listMasterData({ kind: MASTER_KINDS.DISTRICT }),
-    listMasterData({ kind: MASTER_KINDS.CITY }),
   ]);
 
   res.status(200).json({
@@ -201,11 +213,7 @@ const dayBounds = (offsetDays) => {
 export const searchDoctors = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
 
-  const filter = {
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
-  };
+  const filter = publicDoctorFilter(await getPublicDoctorUserIds());
 
   if (req.query.specializationMasterId) {
     const specialization = await resolveCanonicalFilterValue(req.query.specializationMasterId, MASTER_KINDS.SPECIALIZATION, "specialization");
@@ -278,7 +286,7 @@ export const searchDoctors = asyncHandler(async (req, res) => {
     // Join with User model — real field, doctor's display name
     const matchingUsers = await mongoose
       .model("User")
-      .find({ name: new RegExp(req.query.name.trim(), "i"), role: "doctor" }, "_id")
+      .find({ name: new RegExp(req.query.name.trim(), "i"), role: "doctor", isActive: true }, "_id")
       .lean();
     filter.userId = { $in: matchingUsers.map((u) => u._id) };
   }
@@ -354,7 +362,7 @@ export const searchDoctors = asyncHandler(async (req, res) => {
 
 // ─── P12 Geographic Coverage ─────────────────────────────────────────────────
 export const getDoctorCoverage = asyncHandler(async (req, res) => {
-  const baseFilter = { isVerified: true, verificationStatus: "approved", isActive: true };
+  const baseFilter = publicDoctorFilter(await getPublicDoctorUserIds());
   if (req.query.specialization) baseFilter.specialization = new RegExp(req.query.specialization.trim(), "i");
   if (req.query.mode) baseFilter.consultationMode = { $in: [req.query.mode] };
   if (req.query.language) baseFilter.languages = { $in: [new RegExp(req.query.language.trim(), "i")] };
@@ -363,7 +371,7 @@ export const getDoctorCoverage = asyncHandler(async (req, res) => {
   if (req.query.minRating) baseFilter.rating = { $gte: Number(req.query.minRating) };
   if (req.query.name) {
     const matchingUsers = await mongoose.model("User")
-      .find({ name: new RegExp(req.query.name.trim(), "i"), role: "doctor" }, "_id")
+      .find({ name: new RegExp(req.query.name.trim(), "i"), role: "doctor", isActive: true }, "_id")
       .lean();
     baseFilter.userId = { $in: matchingUsers.map((user) => user._id) };
   }
@@ -496,9 +504,7 @@ export const getPublicDoctorAvailability = asyncHandler(async (req, res) => {
 
   const doctors = await Doctor.find({
     _id: { $in: doctorIds },
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
+    ...publicDoctorFilter(await getPublicDoctorUserIds()),
   }).select("_id availability blockedDates").lean();
 
   const today = new Date();
@@ -536,9 +542,7 @@ export const getPublicNextAvailability = asyncHandler(async (req, res) => {
   }
   const doctor = await Doctor.findOne({
     _id: doctorId,
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
+    ...publicDoctorFilter(await getPublicDoctorUserIds()),
   }).select("_id").lean();
   if (!doctor) throw new AppError("Doctor is not publicly available", 404);
   return getNextAvailableSlot(req, res, (error) => {
@@ -555,11 +559,9 @@ export const getDoctorPublicProfile = asyncHandler(async (req, res) => {
 
   const doctor = await Doctor.findOne({
     _id: req.params.id,
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
+    ...publicDoctorFilter(await getPublicDoctorUserIds()),
   })
-    .populate("userId", "name")
+    .populate("userId", "name role isActive")
     .lean();
 
   if (!doctor) throw new AppError("Doctor not found or not available", 404);
@@ -623,9 +625,7 @@ export const getDoctorPublicReviews = asyncHandler(async (req, res) => {
   // confirm a non-public doctor exists and read reviews naming them.
   const doctor = await Doctor.findOne({
     _id: req.params.id,
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
+    ...publicDoctorFilter(await getPublicDoctorUserIds()),
   }).select("_id").lean();
   if (!doctor) throw new AppError("Doctor not found or not available", 404);
 
@@ -669,9 +669,7 @@ export const compareDoctors = asyncHandler(async (req, res) => {
 
   const doctors = await Doctor.find({
     _id: { $in: ids },
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
+    ...publicDoctorFilter(await getPublicDoctorUserIds()),
   })
     .populate("userId", "name")
     .lean();
@@ -718,20 +716,18 @@ export const getSimilarDoctors = asyncHandler(async (req, res) => {
     throw new AppError("Invalid doctor ID", 400);
   }
 
+  const publicUserIds = await getPublicDoctorUserIds();
+  const publicBase = publicDoctorFilter(publicUserIds);
   const source = await Doctor.findOne({
     _id: req.params.id,
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
+    ...publicBase,
   }).select("specialization city").lean();
   if (!source) throw new AppError("Doctor not found", 404);
 
   const baseFilter = {
+    ...publicBase,
     _id: { $ne: req.params.id },
     specialization: source.specialization,
-    isVerified: true,
-    verificationStatus: "approved",
-    isActive: true,
   };
 
   // Prefer same city, but widen to the whole specialization if that's too few —
@@ -771,7 +767,11 @@ export const getSimilarDoctors = asyncHandler(async (req, res) => {
 // ─── Public Testimonials (highest-rated reviews across the platform) ─────────
 
 export const getPublicTestimonials = asyncHandler(async (_req, res) => {
+  const publicUserIds = await getPublicDoctorUserIds();
+  const publicDoctors = await Doctor.find(publicDoctorFilter(publicUserIds)).select("_id").lean();
+  const publicDoctorIds = publicDoctors.map((doctor) => doctor._id);
   const reviews = await Review.find({
+    doctorId: { $in: publicDoctorIds },
     rating: { $gte: 4 },
     comment: { $ne: "", $exists: true },
     adminDeleted: { $ne: true },
@@ -1019,7 +1019,7 @@ export const getDoctorReputation = asyncHandler(async (req, res) => {
 // ─── Public: Browse by Specialty (real doctor counts, no fabricated numbers) ─
 
 export const getSpecialtyBrowse = asyncHandler(async (_req, res) => {
-  const baseFilter = { isVerified: true, verificationStatus: "approved", isActive: true };
+  const baseFilter = publicDoctorFilter(await getPublicDoctorUserIds());
 
   const counts = await Doctor.aggregate([
     { $match: baseFilter },
@@ -1052,17 +1052,17 @@ export const getSpecialtyBrowse = asyncHandler(async (_req, res) => {
 // ─── Public: Services + Articles ────────────────────────────────────────────
 // Public serialization is canonical and publication is enforced at query time.
 
-const publishedServiceFilter = { $or: [{ status: "published", visibility: "public" }, { status: { $exists: false }, isActive: true }] };
-const publishedArticleFilter = { $or: [{ status: "published", visibility: "public" }, { status: { $exists: false }, isPublished: true }] };
+const publishedServiceFilter = { status: "published", visibility: "public", isActive: true };
+const publishedArticleFilter = { status: "published", visibility: "public", isPublished: true };
 
 const populateServiceRelations = (query) => query
-  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus verifiedAt profilePhoto createdAt" })
+  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus verifiedAt profilePhoto createdAt", populate: { path: "userId", select: "name role isActive" } })
   .populate({ path: "relatedServices", select: "title slug shortDescription description benefits eligibility preparation procedureInformation duration consultationModes price category relatedSpecialties relatedDoctors relatedServices status visibility featured displayOrder localizedContent seo icon image createdAt updatedAt" });
 
 const populateArticleRelations = (query) => query
   .populate({ path: "author", select: "name" })
   .populate({ path: "relatedServices", select: "title slug shortDescription description benefits eligibility preparation procedureInformation duration consultationModes price category relatedSpecialties relatedDoctors relatedServices status visibility featured displayOrder localizedContent seo icon image createdAt updatedAt" })
-  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus verifiedAt profilePhoto createdAt" });
+  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus verifiedAt profilePhoto createdAt", populate: { path: "userId", select: "name role isActive" } });
 
 export const getPublicServices = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);

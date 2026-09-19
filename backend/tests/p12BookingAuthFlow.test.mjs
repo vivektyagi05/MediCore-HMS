@@ -37,8 +37,10 @@ assert.match(appointmentController, /Insurance\.findOne\([\s\S]*?userId:\s*req\.
   "insurance attachment must remain patient-owned");
 assert.match(appointmentController, /MedicalReport\.find\([\s\S]*?userId:\s*req\.user\._id/,
   "report attachment must remain patient-owned");
-assert.match(roles, /RECEPTIONIST:\s*"receptionist"/,
-  "the booking flow audit must account for the application's receptionist role");
+assert.doesNotMatch(roles, /RECEPTIONIST:\s*"receptionist"/,
+  "the runtime role model must not contain RECEPTIONIST");
+assert.doesNotMatch(roles, /ADMIN:\s*"admin"/,
+  "the runtime role model must not contain ADMIN");
 
 assert.match(bookingIntent, /value\.startsWith\("\/\/"\)/,
   "redirect validation must reject protocol-relative open redirects");

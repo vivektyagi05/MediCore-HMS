@@ -23,7 +23,7 @@ export const ACTION_LIBRARY = Object.freeze([
     category: "notification",
     description: "Sends a real in-app notification to every active user of a role.",
     configFields: [
-      { key: "role", label: "Role", type: "select", options: ["super_admin", "doctor", "receptionist", "patient"] },
+      { key: "role", label: "Role", type: "select", options: ["super_admin", "doctor", "patient"] },
       { key: "title", label: "Title", type: "text" },
       { key: "message", label: "Message", type: "textarea" },
       { key: "severity", label: "Severity", type: "select", options: ["info", "warning", "critical"] },

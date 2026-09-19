@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getApiErrorMessage } from "../api/axios";
 import { realtimeApi } from "../api/realtimeApi";
 import { SOCKET_EVENTS } from "../socket/socketEvents";
@@ -17,12 +17,16 @@ export function RealtimeProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [dashboardSyncTick, setDashboardSyncTick] = useState(0);
+  const [topAnnouncement, setTopAnnouncement] = useState(null);
+  const notificationIdsRef = useRef(new Set());
 
   const loadNotifications = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
       const response = await realtimeApi.getNotifications({ limit: 25 });
-      setNotifications(response.data.notifications || []);
+      const nextNotifications = response.data.notifications || [];
+      setNotifications(nextNotifications);
+      notificationIdsRef.current = new Set(nextNotifications.map((notification) => notification._id));
       setUnreadCount(response.data.unreadCount || 0);
     } catch (error) {
       toast.error(getApiErrorMessage(error));
@@ -45,18 +49,30 @@ export function RealtimeProvider({ children }) {
       setSocket(null);
       setConnectionStatus("offline");
       setNotifications([]);
+      notificationIdsRef.current.clear();
       setUnreadCount(0);
+      setTopAnnouncement(null);
       return undefined;
     }
 
     const activeSocket = connectSocket(token);
     setSocket(activeSocket);
     setConnectionStatus(activeSocket.connected ? "online" : "connecting");
+
+    // Initial REST hydration is started immediately so persisted notifications
+    // remain available even when the socket handshake is slow/unavailable.
+    // The first socket `connect` event must not repeat those same reads; only
+    // a genuine reconnect needs a fresh persisted-state sync.
     loadNotifications();
     loadPresence();
+    let initialConnection = true;
 
     const onConnect = () => {
       setConnectionStatus("online");
+      if (initialConnection) {
+        initialConnection = false;
+        return;
+      }
       loadNotifications();
       loadPresence();
     };
@@ -74,9 +90,14 @@ export function RealtimeProvider({ children }) {
       }
     };
     const onNotification = (notification) => {
+      const isNew = !notificationIdsRef.current.has(notification._id);
+      notificationIdsRef.current.add(notification._id);
       setNotifications((current) => [notification, ...current.filter((item) => item._id !== notification._id)].slice(0, 25));
-      setUnreadCount((current) => current + 1);
-      toast.success(notification.title);
+      if (isNew) {
+        setUnreadCount((current) => current + (notification.readAt ? 0 : 1));
+        setTopAnnouncement(notification);
+        toast.success(notification.title);
+      }
     };
     const onPresence = (presence) => {
       setOnlineUsers((current) => {
@@ -145,8 +166,10 @@ export function RealtimeProvider({ children }) {
       dashboardSyncTick,
       loadNotifications,
       markNotificationRead,
+      topAnnouncement,
+      setTopAnnouncement,
     }),
-    [connectionStatus, dashboardSyncTick, loadNotifications, markNotificationRead, notifications, onlineUsers, socket, unreadCount],
+    [connectionStatus, dashboardSyncTick, loadNotifications, markNotificationRead, notifications, onlineUsers, socket, unreadCount, topAnnouncement],
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

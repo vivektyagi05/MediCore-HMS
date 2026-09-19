@@ -9,6 +9,7 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
 import { clinicalEmitter } from "../realtime/clinicalEmitter.js";
 import { practiceEmitter } from "../realtime/practiceEmitter.js";
+import { getVerificationCycleId } from "../utils/verificationCycle.js";
 import { ensureDoctorProfileForUser } from "../services/doctorProfileService.js";
 import { logger } from "../utils/logger.js";
 import { validateAndDeriveAvailability } from "../utils/slotEngine.js";
@@ -17,6 +18,7 @@ import { TRIGGER_TYPES } from "../automation-studio/triggerRegistry.js";
 import { clampPagination, buildPaginationMeta } from "../utils/paginationValidation.js";
 import { roomManager } from "../socket/roomManager.js";
 import { emailService } from "../services/emailService.js";
+import { applyDoctorMasterData, resolveDoctorMasterData } from "../services/masterDataService.js";
 import {
   computeRiskLevel,
   resolveFollowUpState,
@@ -118,6 +120,8 @@ export const createDoctor = asyncHandler(async (req, res) => {
     throw new AppError("Validation failed", 400, validation.errors);
   }
 
+  const masterData = await resolveDoctorMasterData(req.body, { allowLegacyOther: true });
+
   const user = await User.findById(req.body.userId);
 
   if (!user || !user.isActive) {
@@ -143,7 +147,7 @@ export const createDoctor = asyncHandler(async (req, res) => {
     rating: req.body.rating || 0,
   });
 
-  doctor.specialization = req.body.specialization.trim();
+  applyDoctorMasterData(doctor, masterData);
   doctor.experience = Number(req.body.experience);
   doctor.fees = Number(req.body.fees);
   doctor.availability = derivedAvailability;
@@ -170,6 +174,9 @@ export const updateDoctor = asyncHandler(async (req, res) => {
     throw new AppError("Validation failed", 400, validation.errors);
   }
 
+  const masterPayload = { ...await Doctor.findById(req.params.id).lean(), ...req.body };
+  const masterData = await resolveDoctorMasterData(masterPayload, { allowLegacyOther: true });
+
   const allowedUpdates = [
     "specialization",
     "experience",
@@ -191,10 +198,14 @@ export const updateDoctor = asyncHandler(async (req, res) => {
     }
   }
 
-  const doctor = await Doctor.findByIdAndUpdate(req.params.id, updates, {
-    returnDocument: "after",
-    runValidators: true,
-  }).populate("userId", "name email role isActive");
+  const doctor = await Doctor.findById(req.params.id);
+  if (!doctor) {
+    throw new AppError("Doctor profile not found", 404);
+  }
+  Object.assign(doctor, updates);
+  applyDoctorMasterData(doctor, masterData);
+  await doctor.save();
+  await doctor.populate("userId", "name email role isActive");
 
   if (!doctor) {
     throw new AppError("Doctor profile not found", 404);
@@ -638,6 +649,8 @@ export const approveDoctor = asyncHandler(
       });
     }
 
+    const cycleId = getVerificationCycleId(existing);
+
     const doctor = await Doctor.findOneAndUpdate(
       {
         _id: req.params.id,
@@ -700,6 +713,7 @@ export const approveDoctor = asyncHandler(
       await practiceEmitter.verificationStatusChanged({
         doctorUserId: doctor.userId,
         doctorId: doctor._id,
+        cycleId,
         status: "approved",
         notes: req.body.notes || "",
       });
@@ -787,6 +801,8 @@ export const rejectDoctor = asyncHandler(
       });
     }
 
+    const cycleId = getVerificationCycleId(existing);
+
     const doctor = await Doctor.findOneAndUpdate(
       {
         _id: req.params.id,
@@ -843,6 +859,7 @@ export const rejectDoctor = asyncHandler(
       await practiceEmitter.verificationStatusChanged({
         doctorUserId: doctor.userId,
         doctorId: doctor._id,
+        cycleId,
         status: "rejected",
         notes: doctor.verificationNotes,
       });

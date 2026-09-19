@@ -12,7 +12,8 @@
     "migrate:content-lifecycle": "node migrations/003_content_lifecycle_backfill.js",
     "audit:integrity": "node migrations/auditDatabaseIntegrity.js",
     "test": "node tests/run-all.mjs",
-    "test:p20-seo": "node tests/p20SeoInfrastructure.test.mjs && node tests/p20SeoStaticContract.test.mjs && node tests/p20SeoValidation.test.mjs"
+    "test:p20-seo": "node tests/p20SeoInfrastructure.test.mjs && node tests/p20SeoStaticContract.test.mjs && node tests/p20SeoValidation.test.mjs",
+    "migrate:master-data": "node migrations/004_master_data_backfill.js"
   },
   "dependencies": {
     "bcrypt": "latest",

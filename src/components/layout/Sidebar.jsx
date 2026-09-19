@@ -81,7 +81,7 @@ function Sidebar({ isOpen, onClose, collapsed = false, onToggleCollapsed }) {
   const navigation = buildNavigation(t);
   const role = JSON.parse(localStorage.getItem("hms_user") || "null")?.role;
   const visibleNavigation = navigation.filter((item) => item.roles.includes(role));
-  const isAdmin = role === "admin" || role === "super_admin";
+  const isAdmin = role === "super_admin";
 
   // Group role-visible items by their configured group, preserving
   // GROUP_ORDER and skipping any group with no visible items for this role

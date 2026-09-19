@@ -27,6 +27,7 @@ import { buildDoctorRevenueIntelligence } from "../doctor/doctorEarningsControll
 import { buildDoctorReviewIntelligence } from "../doctor/doctorReviewController.js";
 import { buildDoctorReputationIntelligence } from "../publicController.js";
 import { buildDoctorProfilePhotoUrl } from "../../services/doctorPublicSerializer.js";
+import { MASTER_KINDS, resolveCanonicalFilterValue, validateCanonicalLocationFilters } from "../../services/masterDataService.js";
 
 const getPagination = (query) => {
   const page = Math.max(Number(query.page) || 1, 1);
@@ -65,7 +66,29 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
   const match = {};
 
   if (req.query.verificationStatus) match.verificationStatus = req.query.verificationStatus;
-  if (req.query.specialization) match.specialization = new RegExp(req.query.specialization, "i");
+
+  if (req.query.specializationMasterId) {
+    const specialization = await resolveCanonicalFilterValue(req.query.specializationMasterId, MASTER_KINDS.SPECIALIZATION, "specialization");
+    match.specializationMasterId = specialization._id;
+  } else if (req.query.specialization && mongoose.Types.ObjectId.isValid(req.query.specialization)) {
+    const specialization = await resolveCanonicalFilterValue(req.query.specialization, MASTER_KINDS.SPECIALIZATION, "specialization");
+    match.specializationMasterId = specialization._id;
+  } else if (req.query.specialization) {
+    match.specialization = new RegExp(req.query.specialization, "i");
+  }
+
+  const canonicalLocation = await validateCanonicalLocationFilters({
+    state: req.query.stateMasterId || (req.query.state && mongoose.Types.ObjectId.isValid(req.query.state) ? req.query.state : undefined),
+    district: req.query.districtMasterId || (req.query.district && mongoose.Types.ObjectId.isValid(req.query.district) ? req.query.district : undefined),
+    city: req.query.cityMasterId || (req.query.city && mongoose.Types.ObjectId.isValid(req.query.city) ? req.query.city : undefined),
+  });
+  if (canonicalLocation.state) match.stateMasterId = canonicalLocation.state._id;
+  if (canonicalLocation.district) match.districtMasterId = canonicalLocation.district._id;
+  if (canonicalLocation.city) match.cityMasterId = canonicalLocation.city._id;
+
+  if (req.query.state && !mongoose.Types.ObjectId.isValid(req.query.state) && !req.query.stateMasterId) match.state = new RegExp(req.query.state, "i");
+  if (req.query.district && !mongoose.Types.ObjectId.isValid(req.query.district) && !req.query.districtMasterId) match.district = new RegExp(req.query.district, "i");
+  if (req.query.city && !mongoose.Types.ObjectId.isValid(req.query.city) && !req.query.cityMasterId) match.city = new RegExp(req.query.city, "i");
   if (req.query.consultationMode) match.consultationMode = req.query.consultationMode;
   if (req.query.status === "active") match.isActive = true;
   if (req.query.status === "inactive") match.isActive = false;
@@ -102,14 +125,17 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
     {
       $lookup: {
         from: "appointments",
-        localField: "_id",
-        foreignField: "doctorId",
-        as: "appointments",
+        let: { doctorId: "$_id" },
+        pipeline: [
+          { $match: { $expr: { $eq: ["$doctorId", "$$doctorId"] } } },
+          { $count: "count" },
+        ],
+        as: "appointmentStats",
       },
     },
     {
       $addFields: {
-        appointmentCount: { $size: "$appointments" },
+        appointmentCount: { $ifNull: [{ $arrayElemAt: ["$appointmentStats.count", 0] }, 0] },
         pendingDocumentsCount: {
           $size: {
             $filter: {
@@ -120,20 +146,20 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
         },
       },
     },
-    { $project: { appointments: 0, "user.password": 0 } },
+    { $project: { appointmentStats: 0, "user.password": 0 } },
     { $sort: sortBy },
     { $skip: skip },
     { $limit: limit },
   );
 
-  const countPipeline = [
-    { $match: match },
-    { $lookup: { from: "users", localField: "userId", foreignField: "_id", as: "user" } },
-    { $unwind: "$user" },
-  ];
+  const countPipeline = [{ $match: match }];
   if (req.query.search) {
     const term = new RegExp(req.query.search, "i");
-    countPipeline.push({ $match: { $or: [{ "user.name": term }, { "user.email": term }] } });
+    countPipeline.push(
+      { $lookup: { from: "users", localField: "userId", foreignField: "_id", as: "user" } },
+      { $unwind: "$user" },
+      { $match: { $or: [{ "user.name": term }, { "user.email": term }] } },
+    );
   }
   countPipeline.push({ $count: "total" });
 

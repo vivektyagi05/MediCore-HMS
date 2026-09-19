@@ -73,6 +73,23 @@ const doctorSchema = new mongoose.Schema(
       index: true,
       default: "General Medicine",
     },
+    specializationMasterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MasterData",
+      default: null,
+      index: true,
+    },
+    specializationType: {
+      type: String,
+      enum: ["MASTER", "OTHER"],
+      default: "MASTER",
+    },
+    specializationOther: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 100,
+    },
     experience: {
       type: Number,
       required: true,
@@ -244,11 +261,45 @@ const doctorSchema = new mongoose.Schema(
         trim: true,
         default: "",
       },
+      cityMasterId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "MasterData",
+        default: null,
+        index: true,
+      },
+      cityType: {
+        type: String,
+        enum: ["MASTER", "OTHER"],
+        default: "OTHER",
+      },
+      cityOther: {
+        type: String,
+        trim: true,
+        default: "",
+        maxlength: 100,
+      },
 
       state: {
         type: String,
         trim: true,
         default: "",
+      },
+      stateMasterId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "MasterData",
+        default: null,
+        index: true,
+      },
+      stateType: {
+        type: String,
+        enum: ["MASTER", "OTHER"],
+        default: "OTHER",
+      },
+      stateOther: {
+        type: String,
+        trim: true,
+        default: "",
+        maxlength: 100,
       },
 
       // P12: optional authoritative geography. District/coordinates are never
@@ -259,6 +310,23 @@ const doctorSchema = new mongoose.Schema(
         default: "",
         maxlength: 120,
         index: true,
+      },
+      districtMasterId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "MasterData",
+        default: null,
+        index: true,
+      },
+      districtType: {
+        type: String,
+        enum: ["MASTER", "OTHER"],
+        default: "OTHER",
+      },
+      districtOther: {
+        type: String,
+        trim: true,
+        default: "",
+        maxlength: 120,
       },
 
       location: {
@@ -410,8 +478,17 @@ const doctorSchema = new mongoose.Schema(
               name: { type: String, required: true, trim: true, maxlength: 160 },
               address: { type: String, trim: true, default: "", maxlength: 300 },
               city: { type: String, trim: true, default: "", maxlength: 100 },
+              cityMasterId: { type: mongoose.Schema.Types.ObjectId, ref: "MasterData", default: null },
+              cityType: { type: String, enum: ["MASTER", "OTHER"], default: "OTHER" },
+              cityOther: { type: String, trim: true, default: "", maxlength: 100 },
               state: { type: String, trim: true, default: "", maxlength: 100 },
+              stateMasterId: { type: mongoose.Schema.Types.ObjectId, ref: "MasterData", default: null },
+              stateType: { type: String, enum: ["MASTER", "OTHER"], default: "OTHER" },
+              stateOther: { type: String, trim: true, default: "", maxlength: 100 },
               district: { type: String, trim: true, default: "", maxlength: 120 },
+              districtMasterId: { type: mongoose.Schema.Types.ObjectId, ref: "MasterData", default: null },
+              districtType: { type: String, enum: ["MASTER", "OTHER"], default: "OTHER" },
+              districtOther: { type: String, trim: true, default: "", maxlength: 120 },
               location: {
                 type: { type: String, enum: ["Point"], default: undefined },
                 coordinates: {

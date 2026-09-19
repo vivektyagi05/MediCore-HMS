@@ -10,8 +10,10 @@ import { notificationEmitter } from "./notificationEmitter.js";
 import { roomManager } from "../socket/roomManager.js";
 import { getIO } from "../socket/socketServer.js";
 
+import { buildVerificationEventKey } from "../utils/verificationCycle.js";
+
 export const practiceEmitter = {
-  async verificationStatusChanged({ doctorUserId, doctorId, status, notes }) {
+  async verificationStatusChanged({ doctorUserId, doctorId, cycleId, status, notes }) {
     const titles = {
       approved: "Your verification was approved",
       rejected: "Your verification was rejected",
@@ -24,7 +26,7 @@ export const practiceEmitter = {
       entityType: "Doctor",
       entityId: doctorId,
       severity: status === "rejected" ? "warning" : "info",
-      eventKey: `verification:${doctorId}:${status}:${Date.now()}`,
+      eventKey: buildVerificationEventKey({ doctorId, cycleId: cycleId?.toString(), status }),
     });
     getIO()?.to(roomManager.userRoom(doctorUserId)).emit("practice:verification-updated", {
       doctorId,

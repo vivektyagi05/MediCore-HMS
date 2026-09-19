@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Image, Plus, Trash2, RefreshCw, Save, Upload, X } from "lucide-react";
 import { practiceApi } from "../../api/practiceApi";
+import { masterDataApi } from "../../api/masterDataApi";
 import Button from "../../components/ui/Button";
 import PracticeManagementNav from "../../components/practice/PracticeManagementNav";
 import { useToast } from "../../context/ToastContext";
@@ -98,8 +99,12 @@ export default function DoctorProfessionalProfile() {
   const [baseline, setBaseline] = useState(null);
   const [profilePhoto, setProfilePhoto] = useState("");
   const [identity, setIdentity] = useState({
-    specialization: "", qualification: "", collegeName: "", graduationYear: "",
-    licenseNumber: "", medicalCouncil: "", hospitalName: "", city: "", state: "", district: "", bio: "",
+    specialization: "", specializationMasterId: "", specializationType: "OTHER", specializationOther: "",
+    qualification: "", collegeName: "", graduationYear: "",
+    licenseNumber: "", medicalCouncil: "", hospitalName: "",
+    city: "", cityMasterId: "", cityType: "OTHER", cityOther: "",
+    state: "", stateMasterId: "", stateType: "OTHER", stateOther: "",
+    district: "", districtMasterId: "", districtType: "OTHER", districtOther: "", bio: "",
   });
   const [languages, setLanguages] = useState([]);
   const [subSpecialties, setSubSpecialties] = useState([]);
@@ -110,6 +115,7 @@ export default function DoctorProfessionalProfile() {
   const [memberships, setMemberships] = useState([]);
   const [clinics, setClinics] = useState([]);
   const [insuranceAccepted, setInsuranceAccepted] = useState([]);
+  const [master, setMaster] = useState({ specializations: [], states: [], districts: [], cities: [] });
 
   const snapshot = (values = {}) => JSON.stringify(values);
   const currentSnapshot = () => snapshot({ identity, languages, subSpecialties, education, experienceEntries, awards, researchPublications, memberships, clinics, insuranceAccepted });
@@ -132,9 +138,13 @@ export default function DoctorProfessionalProfile() {
       const d = res.data;
       setProfilePhoto(d.profilePhoto || "");
       setIdentity({
-        specialization: d.specialization || "", qualification: d.qualification || "", collegeName: d.collegeName || "",
+        specialization: d.specialization || "", specializationMasterId: d.specializationMasterId || "", specializationType: d.specializationType || "OTHER", specializationOther: d.specializationOther || "",
+        qualification: d.qualification || "", collegeName: d.collegeName || "",
         graduationYear: d.graduationYear || "", licenseNumber: d.licenseNumber || "", medicalCouncil: d.medicalCouncil || "",
-        hospitalName: d.hospitalName || "", city: d.city || "", state: d.state || "", district: d.district || "", bio: d.bio || "",
+        hospitalName: d.hospitalName || "",
+        city: d.city || "", cityMasterId: d.cityMasterId || "", cityType: d.cityType || "OTHER", cityOther: d.cityOther || "",
+        state: d.state || "", stateMasterId: d.stateMasterId || "", stateType: d.stateType || "OTHER", stateOther: d.stateOther || "",
+        district: d.district || "", districtMasterId: d.districtMasterId || "", districtType: d.districtType || "OTHER", districtOther: d.districtOther || "", bio: d.bio || "",
       });
       setLanguages(d.languages || []);
       setSubSpecialties(d.subSpecialties || []);
@@ -156,6 +166,28 @@ export default function DoctorProfessionalProfile() {
       setError(err?.response?.data?.message || p("emptyError"));
     } finally { setLoading(false); }
   }, [t]);
+
+  useEffect(() => {
+    Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
+      .then(([specializations, states]) => setMaster((current) => ({ ...current, specializations: specializations.data || [], states: states.data || [] })))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!identity.stateMasterId) {
+      setMaster((current) => ({ ...current, districts: [], cities: [] }));
+      return;
+    }
+    masterDataApi.getDistricts(identity.stateMasterId).then((response) => setMaster((current) => ({ ...current, districts: response.data || [], cities: [] }))).catch(() => {});
+  }, [identity.stateMasterId]);
+
+  useEffect(() => {
+    if (!identity.districtMasterId) {
+      setMaster((current) => ({ ...current, cities: [] }));
+      return;
+    }
+    masterDataApi.getCities(identity.districtMasterId).then((response) => setMaster((current) => ({ ...current, cities: response.data || [] }))).catch(() => {});
+  }, [identity.districtMasterId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -206,6 +238,21 @@ export default function DoctorProfessionalProfile() {
 
   if (loading) return <div className="space-y-4 animate-pulse">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="glass-card h-40 rounded-2xl bg-slate-100" />)}</div>;
   if (error) return <div className="glass-card flex flex-col items-center justify-center gap-3 rounded-2xl py-16 text-center"><p className="text-sm font-semibold text-slate-500">{error}</p><button type="button" onClick={load} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"><RefreshCw size={14} /> {p("retry")}</button></div>;
+
+  const selectMaster = (fieldName, id) => {
+    const list = fieldName === "specialization" ? master.specializations : master[`${fieldName}s`];
+    const item = (list || []).find((entry) => String(entry._id) === String(id));
+    setIdentity((current) => ({
+      ...current,
+      [`${fieldName}MasterId`]: id,
+      [`${fieldName}Type`]: "MASTER",
+      [`${fieldName}Other`]: "",
+      [fieldName]: item?.name || "",
+      ...(fieldName === "state" ? { districtMasterId: "", districtType: "OTHER", districtOther: "", district: "", cityMasterId: "", cityType: "OTHER", cityOther: "", city: "" } : {}),
+      ...(fieldName === "district" ? { cityMasterId: "", cityType: "OTHER", cityOther: "", city: "" } : {}),
+    }));
+  };
+  const selectOther = (fieldName) => setIdentity((current) => ({ ...current, [`${fieldName}MasterId`]: "", [`${fieldName}Type`]: "OTHER", [fieldName]: "Other" }));
 
   const field = (key, type = "text") => (
     <label key={key} className="block">
@@ -273,8 +320,12 @@ export default function DoctorProfessionalProfile() {
           <div className="glass-card rounded-2xl p-6">
             <h3 className="font-black text-slate-950">{p("identity")}</h3>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {field("specialization")}{field("qualification")}{field("collegeName")}{field("graduationYear","number")}
-              {field("licenseNumber")}{field("medicalCouncil")}{field("hospitalName")}{field("city")}{field("state")}{field("district")}
+              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("specialization")}</span><select value={identity.specializationType === "OTHER" ? "__other__" : identity.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("specialization") : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Select specialization</option>{master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.specializationType === "OTHER" && <input value={identity.specializationOther} onChange={(e) => setIdentity((v) => ({ ...v, specializationOther: e.target.value }))} placeholder="Other specialization" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
+              {field("qualification")}{field("collegeName")}{field("graduationYear","number")}
+              {field("licenseNumber")}{field("medicalCouncil")}{field("hospitalName")}
+              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("state")}</span><select value={identity.stateType === "OTHER" ? "__other__" : identity.stateMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("state") : selectMaster("state", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Select state</option>{master.states.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.stateType === "OTHER" && <input value={identity.stateOther} onChange={(e) => setIdentity((v) => ({ ...v, stateOther: e.target.value }))} placeholder="Other state" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
+              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("district")}</span><select disabled={identity.stateType !== "MASTER" || !identity.stateMasterId} value={identity.districtType === "OTHER" ? "__other__" : identity.districtMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("district") : selectMaster("district", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"><option value="">Select district</option>{master.districts.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.districtType === "OTHER" && <input value={identity.districtOther} onChange={(e) => setIdentity((v) => ({ ...v, districtOther: e.target.value }))} placeholder="Other district" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
+              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("city")}</span><select disabled={identity.districtType !== "MASTER" || !identity.districtMasterId} value={identity.cityType === "OTHER" ? "__other__" : identity.cityMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("city") : selectMaster("city", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"><option value="">Select city</option>{master.cities.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.cityType === "OTHER" && <input value={identity.cityOther} onChange={(e) => setIdentity((v) => ({ ...v, cityOther: e.target.value }))} placeholder="Other city" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
             </div>
             <label className="mt-4 block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("bio")}</span><textarea rows={6} value={identity.bio} onChange={(e) => setIdentity((v) => ({ ...v, bio: e.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" /></label>
             <div className="mt-4"><TagListEditor title={p("languages")} tags={languages} setTags={setLanguages} placeholder={p("languagePlaceholder")} addLabel={p("add")} removeLabel={p("remove")} /></div>

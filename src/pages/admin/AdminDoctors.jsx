@@ -32,7 +32,7 @@ import Textarea from "../../components/ui/Textarea";
 import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
 
-const emptyForm = { userId: "", specialization: "", experience: 0, fees: 0 };
+const emptyForm = { userId: "", specialization: "", specializationType: "MASTER", specializationMasterId: "", specializationOther: "", experience: 0, fees: 0 };
 
 const SORT_OPTIONS = [
   { value: "newest", label: "Newest first" },
@@ -367,6 +367,18 @@ function AdminDoctors() {
           <option value="active">Active</option>
           <option value="inactive">Deactivated</option>
         </Select>
+        <Select name="state" value={filters.state} onChange={(event) => setFilters((current) => ({ ...current, state: event.target.value, district: "", city: "" }))}>
+          <option value="">All states</option>
+          {master.states.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+        </Select>
+        <Select name="district" value={filters.district} disabled={!filters.state} onChange={(event) => setFilters((current) => ({ ...current, district: event.target.value, city: "" }))}>
+          <option value="">All districts</option>
+          {master.districts.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+        </Select>
+        <Select name="city" value={filters.city} disabled={!filters.district} onChange={(event) => setFilters((current) => ({ ...current, city: event.target.value }))}>
+          <option value="">All cities</option>
+          {master.cities.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+        </Select>
         <Select value={sort} onChange={(event) => changeSort(event.target.value)}>
           {SORT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -423,13 +435,28 @@ function AdminDoctors() {
               </option>
             ))}
           </Select>
-          <Input
+          <Select
             label="Specialization"
             required
             value={form.specialization}
             error={formErrors.specialization}
-            onChange={(e) => setForm({ ...form, specialization: e.target.value })}
-          />
+            onChange={(e) => {
+              const value = e.target.value;
+              const item = master.specializations.find((entry) => entry.name === value);
+              setForm({
+                ...form,
+                specialization: value,
+                specializationMasterId: item?._id || "",
+                specializationType: item ? "MASTER" : "OTHER",
+                specializationOther: item ? "" : "",
+              });
+            }}
+          >
+            <option value="">Select specialization…</option>
+            {master.specializations.map((item) => <option key={item._id} value={item.name}>{item.name}</option>)}
+            <option value="Other">Other</option>
+          </Select>
+          {form.specialization === "Other" && <Input label="Other specialization" required value={form.specializationOther || ""} onChange={(e) => setForm({ ...form, specializationOther: e.target.value })} />}
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               label="Experience (years)"

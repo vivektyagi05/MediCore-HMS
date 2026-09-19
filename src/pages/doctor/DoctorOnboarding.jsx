@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { doctorApi } from "../../api/doctorApi";
+import { masterDataApi } from "../../api/masterDataApi";
 import { getApiErrorMessage } from "../../api/axios";
 import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
@@ -39,8 +40,20 @@ const initialForm = {
   licenseNumber: "",
 
   city: "",
+  cityMasterId: "",
+  cityType: "MASTER",
+  cityOther: "",
   state: "",
+  stateMasterId: "",
+  stateType: "MASTER",
+  stateOther: "",
   district: "",
+  districtMasterId: "",
+  districtType: "MASTER",
+  districtOther: "",
+  specializationMasterId: "",
+  specializationType: "MASTER",
+  specializationOther: "",
 
   languages: "",
   bio: "",
@@ -62,6 +75,8 @@ function DoctorOnboarding() {
 
   const [documents, setDocuments] =
     useState([]);
+  const [master, setMaster] = useState({ specializations: [], states: [], districts: [], cities: [] });
+  const [masterLoading, setMasterLoading] = useState(true);
 
     const [uploading, setUploading] =
     useState(false);
@@ -84,6 +99,9 @@ function DoctorOnboarding() {
       setForm({
         specialization:
           doctor.specialization || "",
+        specializationMasterId: doctor.specializationMasterId || "",
+        specializationType: doctor.specializationType || "OTHER",
+        specializationOther: doctor.specializationOther || "",
 
         qualification:
           doctor.qualification || "",
@@ -201,16 +219,62 @@ const uploadDocument =
   const { refreshUser } = useAuth();
 
   useEffect(() => {
+    let active = true;
+    Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
+      .then(([specializations, states]) => {
+        if (active) setMaster((current) => ({ ...current, specializations: specializations.data || [], states: states.data || [] }));
+      })
+      .catch(() => {})
+      .finally(() => { if (active) setMasterLoading(false); });
     loadProfile();
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!form.stateMasterId) {
+      setMaster((current) => ({ ...current, districts: [], cities: [] }));
+      return;
+    }
+    masterDataApi.getDistricts(form.stateMasterId).then((response) => {
+      setMaster((current) => ({ ...current, districts: response.data || [], cities: [] }));
+    }).catch(() => {});
+  }, [form.stateMasterId]);
+
+  useEffect(() => {
+    if (!form.districtMasterId) {
+      setMaster((current) => ({ ...current, cities: [] }));
+      return;
+    }
+    masterDataApi.getCities(form.districtMasterId).then((response) => {
+      setMaster((current) => ({ ...current, cities: response.data || [] }));
+    }).catch(() => {});
+  }, [form.districtMasterId]);
 
   const updateField = (e) => {
     const { name, value } = e.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  };
 
+  const selectMaster = (field, id) => {
+    const typeField = `${field}Type`;
+    const idField = `${field}MasterId`;
+    const otherField = `${field}Other`;
+    const item = (master[field === "specialization" ? "specializations" : `${field}s`] || []).find((entry) => String(entry._id) === String(id));
     setForm((current) => ({
       ...current,
-      [name]: value,
+      [idField]: id,
+      [typeField]: "MASTER",
+      [otherField]: "",
+      [field]: item?.name || "",
+      ...(field === "state" ? { districtMasterId: "", districtType: "MASTER", districtOther: "", district: "", cityMasterId: "", cityType: "MASTER", cityOther: "", city: "" } : {}),
+      ...(field === "district" ? { cityMasterId: "", cityType: "MASTER", cityOther: "", city: "" } : {}),
     }));
+  };
+
+  const selectOther = (field) => {
+    const typeField = `${field}Type`;
+    const idField = `${field}MasterId`;
+    setForm((current) => ({ ...current, [typeField]: "OTHER", [idField]: "", [field]: "Other" }));
   };
 
   const submitForm = async (e) => {
@@ -312,12 +376,15 @@ const uploadDocument =
         >
           <div className="grid gap-4 md:grid-cols-2">
 
-            <Input
-              label={t("common.specialization")}
-              name="specialization"
-              value={form.specialization}
-              onChange={updateField}
-            />
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">{t("common.specialization")}</span>
+              <select value={form.specializationType === "OTHER" ? "__other__" : form.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("specialization") : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select specialization</option>
+                {master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+                <option value="__other__">Other</option>
+              </select>
+              {form.specializationType === "OTHER" && <Input label="Other specialization" name="specializationOther" value={form.specializationOther} onChange={updateField} />}
+            </label>
 
             <Input
               label={t("common.qualification")}
@@ -400,26 +467,35 @@ const uploadDocument =
 
           <div className="grid gap-4 md:grid-cols-2">
 
-            <Input
-              label="City"
-              name="city"
-              value={form.city}
-              onChange={updateField}
-            />
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">State</span>
+              <select value={form.stateType === "OTHER" ? "__other__" : form.stateMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("state") : selectMaster("state", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select state</option>
+                {master.states.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+                <option value="__other__">Other</option>
+              </select>
+              {form.stateType === "OTHER" && <Input label="Other state" name="stateOther" value={form.stateOther} onChange={updateField} />}
+            </label>
 
-            <Input
-              label="State"
-              name="state"
-              value={form.state}
-              onChange={updateField}
-            />
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">District</span>
+              <select disabled={form.stateType !== "MASTER" || !form.stateMasterId} value={form.districtType === "OTHER" ? "__other__" : form.districtMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("district") : selectMaster("district", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm disabled:bg-slate-100">
+                <option value="">Select district</option>
+                {master.districts.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+                <option value="__other__">Other</option>
+              </select>
+              {form.districtType === "OTHER" && <Input label="Other district" name="districtOther" value={form.districtOther} onChange={updateField} />}
+            </label>
 
-            <Input
-              label="District"
-              name="district"
-              value={form.district}
-              onChange={updateField}
-            />
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">City</span>
+              <select disabled={form.districtType !== "MASTER" || !form.districtMasterId} value={form.cityType === "OTHER" ? "__other__" : form.cityMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("city") : selectMaster("city", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm disabled:bg-slate-100">
+                <option value="">Select city</option>
+                {master.cities.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+                <option value="__other__">Other</option>
+              </select>
+              {form.cityType === "OTHER" && <Input label="Other city" name="cityOther" value={form.cityOther} onChange={updateField} />}
+            </label>
 
           </div>
 

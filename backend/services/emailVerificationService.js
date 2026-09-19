@@ -50,34 +50,40 @@ export const verifyEmailToken = async (rawToken) => {
   }
 
   const tokenHash = hashEmailVerificationToken(rawToken);
-  const user = await User.findOne({
-    emailVerificationTokenHash: tokenHash,
-    emailVerificationExpiresAt: { $gt: new Date() },
-    isActive: true,
-  }).select("+emailVerificationTokenHash +emailVerificationExpiresAt");
-
-  if (!user) {
-    const matchingVerifiedUser = await User.findOne({
-      emailVerified: true,
+  const user = await User.findOneAndUpdate(
+    {
+      emailVerificationTokenHash: tokenHash,
+      emailVerificationExpiresAt: { $gt: new Date() },
       isActive: true,
-      emailVerificationLastUsedHash: tokenHash,
-    }).select("_id emailVerified");
+      emailVerified: false,
+    },
+    {
+      $set: {
+        emailVerified: true,
+        emailVerificationLastUsedHash: tokenHash,
+        emailVerificationTokenHash: null,
+        emailVerificationExpiresAt: null,
+        emailVerificationSentAt: null,
+      },
+    },
+    { new: true },
+  ).select("_id emailVerified");
 
-    if (matchingVerifiedUser) {
-      return { alreadyVerified: true, user: matchingVerifiedUser };
-    }
-
-    throw new AppError("Invalid or expired verification link", 400);
+  if (user) {
+    return { verified: true, user };
   }
 
-  user.emailVerified = true;
-  user.emailVerificationLastUsedHash = tokenHash;
-  user.emailVerificationTokenHash = null;
-  user.emailVerificationExpiresAt = null;
-  user.emailVerificationSentAt = null;
-  await user.save();
+  const matchingVerifiedUser = await User.findOne({
+    emailVerified: true,
+    isActive: true,
+    emailVerificationLastUsedHash: tokenHash,
+  }).select("_id emailVerified");
 
-  return { verified: true, user };
+  if (matchingVerifiedUser) {
+    return { alreadyVerified: true, user: matchingVerifiedUser };
+  }
+
+  throw new AppError("Invalid or expired verification link", 400);
 };
 
 export const verificationCooldownMs = 60 * 1000;

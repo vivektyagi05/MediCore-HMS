@@ -6,11 +6,39 @@ import { useRealtime } from "../../context/RealtimeContext";
 import EmptyState from "../shared/EmptyState";
 
 function LiveNotificationCenter() {
-  const { notifications, unreadCount, markNotificationRead } = useRealtime();
+  const { notifications, unreadCount, markNotificationRead, topAnnouncement, setTopAnnouncement } = useRealtime();
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
 
   return (
+    <>
+      {topAnnouncement && (
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="fixed left-1/2 top-3 z-40 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur"
+            role="status"
+          >
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black text-slate-950">{topAnnouncement.title}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-600">{topAnnouncement.message}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTopAnnouncement(null)}
+                className="text-xs font-bold text-slate-400 hover:text-slate-700"
+                aria-label="Dismiss notification announcement"
+              >
+                Dismiss
+              </button>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      )}
+
     <div className="relative">
       <button
         className="relative rounded-xl bg-white/70 p-3 text-slate-900 shadow-lg transition hover:-translate-y-0.5 hover:bg-white"
@@ -69,6 +97,7 @@ function LiveNotificationCenter() {
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }
 

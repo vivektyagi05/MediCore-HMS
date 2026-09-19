@@ -303,7 +303,7 @@ function AdminExecutiveActionCenter() {
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-600">Recipients (default: all patients + doctors)</label>
             <div className="flex gap-3">
-              {["patient", "doctor", "receptionist"].map((role) => (
+              {["patient", "doctor"].map((role) => (
                 <label key={role} className="flex items-center gap-1.5 text-sm capitalize">
                   <input
                     type="checkbox"

@@ -36,7 +36,7 @@ import AdminTable from "../../components/admin/AdminTable";
 // filtering. Nothing here re-implements that filtering client-side.
 // ─────────────────────────────────────────────────────────────────────────
 
-const ROLE_OPTIONS = ["super_admin", "doctor", "receptionist", "patient"];
+const ROLE_OPTIONS = ["super_admin", "doctor", "patient"];
 const ROLE_TONE = { super_admin: "violet", doctor: "info", receptionist: "neutral", patient: "success" };
 
 function roleLabel(role) {

@@ -271,19 +271,22 @@ export const emailService = {
     });
   },
 
-  sendWelcomeEmail({ toEmail, toName }) {
+  sendWelcomeEmail({ toEmail, toName, verificationEmailSent = true }) {
+    const verificationCopy = verificationEmailSent
+      ? "We sent a separate verification email to your registered email address. Please use that message to verify your email before continuing."
+      : "Your verification email could not be sent during registration. Please use the resend verification option before continuing.";
     return sendMail({
       to: toEmail,
       subject: `Welcome to ${env.hospital.name}`,
-      html: `<p>Hello ${escapeHtml(toName || "there")},</p><p>Your ${escapeHtml(env.hospital.name)} account has been created successfully. Please verify your email address before continuing.</p>`,
+      html: `<p>Hello ${escapeHtml(toName || "there")},</p><p>Your ${escapeHtml(env.hospital.name)} account has been created successfully.</p><p>${escapeHtml(verificationCopy)}</p>`,
     });
   },
 
-  sendNewUserAdminNotification({ toEmail, toName, role }) {
+  sendNewUserAdminNotification({ toEmail, userName, userEmail, userRole }) {
     return sendMail({
       to: toEmail,
       subject: "New user registration requires attention",
-      html: `<p>A new ${escapeHtml(role === "doctor" ? "doctor" : "user")} account has been registered.</p><p>Name: ${escapeHtml(toName || "Unknown")}</p><p>Email: ${escapeHtml(toEmail)}</p>`,
+      html: `<p>A new user account has been registered.</p><p>Name: ${escapeHtml(userName || "Unknown")}</p><p>Email: ${escapeHtml(userEmail || "Unknown")}</p><p>Role: ${escapeHtml(userRole || "Unknown")}</p>`,
     });
   },
 

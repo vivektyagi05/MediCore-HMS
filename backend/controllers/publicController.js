@@ -21,6 +21,7 @@ import { serializeDoctorPublicProfile } from "../services/doctorPublicSerializer
 import { serializeServicePublic } from "../services/servicePublicSerializer.js";
 import { serializeArticlePublic } from "../services/articlePublicSerializer.js";
 import { getHomeSeoData } from "../services/seoInfrastructureService.js";
+import { listMasterData, MASTER_KINDS, resolveCanonicalFilterValue, validateCanonicalLocationFilters } from "../services/masterDataService.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -158,22 +159,25 @@ export const getFeaturedDoctors = asyncHandler(async (req, res) => {
 export const getSearchMeta = asyncHandler(async (_req, res) => {
   const baseFilter = { isVerified: true, verificationStatus: "approved", isActive: true };
 
-  const [specializations, cities, states, districts, languages] = await Promise.all([
-    Doctor.distinct("specialization", baseFilter),
-    Doctor.distinct("city", { ...baseFilter, city: { $ne: "" } }),
-    Doctor.distinct("state", { ...baseFilter, state: { $ne: "" } }),
-    Doctor.distinct("district", { ...baseFilter, district: { $ne: "" } }),
-    Doctor.distinct("languages", { ...baseFilter }),
+  const [specializationMaster, stateMaster, languageValues] = await Promise.all([
+    listMasterData({ kind: MASTER_KINDS.SPECIALIZATION }),
+    listMasterData({ kind: MASTER_KINDS.STATE }),
+    Doctor.distinct("languages", baseFilter),
+  ]);
+
+  const [districtMaster, cityMaster] = await Promise.all([
+    listMasterData({ kind: MASTER_KINDS.DISTRICT }),
+    listMasterData({ kind: MASTER_KINDS.CITY }),
   ]);
 
   res.status(200).json({
     success: true,
     data: {
-      specializations: specializations.filter(Boolean).sort(),
-      cities: cities.filter(Boolean).sort(),
-      states: states.filter(Boolean).sort(),
-      districts: districts.filter(Boolean).sort(),
-      languages: [...new Set(languages.flat().filter(Boolean))].sort(),
+      specializations: specializationMaster.map((item) => item.name),
+      cities: cityMaster.map((item) => item.name),
+      states: stateMaster.map((item) => item.name),
+      districts: districtMaster.map((item) => item.name),
+      languages: [...new Set(languageValues.flat().filter(Boolean))].sort(),
       consultationModes: ["online", "offline", "home_visit"],
     },
     message: "Search metadata fetched successfully",
@@ -203,11 +207,35 @@ export const searchDoctors = asyncHandler(async (req, res) => {
     isActive: true,
   };
 
-  if (req.query.specialization) {
+  if (req.query.specializationMasterId) {
+    const specialization = await resolveCanonicalFilterValue(req.query.specializationMasterId, MASTER_KINDS.SPECIALIZATION, "specialization");
+    filter.specializationMasterId = specialization._id;
+  } else if (req.query.specialization && mongoose.Types.ObjectId.isValid(req.query.specialization)) {
+    const specialization = await resolveCanonicalFilterValue(req.query.specialization, MASTER_KINDS.SPECIALIZATION, "specialization");
+    filter.specializationMasterId = specialization._id;
+  } else if (req.query.specialization) {
     filter.specialization = new RegExp(req.query.specialization.trim(), "i");
   }
-  const geographicFilter = buildDoctorGeographicFilter(req.query);
-  if (geographicFilter) Object.assign(filter, geographicFilter);
+
+  const canonicalLocation = await validateCanonicalLocationFilters({
+    state: req.query.stateMasterId || (req.query.state && mongoose.Types.ObjectId.isValid(req.query.state) ? req.query.state : undefined),
+    district: req.query.districtMasterId || (req.query.district && mongoose.Types.ObjectId.isValid(req.query.district) ? req.query.district : undefined),
+    city: req.query.cityMasterId || (req.query.city && mongoose.Types.ObjectId.isValid(req.query.city) ? req.query.city : undefined),
+  });
+
+  if (canonicalLocation.state || canonicalLocation.district || canonicalLocation.city) {
+    const locationClauses = [];
+    const primary = {};
+    const clinic = {};
+    if (canonicalLocation.state) { primary.stateMasterId = canonicalLocation.state._id; clinic["clinics.stateMasterId"] = canonicalLocation.state._id; }
+    if (canonicalLocation.district) { primary.districtMasterId = canonicalLocation.district._id; clinic["clinics.districtMasterId"] = canonicalLocation.district._id; }
+    if (canonicalLocation.city) { primary.cityMasterId = canonicalLocation.city._id; clinic["clinics.cityMasterId"] = canonicalLocation.city._id; }
+    locationClauses.push(primary, { clinics: { $elemMatch: Object.fromEntries(Object.entries(clinic).map(([key, value]) => [key.replace("clinics.", ""), value])) } });
+    filter.$or = locationClauses;
+  } else {
+    const geographicFilter = buildDoctorGeographicFilter(req.query);
+    if (geographicFilter) Object.assign(filter, geographicFilter);
+  }
   if (req.query.hospital) {
     filter.hospitalName = new RegExp(req.query.hospital.trim(), "i");
   }
@@ -343,70 +371,87 @@ export const getDoctorCoverage = asyncHandler(async (req, res) => {
   if (req.query.emergency === "true") baseFilter["availability.emergencySlotsPerDay"] = { $gt: 0 };
 
   // A doctor's primary location and clinic locations are both legitimate
-  // geographic sources. We count unique doctors per area so multiple clinics
-  // never inflate doctor coverage.
-  const locationStages = [
-    { $project: {
-      doctorId: "$_id",
-      locations: {
-        $concatArrays: [
-          [{ city: "$city", state: "$state", district: "$district" }],
-          {
-            $map: {
-              input: { $ifNull: ["$clinics", []] },
-              as: "clinic",
-              in: { city: "$$clinic.city", state: "$$clinic.state", district: "$$clinic.district" },
+  // geographic sources. Keep all coverage facets on one matched Doctor input
+  // so the same filtered collection scan is shared instead of executing four
+  // independent aggregation pipelines plus a coordinate count query.
+  const locationFilterStage = buildLocationAggregationMatch(req.query);
+  const coverageLocationStages = [
+    {
+      $project: {
+        doctorId: "$_id",
+        locations: {
+          $concatArrays: [
+            [{ city: "$city", state: "$state", district: "$district" }],
+            {
+              $map: {
+                input: { $ifNull: ["$clinics", []] },
+                as: "clinic",
+                in: { city: "$$clinic.city", state: "$$clinic.state", district: "$$clinic.district" },
+              },
             },
-          },
-        ],
+          ],
+        },
       },
-    } },
+    },
     { $unwind: "$locations" },
-    { $match: {
-      "locations.state": { $nin: ["", null] },
-    } },
+    { $match: { "locations.state": { $nin: ["", null] } } },
+    ...(locationFilterStage ? [locationFilterStage] : []),
   ];
 
-  const locationFilterStage = buildLocationAggregationMatch(req.query);
-  const locationStagesWithFilter = locationFilterStage ? [...locationStages, locationFilterStage] : locationStages;
-
-  const [stateAgg, districtAgg, cityAgg, totalAgg, coordinateCount] = await Promise.all([
-    Doctor.aggregate([
-      { $match: baseFilter },
-      ...locationStagesWithFilter,
-      { $group: { _id: "$locations.state", doctors: { $addToSet: "$doctorId" }, districts: { $addToSet: "$locations.district" }, cities: { $addToSet: "$locations.city" } } },
-      { $project: { _id: 1, doctorCount: { $size: "$doctors" }, districts: 1, cities: 1 } },
-      { $sort: { doctorCount: -1, _id: 1 } },
-    ]),
-    Doctor.aggregate([
-      { $match: baseFilter },
-      ...locationStagesWithFilter,
-      { $match: { "locations.district": { $nin: ["", null] } } },
-      { $group: { _id: { state: "$locations.state", district: "$locations.district" }, doctors: { $addToSet: "$doctorId" }, cities: { $addToSet: "$locations.city" } } },
-      { $project: { _id: 1, doctorCount: { $size: "$doctors" }, cities: 1 } },
-      { $sort: { "_id.state": 1, "_id.district": 1 } },
-    ]),
-    Doctor.aggregate([
-      { $match: baseFilter },
-      ...locationStagesWithFilter,
-      { $group: { _id: { state: "$locations.state", district: "$locations.district", city: "$locations.city" }, doctors: { $addToSet: "$doctorId" } } },
-      { $project: { _id: 1, doctorCount: { $size: "$doctors" } } },
-      { $sort: { "_id.state": 1, "_id.district": 1, "_id.city": 1 } },
-    ]),
-    Doctor.aggregate([
-      { $match: baseFilter },
-      ...locationStagesWithFilter,
-      { $group: { _id: null, doctors: { $addToSet: "$doctorId" } } },
-      { $project: { _id: 0, doctorCount: { $size: "$doctors" } } },
-    ]),
-    Doctor.countDocuments({
-      ...baseFilter,
-      "location.type": "Point",
-      "location.coordinates.0": { $exists: true },
-      "location.coordinates.1": { $exists: true },
-    }),
+  const [coverage] = await Doctor.aggregate([
+    { $match: baseFilter },
+    {
+      $project: {
+        _id: 1,
+        city: 1,
+        state: 1,
+        district: 1,
+        clinics: 1,
+        hasCoordinates: {
+          $and: [
+            { $eq: ["$location.type", "Point"] },
+            { $ne: [{ $arrayElemAt: [{ $ifNull: ["$location.coordinates", []] }, 0] }, null] },
+            { $ne: [{ $arrayElemAt: [{ $ifNull: ["$location.coordinates", []] }, 1] }, null] },
+          ],
+        },
+      },
+    },
+    {
+      $facet: {
+        stateAgg: [
+          ...coverageLocationStages,
+          { $group: { _id: "$locations.state", doctors: { $addToSet: "$doctorId" }, districts: { $addToSet: "$locations.district" }, cities: { $addToSet: "$locations.city" } } },
+          { $project: { _id: 1, doctorCount: { $size: "$doctors" }, districts: 1, cities: 1 } },
+          { $sort: { doctorCount: -1, _id: 1 } },
+        ],
+        districtAgg: [
+          ...coverageLocationStages,
+          { $match: { "locations.district": { $nin: ["", null] } } },
+          { $group: { _id: { state: "$locations.state", district: "$locations.district" }, doctors: { $addToSet: "$doctorId" }, cities: { $addToSet: "$locations.city" } } },
+          { $project: { _id: 1, doctorCount: { $size: "$doctors" }, cities: 1 } },
+          { $sort: { "_id.state": 1, "_id.district": 1 } },
+        ],
+        cityAgg: [
+          ...coverageLocationStages,
+          { $group: { _id: { state: "$locations.state", district: "$locations.district", city: "$locations.city" }, doctors: { $addToSet: "$doctorId" } } },
+          { $project: { _id: 1, doctorCount: { $size: "$doctors" } } },
+          { $sort: { "_id.state": 1, "_id.district": 1, "_id.city": 1 } },
+        ],
+        totalAgg: [
+          ...coverageLocationStages,
+          { $group: { _id: null, doctors: { $addToSet: "$doctorId" } } },
+          { $project: { _id: 0, doctorCount: { $size: "$doctors" } } },
+        ],
+        coordinateAgg: [
+          { $match: { hasCoordinates: true } },
+          { $group: { _id: "$_id" } },
+          { $count: "doctorCount" },
+        ],
+      },
+    },
   ]);
 
+  const { stateAgg = [], districtAgg = [], cityAgg = [], totalAgg = [], coordinateAgg = [] } = coverage || {};
   const stateMap = Object.fromEntries(stateAgg.map((item) => [item._id, {
     name: item._id,
     doctorCount: item.doctorCount,
@@ -434,7 +479,7 @@ export const getDoctorCoverage = asyncHandler(async (req, res) => {
       })),
       geographicDataAvailability: {
         districtCoverageStates: Object.values(stateMap).filter((item) => item.hasAuthoritativeDistrictData).length,
-        coordinateDoctors: coordinateCount,
+        coordinateDoctors: coordinateAgg[0]?.doctorCount || 0,
       },
     },
     message: "Doctor geographic coverage fetched successfully",

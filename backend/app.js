@@ -61,6 +61,7 @@ import adminReviewRoutes
 from "./routes/adminReviewRoutes.js";
 import privacyRoutes from "./routes/privacyRoutes.js";
 import leadRoutes from "./routes/leadRoutes.js";
+import masterDataRoutes from "./routes/masterDataRoutes.js";
 
 
 const sanitizeValue = (value) => {
@@ -265,6 +266,7 @@ app.use("/api/ai/assist", aiAssistRoutes);
 
 app.use("/api/doctors", doctorRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/master-data", masterDataRoutes);
 
 app.use("/api/doctor", doctorWorkflowRoutes);
 app.use("/api/doctor", doctorPracticeRoutes);

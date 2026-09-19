@@ -25,6 +25,7 @@ import { DOCTOR_CONSULTATION_MODES } from "../../constants/consultationMode.js";
 import { assertValidUploadOrDelete } from "../../utils/fileValidation.js";
 import { serializeDoctorPublicProfile } from "../../services/doctorPublicSerializer.js";
 import { buildDoctorProfileIntelligence } from "../../services/doctorProfileIntelligenceService.js";
+import { applyDoctorMasterData, resolveDoctorMasterData } from "../../services/masterDataService.js";
 
 const getDoctor = async (userId) => {
   const doctor = await Doctor.findOne({ userId }).lean();
@@ -66,14 +67,45 @@ export const getProfileIntelligence = asyncHandler(async (req, res) => {
 // so editing them never triggers re-verification (see
 // doctorOnboardingController.CRITICAL_VERIFICATION_FIELDS for that list).
 const PROFESSIONAL_PROFILE_FIELDS = [
-  "specialization", "qualification", "collegeName", "graduationYear",
-  "licenseNumber", "medicalCouncil", "hospitalName", "city", "state",
-  "district", "bio", "languages",
+  "specialization", "specializationMasterId", "specializationType", "specializationOther",
+  "qualification", "collegeName", "graduationYear",
+  "licenseNumber", "medicalCouncil", "hospitalName",
+  "city", "cityMasterId", "cityType", "cityOther",
+  "state", "stateMasterId", "stateType", "stateOther",
+  "district", "districtMasterId", "districtType", "districtOther",
+  "bio", "languages",
   "subSpecialties", "education", "experienceEntries", "awards",
   "researchPublications", "memberships", "clinics", "clinicPhotos",
   "emergencyAvailability", "insuranceAccepted",
 ];
 const YEAR_NOW = new Date().getFullYear();
+
+const normalizeClinicMasterData = async (clinics = []) => {
+  if (!Array.isArray(clinics)) return clinics;
+  return Promise.all(clinics.map(async (clinic) => {
+    const resolved = await resolveDoctorMasterData(clinic, { allowLegacyOther: true });
+    const next = { ...clinic };
+    if (resolved.state) {
+      next.state = resolved.state.displayValue;
+      next.stateMasterId = resolved.state.masterId;
+      next.stateType = resolved.state.type;
+      next.stateOther = resolved.state.otherValue || "";
+    }
+    if (resolved.district) {
+      next.district = resolved.district.displayValue;
+      next.districtMasterId = resolved.district.masterId;
+      next.districtType = resolved.district.type;
+      next.districtOther = resolved.district.otherValue || "";
+    }
+    if (resolved.city) {
+      next.city = resolved.city.displayValue;
+      next.cityMasterId = resolved.city.masterId;
+      next.cityType = resolved.city.type;
+      next.cityOther = resolved.city.otherValue || "";
+    }
+    return next;
+  }));
+};
 
 const validateProfessionalProfilePayload = (body) => {
   const errors = {};
@@ -151,13 +183,19 @@ export const updateProfessionalProfile = asyncHandler(async (req, res) => {
   if (Object.keys(errors).length) throw new AppError("Profile validation failed", 422, errors);
 
   const wasApproved = doctor.verificationStatus === "approved";
+  const masterPayload = { ...doctor.toObject(), ...req.body };
+  const masterData = await resolveDoctorMasterData(masterPayload, { allowLegacyOther: true });
+  const normalizedClinics = req.body.clinics !== undefined
+    ? await normalizeClinicMasterData(req.body.clinics)
+    : undefined;
   const credentialFields = ["licenseNumber", "medicalCouncil", "qualification", "collegeName", "graduationYear"];
   const changedCredential = credentialFields.some((field) =>
     req.body[field] !== undefined && String(req.body[field] ?? "") !== String(doctor[field] ?? ""),
   );
   for (const field of PROFESSIONAL_PROFILE_FIELDS) {
-    if (req.body[field] !== undefined) doctor[field] = req.body[field];
+    if (req.body[field] !== undefined) doctor[field] = field === "clinics" ? normalizedClinics : req.body[field];
   }
+  applyDoctorMasterData(doctor, masterData);
   if (wasApproved && changedCredential) {
     doctor.verificationStatus = "pending";
     doctor.isVerified = false;

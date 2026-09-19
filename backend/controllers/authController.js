@@ -107,12 +107,52 @@ const user = await User.create({
       entityId: user._id,
       severity: "info",
       eventKey: `user-registration:${user._id}`,
+      metadata: {
+        action: { to: "/admin/user-management" },
+        userName: user.name,
+        userEmail: user.email,
+        userRole: user.role,
+      },
     });
   } catch (error) {
     logger.warn("New user registration notification failed", {
       message: error?.message,
       userId: user._id.toString(),
     });
+  }
+
+  if (user.role === ROLES.PATIENT) {
+    try {
+      const admins = await User.find({
+        role: ROLES.SUPER_ADMIN,
+        isActive: true,
+      }).select("email").lean();
+
+      await Promise.allSettled(
+        admins
+          .filter((admin) => admin.email)
+          .map((admin) =>
+            emailService.sendNewUserAdminNotification({
+              toEmail: admin.email,
+              userName: user.name,
+              userEmail: user.email,
+              userRole: user.role,
+            }).catch((error) => {
+              logger.warn("New user admin email failed", {
+                adminId: admin._id.toString(),
+                userId: user._id.toString(),
+                errorName: error?.name,
+                message: error?.message,
+              });
+            }),
+          ),
+      );
+    } catch (error) {
+      logger.warn("New user admin recipient lookup failed", {
+        userId: user._id.toString(),
+        message: error?.message,
+      });
+    }
   }
 
   // The existing automation trigger remains unchanged; it is not the
@@ -125,7 +165,7 @@ const user = await User.create({
 
   if (user.role !== ROLES.DOCTOR) {
     try {
-      await emailService.sendWelcomeEmail({ toEmail: user.email, toName: user.name });
+      await emailService.sendWelcomeEmail({ toEmail: user.email, toName: user.name, verificationEmailSent });
     } catch (error) {
       logger.warn("Registration welcome email failed", {
         message: error?.message,

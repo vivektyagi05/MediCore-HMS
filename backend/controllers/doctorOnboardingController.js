@@ -2,11 +2,13 @@ import Doctor from "../models/Doctor.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
 import { practiceEmitter } from "../realtime/practiceEmitter.js";
+import { getVerificationCycleId } from "../utils/verificationCycle.js";
 import { logger } from "../utils/logger.js";
 import { notificationEmitter } from "../realtime/notificationEmitter.js";
 import { emailService } from "../services/emailService.js";
 import { ROLES } from "../constants/roles.js";
 import User from "../models/User.js";
+import { applyDoctorMasterData, resolveDoctorMasterData } from "../services/masterDataService.js";
 
 // SECURITY BUGFIX: both submitOnboarding and updateOnboarding used
 // `Object.assign(doctor, req.body)` with NO field whitelist — a classic mass
@@ -22,6 +24,9 @@ import User from "../models/User.js";
 // deliberately excluded here too.
 const ONBOARDING_EDITABLE_FIELDS = [
   "specialization",
+  "specializationMasterId",
+  "specializationType",
+  "specializationOther",
   "experience",
   "fees",
   "licenseNumber",
@@ -31,8 +36,17 @@ const ONBOARDING_EDITABLE_FIELDS = [
   "graduationYear",
   "hospitalName",
   "city",
+  "cityMasterId",
+  "cityType",
+  "cityOther",
   "state",
+  "stateMasterId",
+  "stateType",
+  "stateOther",
   "district",
+  "districtMasterId",
+  "districtType",
+  "districtOther",
   "bio",
   "languages",
   "consultationMode",
@@ -86,7 +100,10 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   }
 
   const submittedAt = new Date();
-  Object.assign(doctor, pickOnboardingFields(req.body));
+  const updates = pickOnboardingFields(req.body);
+  const masterData = await resolveDoctorMasterData(updates, { allowLegacyOther: true });
+  Object.assign(doctor, updates);
+  applyDoctorMasterData(doctor, masterData);
   doctor.verificationStatus = "pending";
   doctor.isVerified = false;
   doctor.verificationNotes = "";
@@ -116,8 +133,8 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
     entityType: "Doctor",
     entityId: doctor._id,
     severity: "info",
-    eventKey: `doctor-application:${doctor._id}:${submittedAt.getTime()}`,
-    metadata: { doctorUserId: doctor.userId },
+    eventKey: `doctor-application:${doctor._id}:${getVerificationCycleId(doctor)}`,
+    metadata: { doctorUserId: doctor.userId, action: { to: "/admin/doctors" } },
   };
 
   try {
@@ -189,11 +206,34 @@ export const updateOnboarding = asyncHandler(async (req, res) => {
 
   const updates = pickOnboardingFields(req.body);
   const wasApproved = doctor.verificationStatus === "approved";
+  const masterPayload = {
+    ...{
+      specialization: doctor.specialization,
+      specializationMasterId: doctor.specializationMasterId,
+      specializationType: doctor.specializationType,
+      specializationOther: doctor.specializationOther,
+      state: doctor.state,
+      stateMasterId: doctor.stateMasterId,
+      stateType: doctor.stateType,
+      stateOther: doctor.stateOther,
+      district: doctor.district,
+      districtMasterId: doctor.districtMasterId,
+      districtType: doctor.districtType,
+      districtOther: doctor.districtOther,
+      city: doctor.city,
+      cityMasterId: doctor.cityMasterId,
+      cityType: doctor.cityType,
+      cityOther: doctor.cityOther,
+    },
+    ...updates,
+  };
+  const masterData = await resolveDoctorMasterData(masterPayload, { allowLegacyOther: true });
   const changedCriticalField = CRITICAL_VERIFICATION_FIELDS.some(
     (field) => updates[field] !== undefined && String(updates[field]) !== String(doctor[field] ?? ""),
   );
 
   Object.assign(doctor, updates);
+  applyDoctorMasterData(doctor, masterData);
 
   if (wasApproved && changedCriticalField) {
     doctor.verificationStatus = "pending";
@@ -214,6 +254,7 @@ export const updateOnboarding = asyncHandler(async (req, res) => {
       await practiceEmitter.verificationStatusChanged({
         doctorUserId: doctor.userId,
         doctorId: doctor._id,
+        cycleId: getVerificationCycleId(doctor),
         status: "pending",
         notes: "A credential change requires re-verification by an admin.",
       });

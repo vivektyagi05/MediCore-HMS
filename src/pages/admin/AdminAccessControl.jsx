@@ -28,7 +28,7 @@ import Tabs from "../../components/ui/Tabs";
 // Never a second permission system, never a fabricated matrix cell.
 // ─────────────────────────────────────────────────────────────────────────
 
-const ROLE_TONE = { super_admin: "violet", doctor: "info", receptionist: "neutral", patient: "success" };
+const ROLE_TONE = { super_admin: "violet", doctor: "info", patient: "success" };
 
 function roleLabel(role) {
   return role.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");

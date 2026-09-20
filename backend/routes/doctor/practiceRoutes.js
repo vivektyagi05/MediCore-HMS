@@ -6,6 +6,7 @@ import { randomBytes } from "crypto";
 import { ROLES } from "../../constants/roles.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { authorizeRoles } from "../../middleware/roleMiddleware.js";
+import { requireApprovedDoctor } from "../../middleware/doctorAccessMiddleware.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import {
   getPracticeOverview,
@@ -78,6 +79,7 @@ router.patch("/practice/subscription/:id/change-plan", changeSubscriptionPlan);
 router.patch("/practice/settings", updatePracticeSettings);
 
 // Step 6: Practice Analytics
-router.get("/practice/analytics", getPracticeAnalytics);
+// Analytics are approved-only (a pending doctor has no practice data to analyse).
+router.get("/practice/analytics", requireApprovedDoctor, getPracticeAnalytics);
 
 export default router;

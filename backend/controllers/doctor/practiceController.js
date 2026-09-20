@@ -168,6 +168,17 @@ export const getProfessionalProfile = asyncHandler(async (req, res) => {
       city: doctor.city || "",
       state: doctor.state || "",
       district: doctor.district || "",
+      // Owner-only canonical MasterData bindings. The public serializer
+      // deliberately omits them, but the editor MUST receive them: without the
+      // ids/types the form reloads blank after every save and the next save
+      // would overwrite (or reject) the stored location/specialization.
+      ...Object.fromEntries(
+        ["specialization", "state", "district", "city"].flatMap((field) => [
+          [`${field}MasterId`, doctor[`${field}MasterId`] || null],
+          [`${field}Type`, doctor[`${field}Type`] || null],
+          [`${field}Other`, doctor[`${field}Other`] || ""],
+        ]),
+      ),
       bio: doctor.bio || "",
     },
     message: "Professional profile fetched successfully",
@@ -208,7 +219,14 @@ export const updateProfessionalProfile = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(req.user._id, { doctorOnboardingStatus: "pending" });
   }
   await doctor.save();
-  practiceEmitter.profileCompletionUpdated(doctor.userId, doctor._id, (await buildProfileIntelligence(doctor.toObject())).profileCompletionPercent);
+  // The profile is already persisted. The completion notification is a derived,
+  // best-effort side effect: its failure must never turn a successful save
+  // into a 500 (the client would think nothing was saved and retry/duplicate).
+  try {
+    practiceEmitter.profileCompletionUpdated(doctor.userId, doctor._id, (await buildProfileIntelligence(doctor.toObject())).profileCompletionPercent);
+  } catch (error) {
+    logger.warn("profileCompletionUpdated side effect failed", { message: error?.message, doctorId: String(doctor._id) });
+  }
   res.status(200).json({
     success: true,
     data: serializeDoctorPublicProfile(doctor.toObject(), req),

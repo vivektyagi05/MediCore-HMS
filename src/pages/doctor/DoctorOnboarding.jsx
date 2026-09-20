@@ -14,6 +14,8 @@ import { useEffect, useState } from "react";
 
 import { doctorApi } from "../../api/doctorApi";
 import { masterDataApi } from "../../api/masterDataApi";
+import DoctorLocationFields from "../../components/doctor/DoctorLocationFields";
+import { EMPTY_LOCATION, LOCATION_KEYS, buildLocationPayload, locationFromDoctor } from "../../utils/doctorLocation";
 import { getApiErrorMessage } from "../../api/axios";
 import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
@@ -39,18 +41,7 @@ const initialForm = {
   medicalCouncil: "",
   licenseNumber: "",
 
-  city: "",
-  cityMasterId: "",
-  cityType: "MASTER",
-  cityOther: "",
-  state: "",
-  stateMasterId: "",
-  stateType: "MASTER",
-  stateOther: "",
-  district: "",
-  districtMasterId: "",
-  districtType: "MASTER",
-  districtOther: "",
+  ...EMPTY_LOCATION,
   specializationMasterId: "",
   specializationType: "MASTER",
   specializationOther: "",
@@ -75,8 +66,7 @@ function DoctorOnboarding() {
 
   const [documents, setDocuments] =
     useState([]);
-  const [master, setMaster] = useState({ specializations: [], states: [], districts: [], cities: [] });
-  const [masterLoading, setMasterLoading] = useState(true);
+  const [master, setMaster] = useState({ specializations: [] });
 
     const [uploading, setUploading] =
     useState(false);
@@ -100,7 +90,7 @@ function DoctorOnboarding() {
         specialization:
           doctor.specialization || "",
         specializationMasterId: doctor.specializationMasterId || "",
-        specializationType: doctor.specializationType || "OTHER",
+        specializationType: doctor.specializationMasterId ? "MASTER" : (doctor.specializationOther ? "OTHER" : "MASTER"),
         specializationOther: doctor.specializationOther || "",
 
         qualification:
@@ -127,15 +117,9 @@ function DoctorOnboarding() {
         licenseNumber:
           doctor.licenseNumber || "",
 
-        city:
-          doctor.city || "",
-
-
-        state:
-          doctor.state || "",
-
-        district:
-          doctor.district || "",
+        // Restores the canonical ids/types too; without them the saved
+        // state/district vanished from the form after every refresh.
+        ...locationFromDoctor(doctor),
 
         languages:
           doctor.languages?.join(", ") || "",
@@ -220,35 +204,14 @@ const uploadDocument =
 
   useEffect(() => {
     let active = true;
-    Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
-      .then(([specializations, states]) => {
-        if (active) setMaster((current) => ({ ...current, specializations: Array.isArray(specializations) ? specializations : [], states: Array.isArray(states) ? states : [] }));
+    masterDataApi.getSpecializations()
+      .then((specializations) => {
+        if (active) setMaster({ specializations: Array.isArray(specializations) ? specializations : [] });
       })
-      .catch(() => {})
-      .finally(() => { if (active) setMasterLoading(false); });
+      .catch(() => {});
     loadProfile();
     return () => { active = false; };
   }, []);
-
-  useEffect(() => {
-    if (!form.stateMasterId) {
-      setMaster((current) => ({ ...current, districts: [], cities: [] }));
-      return;
-    }
-    masterDataApi.getDistricts(form.stateMasterId).then((response) => {
-      setMaster((current) => ({ ...current, districts: Array.isArray(response) ? response : [], cities: [] }));
-    }).catch(() => {});
-  }, [form.stateMasterId]);
-
-  useEffect(() => {
-    if (!form.districtMasterId) {
-      setMaster((current) => ({ ...current, cities: [] }));
-      return;
-    }
-    masterDataApi.getCities(form.districtMasterId).then((response) => {
-      setMaster((current) => ({ ...current, cities: Array.isArray(response) ? response : [] }));
-    }).catch(() => {});
-  }, [form.districtMasterId]);
 
   const updateField = (e) => {
     const { name, value } = e.target;
@@ -256,25 +219,18 @@ const uploadDocument =
   };
 
   const selectMaster = (field, id) => {
-    const typeField = `${field}Type`;
-    const idField = `${field}MasterId`;
-    const otherField = `${field}Other`;
-    const item = (master[field === "specialization" ? "specializations" : `${field}s`] || []).find((entry) => String(entry._id) === String(id));
+    const item = master.specializations.find((entry) => String(entry._id) === String(id));
     setForm((current) => ({
       ...current,
-      [idField]: id,
-      [typeField]: "MASTER",
-      [otherField]: "",
-      [field]: item?.name || "",
-      ...(field === "state" ? { districtMasterId: "", districtType: "MASTER", districtOther: "", district: "", cityMasterId: "", cityType: "MASTER", cityOther: "", city: "" } : {}),
-      ...(field === "district" ? { cityMasterId: "", cityType: "MASTER", cityOther: "", city: "" } : {}),
+      specializationMasterId: id,
+      specializationType: "MASTER",
+      specializationOther: "",
+      specialization: item?.name || "",
     }));
   };
 
-  const selectOther = (field) => {
-    const typeField = `${field}Type`;
-    const idField = `${field}MasterId`;
-    setForm((current) => ({ ...current, [typeField]: "OTHER", [idField]: "", [field]: "Other" }));
+  const selectOther = () => {
+    setForm((current) => ({ ...current, specializationType: "OTHER", specializationMasterId: "", specialization: "Other" }));
   };
 
   const submitForm = async (e) => {
@@ -285,6 +241,7 @@ const uploadDocument =
 
       const payload = {
         ...form,
+        ...buildLocationPayload(form),
 
         experience:
           Number(form.experience),
@@ -321,6 +278,8 @@ const uploadDocument =
       setSaving(false);
     }
   };
+
+  const locationValue = Object.fromEntries(LOCATION_KEYS.map((key) => [key, form[key] ?? ""]));
 
   if (loading) {
     return (
@@ -378,7 +337,7 @@ const uploadDocument =
 
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-slate-700">{t("common.specialization")}</span>
-              <select value={form.specializationType === "OTHER" ? "__other__" : form.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("specialization") : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+              <select value={form.specializationType === "OTHER" ? "__other__" : form.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther() : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select specialization</option>
                 {master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
                 <option value="__other__">Other</option>
@@ -464,52 +423,10 @@ const uploadDocument =
         </Card>
 
         <Card title="Location">
-
-          <div className="grid gap-4 md:grid-cols-2">
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-700">State</span>
-              <select value={form.stateType === "OTHER" ? "__other__" : form.stateMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("state") : selectMaster("state", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <option value="">Select state</option>
-                {master.states.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
-                <option value="__other__">Other</option>
-              </select>
-              {form.stateType === "OTHER" && <Input label="Other state" name="stateOther" value={form.stateOther} onChange={updateField} />}
-            </label>
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-700">District</span>
-              <select disabled={form.stateType !== "MASTER" || !form.stateMasterId} value={form.districtType === "OTHER" ? "__other__" : form.districtMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("district") : selectMaster("district", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm disabled:bg-slate-100">
-                <option value="">Select district</option>
-                {master.districts.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
-                <option value="__other__">Other</option>
-              </select>
-              {form.districtType === "OTHER" && <Input label="Other district" name="districtOther" value={form.districtOther} onChange={updateField} />}
-            </label>
-
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-700">City</span>
-              <Input
-                label=""
-                name="city"
-                value={form.city || ""}
-                disabled={form.districtType !== "MASTER" || !form.districtMasterId}
-                placeholder="Enter city"
-                onChange={(e) => setForm((current) => ({
-                  ...current,
-                  city: e.target.value,
-                  cityMasterId: "",
-                  cityType: "OTHER",
-                  cityOther: e.target.value,
-                }))}
-              />
-              {form.districtType === "MASTER" && form.districtMasterId && (
-                <p className="mt-1 text-xs text-slate-500">If the city exactly matches a canonical city in the selected district, it will be saved as MasterData; otherwise it will be saved as Other.</p>
-              )}
-            </label>
-
-          </div>
-
+          <DoctorLocationFields
+            value={locationValue}
+            onChange={(next) => setForm((current) => ({ ...current, ...next }))}
+          />
         </Card>
 
         <Card title="Profile Details">

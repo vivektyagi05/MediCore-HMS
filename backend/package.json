@@ -14,7 +14,9 @@
     "test": "node tests/run-all.mjs",
     "test:p20-seo": "node tests/p20SeoInfrastructure.test.mjs && node tests/p20SeoStaticContract.test.mjs && node tests/p20SeoValidation.test.mjs",
     "migrate:master-data": "node migrations/004_master_data_backfill.js",
-    "migrate:master-data:lgd": "node migrations/005_import_lgd_master_data.js"
+    "migrate:master-data:lgd": "node migrations/005_import_lgd_master_data.js",
+    "verify:runtime": "node scripts/runtime-verification/location.mjs && node scripts/runtime-verification/visibility.mjs && node scripts/runtime-verification/cms.mjs && node scripts/runtime-verification/related.mjs",
+    "update:lgd-manifest": "node scripts/updateLgdManifest.mjs"
   },
   "dependencies": {
     "bcrypt": "latest",

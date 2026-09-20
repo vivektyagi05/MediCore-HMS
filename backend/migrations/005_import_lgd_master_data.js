@@ -1,143 +1,130 @@
-import fs from "fs";
-import path from "path";
+// Import the Government of India Local Government Directory (LGD) geography
+// (State → District → City/urban local body) into the canonical MasterData
+// collection, plus the repository-controlled specialization vocabulary.
+//
+//   npm run migrate:master-data:lgd
+//
+// Idempotent: records are upserted on (kind, parentId, normalizedName), so
+// re-runs never duplicate and existing MongoDB _ids are preserved (doctors
+// reference them). Fails loudly — never leaves the caller with a silently
+// empty or partial geography.
 import { connectDB, disconnectDB } from "../config/db.js";
 import MasterData from "../models/MasterData.js";
 import { CANONICAL_MASTER_SEEDS } from "../master-data/canonicalSeed.js";
-import { normalizeMasterText } from "../utils/masterDataValidation.js";
+import { loadLgdSource, cleanName, normalizeName } from "../master-data/lgdSource.js";
 
-const SOURCE_DIR = process.env.LGD_MASTER_DATA_DIR || path.resolve(process.cwd(), "master-data/source/lgd");
-const STATE_FILE = process.env.LGD_STATES_FILE || path.join(SOURCE_DIR, "states.csv");
-const DISTRICT_FILE = process.env.LGD_DISTRICTS_FILE || path.join(SOURCE_DIR, "districts.csv");
-const CITY_FILE = process.env.LGD_CITY_FILE || path.join(SOURCE_DIR, "statewise_ulbs_coverage.csv");
+const CHUNK = 1000;
+const keyOf = (parentId, normalizedName) => `${parentId ? String(parentId) : ""}|${normalizedName}`;
 
-const FIELD_ALIASES = {
-  stateName: ["State Name(In English)", "State Name (In English)", "State Name"],
-  stateCode: ["State Code", "State code"],
-  districtName: ["District Name(In English)", "District Name (In English)", "District Name"],
-  districtCode: ["District Code", "District code"],
-  cityName: ["Localbody Name", "Local Body Name\n(In English)", "Localbody Name\n(In English)", "Local Body Name (In English)"],
-  cityCode: ["Localbody", "Local Body\nCode", "Localbody Code"],
-  cityDistrict: ["District Name", "District Name(In English)", "District Name (In English)"],
-  cityState: ["State Name", "State Name(In English)", "State Name (In English)"],
-};
+// Read-diff-write instead of one upsert per record: a fresh import is a handful
+// of insertMany calls, a re-run performs no writes at all (idempotent), and the
+// unique (kind, parentId, normalizedName) index remains the concurrency guard.
+// Existing _ids are always preserved (doctors reference them).
+const syncRecords = async (kind, records) => {
+  const existing = await MasterData.find({ kind }).select("_id name parentId normalizedName active source").lean();
+  const byKey = new Map(existing.map((doc) => [keyOf(doc.parentId, doc.normalizedName), doc]));
 
-const clean = (value) => normalizeMasterText(String(value || "").replace(/\s+/g, " ").trim());
-const normalized = (value) => clean(value).toLowerCase();
-
-const parseCsv = (filePath) => {
-  if (!fs.existsSync(filePath)) throw new Error(`LGD source file not found: ${filePath}`);
-  const input = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
-  const rows = [];
-  let row = [];
-  let field = "";
-  let quoted = false;
-  for (let i = 0; i < input.length; i += 1) {
-    const char = input[i];
-    const next = input[i + 1];
-    if (char === '"') {
-      if (quoted && next === '"') { field += '"'; i += 1; }
-      else quoted = !quoted;
-    } else if (!quoted && char === ";") {
-      row.push(field); field = "";
-    } else if (!quoted && (char === "\n" || char === "\r")) {
-      if (char === "\r" && next === "\n") i += 1;
-      row.push(field); field = "";
-      if (row.some((value) => String(value).trim() !== "")) rows.push(row);
-      row = [];
-    } else field += char;
+  const toInsert = [];
+  const toUpdate = [];
+  const seen = new Set();
+  for (const { name, parentId, source } of records) {
+    const normalizedNameValue = normalizeName(name);
+    const key = keyOf(parentId, normalizedNameValue);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const current = byKey.get(key);
+    if (!current) {
+      toInsert.push({ kind, name: cleanName(name), normalizedName: normalizedNameValue, parentId: parentId || null, active: true, source });
+    } else if (!current.active || (current.source !== source && current.source !== "lgd")) {
+      toUpdate.push({ _id: current._id, source: current.source === "lgd" ? "lgd" : source });
+    }
   }
-  if (field || row.length) { row.push(field); rows.push(row); }
-  if (!rows.length) return [];
-  const headers = rows.shift().map((value) => String(value).trim());
-  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, String(values[index] ?? "").trim()])));
+
+  for (let i = 0; i < toInsert.length; i += CHUNK) {
+    try {
+      const chunk = toInsert.slice(i, i + CHUNK);
+      const inserted = await MasterData.insertMany(chunk, { ordered: false });
+      // insertMany({ordered:false}) can swallow per-document validation errors and
+      // simply return fewer documents; never accept a silent shortfall.
+      if (inserted.length !== chunk.length) {
+        throw new Error(`LGD import: ${kind} insert shortfall (${inserted.length}/${chunk.length}) — a document failed validation`);
+      }
+    } catch (error) {
+      const writeErrors = error?.writeErrors || error?.results?.filter?.((r) => r instanceof Error) || [];
+      const onlyDuplicates = error?.code === 11000 || (writeErrors.length > 0 && writeErrors.every((e) => (e.code ?? e.err?.code) === 11000));
+      if (!onlyDuplicates) throw error; // a concurrent run inserted the same rows: safe to ignore
+    }
+  }
+  if (toUpdate.length) {
+    await MasterData.bulkWrite(
+      toUpdate.map((u) => ({ updateOne: { filter: { _id: u._id }, update: { $set: { active: true, source: u.source } } } })),
+      { ordered: false },
+    );
+  }
+
+  const after = await MasterData.find({ kind }).select("_id parentId normalizedName").lean();
+  return { idByKey: new Map(after.map((doc) => [keyOf(doc.parentId, doc.normalizedName), doc._id])), inserted: toInsert.length, updated: toUpdate.length };
 };
 
-const first = (row, aliases) => aliases.map((key) => row[key]).find((value) => value !== undefined && String(value).trim() !== "") || "";
+export const importLgdMasterData = async ({ env = process.env } = {}) => {
+  // 1. Verified source first: throws before any DB write if it is missing/altered.
+  const source = loadLgdSource({ env });
 
-const upsertMaster = async ({ kind, name, parentId, source = "lgd" }) => {
-  const normalizedName = normalized(name);
-  if (!normalizedName) return null;
-  return MasterData.findOneAndUpdate(
-    { kind, parentId: parentId || null, normalizedName },
-    { $set: { name: clean(name), active: true, source }, $setOnInsert: { normalizedName } },
-    { upsert: true, returnDocument: "after", runValidators: true },
+  // The unique (kind, parentId, normalizedName) index is the idempotency/concurrency
+  // guard. Production runs with autoIndex disabled, so build it explicitly.
+  await MasterData.createIndexes();
+
+  // 2. Controlled clinical vocabulary (deterministic, idempotent).
+  const specs = await syncRecords("specialization", CANONICAL_MASTER_SEEDS.map((item) => ({ name: item.name, parentId: null, source: "seed" })));
+
+  // 3. States.
+  const stateSync = await syncRecords("state", source.states.map((s) => ({ name: s.name, parentId: null, source: "lgd" })));
+  const stateIdByKey = new Map(source.states.map((s) => [s.key, stateSync.idByKey.get(keyOf(null, normalizeName(s.name)))]));
+  const missingState = source.states.find((s) => !stateIdByKey.get(s.key));
+  if (missingState) throw new Error(`LGD import: state not persisted: ${missingState.name}`);
+
+  // 4. Districts (parent = state).
+  const districtSync = await syncRecords("district", source.districts.map((d) => ({ name: d.name, parentId: stateIdByKey.get(d.stateKey), source: "lgd" })));
+  const districtIdByKey = new Map(
+    source.districts.map((d) => [d.key, districtSync.idByKey.get(keyOf(stateIdByKey.get(d.stateKey), normalizeName(d.name)))]),
   );
-};
+  const missingDistrict = source.districts.find((d) => !districtIdByKey.get(d.key));
+  if (missingDistrict) throw new Error(`LGD import: district not persisted: ${missingDistrict.name}`);
 
-const seedSpecializations = async () => {
-  for (const item of CANONICAL_MASTER_SEEDS) {
-    await upsertMaster({ kind: item.kind, name: item.name, parentId: null, source: "seed" });
-  }
-};
+  // 5. Cities (parent = district). Matching is always scoped by district.
+  const citySync = await syncRecords("city", source.cities.map((c) => ({ name: c.name, parentId: districtIdByKey.get(c.districtKey), source: "lgd" })));
 
-export const importLgdMasterData = async () => {
-  await seedSpecializations();
-
-  const states = parseCsv(STATE_FILE);
-  const districts = parseCsv(DISTRICT_FILE);
-  const cities = parseCsv(CITY_FILE);
-
-  const stateByCode = new Map();
-  const stateByName = new Map();
-  const districtByCode = new Map();
-  const districtByName = new Map();
-
-  for (const row of states) {
-    const name = first(row, FIELD_ALIASES.stateName);
-    const code = first(row, FIELD_ALIASES.stateCode);
-    if (!name) continue;
-    const state = await upsertMaster({ kind: "state", name, parentId: null });
-    stateByName.set(normalized(name), state);
-    if (code) stateByCode.set(String(code).trim(), state);
-  }
-
-  for (const row of districts) {
-    const name = first(row, FIELD_ALIASES.districtName);
-    const stateCode = first(row, FIELD_ALIASES.stateCode);
-    const stateName = first(row, FIELD_ALIASES.stateName);
-    const state = stateByCode.get(String(stateCode).trim()) || stateByName.get(normalized(stateName));
-    if (!name || !state) continue;
-    const district = await upsertMaster({ kind: "district", name, parentId: state._id });
-    const code = first(row, FIELD_ALIASES.districtCode);
-    if (code) districtByCode.set(`${String(state._id)}:${String(code).trim()}`, district);
-    districtByName.set(`${String(state._id)}:${normalized(name)}`, district);
-  }
-
-  const cityKeys = new Set();
-  for (const row of cities) {
-    const name = first(row, FIELD_ALIASES.cityName);
-    const stateName = first(row, FIELD_ALIASES.cityState);
-    const districtName = first(row, FIELD_ALIASES.cityDistrict);
-    const state = stateByName.get(normalized(stateName));
-    if (!name || !state || !districtName) continue;
-    const district = districtByName.get(`${String(state._id)}:${normalized(districtName)}`);
-    if (!district) continue;
-    const key = `${String(district._id)}:${normalized(name)}`;
-    if (cityKeys.has(key)) continue;
-    cityKeys.add(key);
-    await upsertMaster({ kind: "city", name, parentId: district._id });
-  }
-
+  // 6. Verify the database really contains the source hierarchy.
   const counts = {
     specializations: await MasterData.countDocuments({ kind: "specialization", active: true }),
     states: await MasterData.countDocuments({ kind: "state", active: true }),
     districts: await MasterData.countDocuments({ kind: "district", active: true }),
     cities: await MasterData.countDocuments({ kind: "city", active: true }),
   };
-
-  if (!counts.states || !counts.districts || !counts.cities) {
-    throw new Error(`LGD import incomplete: ${JSON.stringify(counts)}`);
+  const lgdCounts = {
+    states: await MasterData.countDocuments({ kind: "state", source: "lgd", active: true }),
+    districts: await MasterData.countDocuments({ kind: "district", source: "lgd", active: true }),
+    cities: await MasterData.countDocuments({ kind: "city", source: "lgd", active: true }),
+  };
+  if (lgdCounts.states < source.stats.states || lgdCounts.districts < source.stats.districts || lgdCounts.cities < source.stats.cities) {
+    throw new Error(`LGD import incomplete: source=${JSON.stringify(source.stats)} database(lgd)=${JSON.stringify(lgdCounts)}`);
   }
 
-  return counts;
+  return {
+    counts,
+    lgdCounts,
+    written: { specializations: specs.inserted, states: stateSync.inserted, districts: districtSync.inserted, cities: citySync.inserted },
+    source: source.stats,
+    snapshotDate: source.manifest?.snapshotDate || null,
+  };
 };
 
 const run = async () => {
   await connectDB();
   const result = await importLgdMasterData();
-  console.log(JSON.stringify({ source: "Government of India Local Government Directory (LGD)", sourceDirectory: SOURCE_DIR, result }));
+  console.log(JSON.stringify({ source: "Government of India Local Government Directory (LGD)", ...result }));
 };
 
 if (process.argv[1]?.endsWith("005_import_lgd_master_data.js")) {
-  run().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => disconnectDB());
+  run().catch((error) => { console.error(error.message || error); process.exitCode = 1; }).finally(() => disconnectDB());
 }

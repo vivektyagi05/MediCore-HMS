@@ -1,0 +1,41 @@
+{
+  "dataset": "Local Government Directory (LGD) - States, Districts, Statewise Urban Local Bodies coverage",
+  "authority": "Ministry of Panchayati Raj, Government of India - Local Government Directory (LGD)",
+  "authoritativeSource": "https://lgdirectory.gov.in/downloadDirectory.do",
+  "license": "Government Open Data License - India (GODL-India)",
+  "licenseUrl": "https://data.gov.in/government-open-data-license-india",
+  "attribution": "Data: Local Government Directory (LGD), Ministry of Panchayati Raj, Government of India, https://lgdirectory.gov.in/ (GODL-India). Snapshot mirrored by ramSeraph/opendata (https://github.com/ramSeraph/opendata, release lgd-latest-extra1).",
+  "snapshotDate": "2026-09-19",
+  "downloadedAt": "2026-09-19T20:41:38Z",
+  "retrievalNote": "lgdirectory.gov.in and data.gov.in return HTTP 403 (host_not_allowed) from the build sandbox, so the LGD Download Directory exports were retrieved from the ramSeraph/opendata automated LGD mirror on GitHub Releases. Files are unmodified extractions of the .7z archives listed below. Independent cross-check: 760/763 district codes in the older direct LGD export (planemad/india-local-government-directory, Dec 2022) map to the same state code in this snapshot, and all 36 state codes are identical.",
+  "delimiter": ",",
+  "files": [
+    {
+      "file": "states.csv",
+      "role": "State layer",
+      "dataRows": 36,
+      "sha256": "17c44a8e083f767f729887efe42388dd9aebfbca7152a0dc33eee7ac1aa0ddaa",
+      "sourceArchive": "states.19Sep2026.csv.7z",
+      "sourceArchiveSha256": "50f8130ccfe38d5973a279f8e887793776ffb70e6eb301edb32f75749dbdf10e",
+      "sourceUrl": "https://github.com/ramSeraph/opendata/releases/download/lgd-latest-extra1/states.19Sep2026.csv.7z"
+    },
+    {
+      "file": "districts.csv",
+      "role": "District layer",
+      "dataRows": 784,
+      "sha256": "ff37eb5ac4fdfad369ef792b13410fff635294f50104b1061fc94b5800be4b2b",
+      "sourceArchive": "districts.19Sep2026.csv.7z",
+      "sourceArchiveSha256": "556cfdac07c863cb517b55b97e23787fc3fe867bb762c26ade2a4896238e8e65",
+      "sourceUrl": "https://github.com/ramSeraph/opendata/releases/download/lgd-latest-extra1/districts.19Sep2026.csv.7z"
+    },
+    {
+      "file": "statewise_ulbs_coverage.csv",
+      "role": "City/Town layer (urban local bodies mapped to district)",
+      "dataRows": 35008,
+      "sha256": "adf3e51d837eb78fc874f807ddfb42245d02fa535068a478fdae2f7943e9c0f5",
+      "sourceArchive": "statewise_ulbs_coverage.19Sep2026.csv.7z",
+      "sourceArchiveSha256": "796e0a77ab5cdc1c0c2311ff4a681fedc4c311a36d2aea9bdd9c903370a1df89",
+      "sourceUrl": "https://github.com/ramSeraph/opendata/releases/download/lgd-latest-extra1/statewise_ulbs_coverage.19Sep2026.csv.7z"
+    }
+  ]
+}

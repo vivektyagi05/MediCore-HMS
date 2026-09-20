@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const realtime = fs.readFileSync("src/context/RealtimeContext.jsx", "utf8");
-const adminDoctors = fs.readFileSync("backend/controllers/admin/doctorAdminController.js", "utf8");
-const publicController = fs.readFileSync("backend/controllers/publicController.js", "utf8");
+// Resolve from this file, not process.cwd(): the suite runs from backend/.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+
+const realtime = read("src/context/RealtimeContext.jsx");
+const adminDoctors = read("backend/controllers/admin/doctorAdminController.js");
+const publicController = read("backend/controllers/publicController.js");
 
 assert.match(realtime, /let initialConnection = true;/);
 assert.match(realtime, /if \(initialConnection\) \{/);

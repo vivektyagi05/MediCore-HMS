@@ -8,7 +8,6 @@ import {
   hashEmailVerificationToken,
 } from "../utils/emailVerification.js";
 import { AppError } from "../middleware/errorMiddleware.js";
-import { logger } from "../utils/logger.js";
 
 const buildVerificationUrl = (token) =>
   `${env.frontendUrl.replace(/\/$/, "")}/verify-email#token=${encodeURIComponent(token)}`;

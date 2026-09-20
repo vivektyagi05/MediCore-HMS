@@ -65,15 +65,15 @@ const automationRunLogSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-automationRunLogSchema.pre("validate", function enforceExactlyOneSource(next) {
+automationRunLogSchema.pre("validate", function enforceExactlyOneSource() {
+  // Mongoose 9: no `next` callback; throw to fail validation.
   const hasFlow = Boolean(this.flowId);
   const hasProcess = Boolean(this.processDefinitionId);
   if (hasFlow === hasProcess) {
-    return next(new Error("AutomationRunLog requires exactly one of flowId or processDefinitionId."));
+    throw new Error("AutomationRunLog requires exactly one of flowId or processDefinitionId.");
   }
   if (hasFlow) this.sourceKind = "automation_flow";
   if (hasProcess) this.sourceKind = "process_definition";
-  next();
 });
 
 automationRunLogSchema.index({ flowId: 1, createdAt: -1 });

@@ -308,6 +308,10 @@ export const getNextAvailableSlot = asyncHandler(async (req, res) => {
   }
   const doctor = await Doctor.findById(doctorId).lean();
   if (!doctor) throw new AppError("Doctor profile not found", 404);
+  // Availability of an unpublished doctor is not bookable and must not be probed.
+  if (req.user?.role !== ROLES.SUPER_ADMIN && (!doctor.isVerified || doctor.verificationStatus !== "approved" || !doctor.isActive)) {
+    throw new AppError("Doctor is not approved for appointments", 403);
+  }
   const horizonDays = Math.min(Math.max(Number(req.query.horizonDays) || MAX_NEXT_AVAILABLE_HORIZON_DAYS, 1), MAX_NEXT_AVAILABLE_HORIZON_DAYS);
   const now = new Date();
   const today = new Date(now);

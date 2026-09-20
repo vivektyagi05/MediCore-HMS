@@ -1,4 +1,5 @@
 import AIInsight from "../models/AIInsight.js";
+import User from "../models/User.js";
 import Doctor from "../models/Doctor.js";
 import SymptomSession from "../models/SymptomSession.js";
 import { ADMIN_ROLES, ROLES } from "../constants/roles.js";
@@ -200,12 +201,19 @@ export const smartSearch = asyncHandler(async (req, res) => {
   const query = String(req.query.q || "").trim();
   if (query.length < 2) throw new AppError("Search query must be at least 2 characters", 400);
 
+  // Only publicly bookable doctors may be suggested (approved + verified +
+  // active, with an active doctor account) — never pending/rejected/inactive.
+  const activeDoctorUsers = await User.find({ role: "doctor", isActive: true }).select("_id").lean();
   const doctors = await Doctor.find({
+    isVerified: true,
+    verificationStatus: "approved",
+    isActive: true,
+    userId: { $in: activeDoctorUsers.map((user) => user._id) },
     $or: [
-      { specialization: new RegExp(query, "i") },
+      { specialization: new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") },
     ],
   })
-    .populate("userId", "name email")
+    .populate("userId", "name")
     .sort({ rating: -1 })
     .limit(10)
     .lean();

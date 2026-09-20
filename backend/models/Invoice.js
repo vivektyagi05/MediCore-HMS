@@ -128,13 +128,13 @@ const invoiceSchema = new mongoose.Schema(
 // have neither), so the real requirement is enforced here instead: every
 // invoice must be identifiable as either a consultation invoice (payment +
 // appointment) or a subscription invoice (subscriptionId), never neither.
-invoiceSchema.pre("validate", function enforceInvoiceLinkage(next) {
+invoiceSchema.pre("validate", function enforceInvoiceLinkage() {
+  // Mongoose 9: no `next` callback; throw to fail validation.
   const hasConsultationLink = Boolean(this.paymentId && this.appointmentId);
   const hasSubscriptionLink = Boolean(this.subscriptionId);
   if (!hasConsultationLink && !hasSubscriptionLink) {
-    return next(new Error("Invoice must reference either a payment+appointment or a subscription"));
+    throw new Error("Invoice must reference either a payment+appointment or a subscription");
   }
-  next();
 });
 
 const Invoice = mongoose.model("Invoice", invoiceSchema);

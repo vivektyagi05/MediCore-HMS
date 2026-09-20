@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Image, Plus, Trash2, RefreshCw, Save, Upload, X } from "lucide-react";
 import { practiceApi } from "../../api/practiceApi";
 import { masterDataApi } from "../../api/masterDataApi";
+import DoctorLocationFields from "../../components/doctor/DoctorLocationFields";
+import { EMPTY_LOCATION, LOCATION_KEYS, buildLocationPayload, locationFromDoctor } from "../../utils/doctorLocation";
 import Button from "../../components/ui/Button";
 import PracticeManagementNav from "../../components/practice/PracticeManagementNav";
 import { useToast } from "../../context/ToastContext";
@@ -99,12 +101,11 @@ export default function DoctorProfessionalProfile() {
   const [baseline, setBaseline] = useState(null);
   const [profilePhoto, setProfilePhoto] = useState("");
   const [identity, setIdentity] = useState({
-    specialization: "", specializationMasterId: "", specializationType: "OTHER", specializationOther: "",
+    specialization: "", specializationMasterId: "", specializationType: "MASTER", specializationOther: "",
     qualification: "", collegeName: "", graduationYear: "",
     licenseNumber: "", medicalCouncil: "", hospitalName: "",
-    city: "", cityMasterId: "", cityType: "OTHER", cityOther: "",
-    state: "", stateMasterId: "", stateType: "OTHER", stateOther: "",
-    district: "", districtMasterId: "", districtType: "OTHER", districtOther: "", bio: "",
+    ...EMPTY_LOCATION,
+    bio: "",
   });
   const [languages, setLanguages] = useState([]);
   const [subSpecialties, setSubSpecialties] = useState([]);
@@ -115,7 +116,7 @@ export default function DoctorProfessionalProfile() {
   const [memberships, setMemberships] = useState([]);
   const [clinics, setClinics] = useState([]);
   const [insuranceAccepted, setInsuranceAccepted] = useState([]);
-  const [master, setMaster] = useState({ specializations: [], states: [], districts: [], cities: [] });
+  const [master, setMaster] = useState({ specializations: [] });
 
   const snapshot = (values = {}) => JSON.stringify(values);
   const currentSnapshot = () => snapshot({ identity, languages, subSpecialties, education, experienceEntries, awards, researchPublications, memberships, clinics, insuranceAccepted });
@@ -137,27 +138,26 @@ export default function DoctorProfessionalProfile() {
       const res = await practiceApi.getProfessionalProfile();
       const d = res.data;
       setProfilePhoto(d.profilePhoto || "");
-      setIdentity({
-        specialization: d.specialization || "", specializationMasterId: d.specializationMasterId || "", specializationType: d.specializationType || "OTHER", specializationOther: d.specializationOther || "",
+      const loadedIdentity = {
+        specialization: d.specialization || "", specializationMasterId: d.specializationMasterId || "",
+        specializationType: d.specializationMasterId ? "MASTER" : (d.specializationOther ? "OTHER" : "MASTER"), specializationOther: d.specializationOther || "",
         qualification: d.qualification || "", collegeName: d.collegeName || "",
         graduationYear: d.graduationYear || "", licenseNumber: d.licenseNumber || "", medicalCouncil: d.medicalCouncil || "",
         hospitalName: d.hospitalName || "",
-        city: d.city || "", cityMasterId: d.cityMasterId || "", cityType: d.cityType || "OTHER", cityOther: d.cityOther || "",
-        state: d.state || "", stateMasterId: d.stateMasterId || "", stateType: d.stateType || "OTHER", stateOther: d.stateOther || "",
-        district: d.district || "", districtMasterId: d.districtMasterId || "", districtType: d.districtType || "OTHER", districtOther: d.districtOther || "", bio: d.bio || "",
-      });
+        ...locationFromDoctor(d),
+        bio: d.bio || "",
+      };
+      setIdentity(loadedIdentity);
       setLanguages(d.languages || []);
       setSubSpecialties(d.subSpecialties || []);
       setEducation(d.education || []); setExperienceEntries(d.experienceEntries || []);
       setAwards(d.awards || []); setResearchPublications(d.researchPublications || []);
       setMemberships(d.memberships || []); setClinics(d.clinics || []);
       setInsuranceAccepted(d.insuranceAccepted || []);
+      // Baseline must be built from the exact same shape as the live form;
+      // a reduced subset made the page permanently "dirty".
       setBaseline(snapshot({
-        identity: {
-          specialization: d.specialization || "", qualification: d.qualification || "", collegeName: d.collegeName || "",
-          graduationYear: d.graduationYear || "", licenseNumber: d.licenseNumber || "", medicalCouncil: d.medicalCouncil || "",
-          hospitalName: d.hospitalName || "", city: d.city || "", state: d.state || "", district: d.district || "", bio: d.bio || "",
-        },
+        identity: loadedIdentity,
         languages: d.languages || [], subSpecialties: d.subSpecialties || [], education: d.education || [],
         experienceEntries: d.experienceEntries || [], awards: d.awards || [], researchPublications: d.researchPublications || [],
         memberships: d.memberships || [], clinics: d.clinics || [], insuranceAccepted: d.insuranceAccepted || [],
@@ -168,26 +168,12 @@ export default function DoctorProfessionalProfile() {
   }, [t]);
 
   useEffect(() => {
-    Promise.all([masterDataApi.getSpecializations(), masterDataApi.getStates()])
-      .then(([specializations, states]) => setMaster((current) => ({ ...current, specializations: Array.isArray(specializations) ? specializations : [], states: Array.isArray(states) ? states : [] })))
+    let active = true;
+    masterDataApi.getSpecializations()
+      .then((specializations) => { if (active) setMaster({ specializations: Array.isArray(specializations) ? specializations : [] }); })
       .catch(() => {});
+    return () => { active = false; };
   }, []);
-
-  useEffect(() => {
-    if (!identity.stateMasterId) {
-      setMaster((current) => ({ ...current, districts: [], cities: [] }));
-      return;
-    }
-    masterDataApi.getDistricts(identity.stateMasterId).then((response) => setMaster((current) => ({ ...current, districts: Array.isArray(response) ? response : [], cities: [] }))).catch(() => {});
-  }, [identity.stateMasterId]);
-
-  useEffect(() => {
-    if (!identity.districtMasterId) {
-      setMaster((current) => ({ ...current, cities: [] }));
-      return;
-    }
-    masterDataApi.getCities(identity.districtMasterId).then((response) => setMaster((current) => ({ ...current, cities: Array.isArray(response) ? response : [] }))).catch(() => {});
-  }, [identity.districtMasterId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -196,6 +182,7 @@ export default function DoctorProfessionalProfile() {
     try {
       await practiceApi.updateProfessionalProfile({
         ...identity,
+        ...buildLocationPayload(identity),
         graduationYear: identity.graduationYear === "" ? null : Number(identity.graduationYear),
         languages, subSpecialties, education, experienceEntries, awards,
         researchPublications, memberships, clinics, insuranceAccepted,
@@ -240,19 +227,16 @@ export default function DoctorProfessionalProfile() {
   if (error) return <div className="glass-card flex flex-col items-center justify-center gap-3 rounded-2xl py-16 text-center"><p className="text-sm font-semibold text-slate-500">{error}</p><button type="button" onClick={load} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"><RefreshCw size={14} /> {p("retry")}</button></div>;
 
   const selectMaster = (fieldName, id) => {
-    const list = fieldName === "specialization" ? master.specializations : master[`${fieldName}s`];
-    const item = (list || []).find((entry) => String(entry._id) === String(id));
+    const item = master.specializations.find((entry) => String(entry._id) === String(id));
     setIdentity((current) => ({
       ...current,
-      [`${fieldName}MasterId`]: id,
-      [`${fieldName}Type`]: "MASTER",
-      [`${fieldName}Other`]: "",
-      [fieldName]: item?.name || "",
-      ...(fieldName === "state" ? { districtMasterId: "", districtType: "OTHER", districtOther: "", district: "", cityMasterId: "", cityType: "OTHER", cityOther: "", city: "" } : {}),
-      ...(fieldName === "district" ? { cityMasterId: "", cityType: "OTHER", cityOther: "", city: "" } : {}),
+      specializationMasterId: id,
+      specializationType: "MASTER",
+      specializationOther: "",
+      specialization: item?.name || "",
     }));
   };
-  const selectOther = (fieldName) => setIdentity((current) => ({ ...current, [`${fieldName}MasterId`]: "", [`${fieldName}Type`]: "OTHER", [fieldName]: "Other" }));
+  const selectOther = () => setIdentity((current) => ({ ...current, specializationMasterId: "", specializationType: "OTHER", specialization: "Other" }));
 
   const field = (key, type = "text") => (
     <label key={key} className="block">
@@ -320,12 +304,16 @@ export default function DoctorProfessionalProfile() {
           <div className="glass-card rounded-2xl p-6">
             <h3 className="font-black text-slate-950">{p("identity")}</h3>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("specialization")}</span><select value={identity.specializationType === "OTHER" ? "__other__" : identity.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("specialization") : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Select specialization</option>{master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.specializationType === "OTHER" && <input value={identity.specializationOther} onChange={(e) => setIdentity((v) => ({ ...v, specializationOther: e.target.value }))} placeholder="Other specialization" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
+              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("specialization")}</span><select value={identity.specializationType === "OTHER" ? "__other__" : identity.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther() : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Select specialization</option>{master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.specializationType === "OTHER" && <input value={identity.specializationOther} onChange={(e) => setIdentity((v) => ({ ...v, specializationOther: e.target.value }))} placeholder="Other specialization" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
               {field("qualification")}{field("collegeName")}{field("graduationYear","number")}
               {field("licenseNumber")}{field("medicalCouncil")}{field("hospitalName")}
-              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("state")}</span><select value={identity.stateType === "OTHER" ? "__other__" : identity.stateMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("state") : selectMaster("state", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Select state</option>{master.states.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.stateType === "OTHER" && <input value={identity.stateOther} onChange={(e) => setIdentity((v) => ({ ...v, stateOther: e.target.value }))} placeholder="Other state" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
-              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("district")}</span><select disabled={identity.stateType !== "MASTER" || !identity.stateMasterId} value={identity.districtType === "OTHER" ? "__other__" : identity.districtMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther("district") : selectMaster("district", e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"><option value="">Select district</option>{master.districts.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}<option value="__other__">Other</option></select>{identity.districtType === "OTHER" && <input value={identity.districtOther} onChange={(e) => setIdentity((v) => ({ ...v, districtOther: e.target.value }))} placeholder="Other district" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />}</label>
-              <label className="block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("city")}</span><input type="text" disabled={identity.districtType !== "MASTER" || !identity.districtMasterId} value={identity.city || ""} onChange={(e) => setIdentity((v) => ({ ...v, city: e.target.value, cityMasterId: "", cityType: "OTHER", cityOther: e.target.value }))} placeholder="Enter city" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100" />{identity.districtType === "MASTER" && identity.districtMasterId && <p className="mt-1 text-xs text-slate-500">Exact canonical matches are resolved automatically within the selected district.</p>}</label>
+            </div>
+            <div className="mt-4">
+              <DoctorLocationFields
+                value={Object.fromEntries(LOCATION_KEYS.map((key) => [key, identity[key] ?? ""]))}
+                onChange={(next) => setIdentity((current) => ({ ...current, ...next }))}
+                labels={{ state: p("state"), district: p("district"), city: p("city") }}
+              />
             </div>
             <label className="mt-4 block"><span className="mb-1 block text-xs font-bold text-slate-500">{p("bio")}</span><textarea rows={6} value={identity.bio} onChange={(e) => setIdentity((v) => ({ ...v, bio: e.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" /></label>
             <div className="mt-4"><TagListEditor title={p("languages")} tags={languages} setTags={setLanguages} placeholder={p("languagePlaceholder")} addLabel={p("add")} removeLabel={p("remove")} /></div>

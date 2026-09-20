@@ -174,21 +174,26 @@ export const getSearchMeta = asyncHandler(async (_req, res) => {
   const baseFilter = publicDoctorFilter(await getPublicDoctorUserIds());
 
   const includeMasterData = _req.query?.masterData !== "false";
-  const [specializationMaster, stateMaster, districtMaster, cityMaster, languageValues] = await Promise.all([
+  // Specializations and states are small canonical lists (LGD: 36 states/UTs).
+  // Districts/cities are ~800/~5,000 records, so the flat search facet lists only
+  // the values that publicly bookable doctors actually have (a real, small facet);
+  // full hierarchies are fetched per-parent via /api/master-data.
+  const [specializationMaster, stateMaster, districtValues, cityValues, languageValues] = await Promise.all([
     includeMasterData ? listMasterData({ kind: MASTER_KINDS.SPECIALIZATION }) : Promise.resolve([]),
     includeMasterData ? listMasterData({ kind: MASTER_KINDS.STATE }) : Promise.resolve([]),
-    includeMasterData ? listMasterData({ kind: MASTER_KINDS.DISTRICT }) : Promise.resolve([]),
-    includeMasterData ? listMasterData({ kind: MASTER_KINDS.CITY }) : Promise.resolve([]),
+    includeMasterData ? Doctor.distinct("district", baseFilter) : Promise.resolve([]),
+    includeMasterData ? Doctor.distinct("city", baseFilter) : Promise.resolve([]),
     Doctor.distinct("languages", baseFilter),
   ]);
+  const sortedUnique = (values) => [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
   res.status(200).json({
     success: true,
     data: {
       specializations: specializationMaster.map((item) => item.name),
-      cities: cityMaster.map((item) => item.name),
+      cities: sortedUnique(cityValues),
       states: stateMaster.map((item) => item.name),
-      districts: districtMaster.map((item) => item.name),
+      districts: sortedUnique(districtValues),
       languages: [...new Set(languageValues.flat().filter(Boolean))].sort(),
       consultationModes: ["online", "offline", "home_visit"],
     },
@@ -1056,13 +1061,13 @@ const publishedServiceFilter = { status: "published", visibility: "public", isAc
 const publishedArticleFilter = { status: "published", visibility: "public", isPublished: true };
 
 const populateServiceRelations = (query) => query
-  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus verifiedAt profilePhoto createdAt", populate: { path: "userId", select: "name role isActive" } })
+  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus isVerified isActive verifiedAt profilePhoto createdAt", populate: { path: "userId", select: "name role isActive" } })
   .populate({ path: "relatedServices", select: "title slug shortDescription description benefits eligibility preparation procedureInformation duration consultationModes price category relatedSpecialties relatedDoctors relatedServices status visibility featured displayOrder localizedContent seo icon image createdAt updatedAt" });
 
 const populateArticleRelations = (query) => query
   .populate({ path: "author", select: "name" })
   .populate({ path: "relatedServices", select: "title slug shortDescription description benefits eligibility preparation procedureInformation duration consultationModes price category relatedSpecialties relatedDoctors relatedServices status visibility featured displayOrder localizedContent seo icon image createdAt updatedAt" })
-  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus verifiedAt profilePhoto createdAt", populate: { path: "userId", select: "name role isActive" } });
+  .populate({ path: "relatedDoctors", select: "userId specialization qualification experience fees city state district hospitalName bio languages consultationMode availability subSpecialties education experienceEntries awards researchPublications memberships clinics clinicPhotos emergencyAvailability insuranceAccepted rating totalReviews licenseNumber medicalCouncil verificationStatus isVerified isActive verifiedAt profilePhoto createdAt", populate: { path: "userId", select: "name role isActive" } });
 
 export const getPublicServices = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);

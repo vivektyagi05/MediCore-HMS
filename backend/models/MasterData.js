@@ -22,10 +22,14 @@ masterDataSchema.index(
   { unique: true },
 );
 
-masterDataSchema.pre("validate", function normalizeMasterName(next) {
+// Mongoose 9 removed the callback-style `next` argument for document
+// middleware: `function (next) { ...; next(); }` throws "next is not a function"
+// on every create()/save()/insertMany(), and insertMany({ordered:false})
+// swallowed that error and reported zero inserted rows. Keep hooks synchronous
+// (throw to fail validation) and never take a `next` parameter.
+masterDataSchema.pre("validate", function normalizeMasterName() {
   this.name = String(this.name || "").trim();
   this.normalizedName = this.name.toLowerCase();
-  next();
 });
 
 const MasterData = mongoose.model("MasterData", masterDataSchema);

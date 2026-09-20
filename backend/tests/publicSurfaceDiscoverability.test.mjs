@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import Doctor from "../models/Doctor.js";
 import Review from "../models/Review.js";
+import User from "../models/User.js";
 import { getDoctorPublicReviews, getSimilarDoctors } from "../controllers/publicController.js";
 
 function test(name, fn) {
@@ -35,6 +36,9 @@ function test(name, fn) {
 console.log("publicSurfaceDiscoverability.test.mjs");
 
 const fakeId = new mongoose.Types.ObjectId().toString();
+
+// publicDoctorFilter() first resolves the active doctor user ids.
+User.find = () => ({ select: () => ({ lean: async () => [] }) });
 
 const fakeRes = () => ({ status: () => ({ json: () => {} }) });
 

@@ -34,7 +34,7 @@ export const serializeArticlePublic = (article, req, locale = "en", { includeCon
     readingTime: Math.max(1, Math.ceil(body.replace(/\s+/g, " ").trim().split(" ").filter(Boolean).length / 200)),
     relatedServices: (article.relatedServices || []).filter((service) => service?.status === "published" && service?.visibility === "public").map((service) => serializeServicePublic(service, req, locale)).filter(Boolean),
     relatedSpecialties: article.relatedSpecialties || [],
-    relatedDoctors: (article.relatedDoctors || []).filter((doctor) => doctor?.verificationStatus === "approved" && doctor?.isActive !== false && doctor?.userId?.role === "doctor" && doctor?.userId?.isActive !== false).map((doctor) => {
+    relatedDoctors: (article.relatedDoctors || []).filter((doctor) => doctor?.verificationStatus === "approved" && doctor?.isVerified === true && doctor?.isActive === true && doctor?.userId?.role === "doctor" && doctor?.userId?.isActive !== false).map((doctor) => {
       const profile = serializeDoctorPublicProfile(doctor, req);
       return { id: profile.id, name: profile.name, specialization: profile.specialization, qualification: profile.qualification, city: profile.city, state: profile.state, profilePhoto: profile.profilePhoto };
     }),

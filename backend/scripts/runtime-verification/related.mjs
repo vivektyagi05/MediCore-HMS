@@ -1,0 +1,16 @@
+import { api, dbConnect, ADMIN_EMAIL, ADMIN_PASSWORD } from "./lib.mjs";
+const m = await dbConnect(); const db = m.connection.db;
+const admin = (await api("POST", "/auth/login", { body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } })).json.data; const A = admin.token;
+const docFor = async (tag) => { const u = await db.collection("users").findOne({ email: `dev-doctor-${tag}@medicore-dev.test` }); return String((await db.collection("doctors").findOne({ userId: u._id }))._id); };
+const ids = { ok: await docFor("vis-approved"), pending: await docFor("vis-pending"), inactive: await docFor("vis-inactive"), unverified: await docFor("vis-unverified") };
+const st = async (id) => { const d = await db.collection("doctors").findOne({ _id: new m.Types.ObjectId(id) }); return `${d.verificationStatus}/${d.isVerified}/${d.isActive}`; };
+console.log("fixture states:", JSON.stringify({ ok: await st(ids.ok), pending: await st(ids.pending), inactive: await st(ids.inactive), unverified: await st(ids.unverified) }));
+const slug = "dev-test-related-doctors";
+await db.collection("services").deleteMany({ slug });
+const cr = await api("POST", "/admin/services", { token: A, body: { title: "DEV TEST Related", slug, shortDescription: "Development test service", description: "Development test service used to verify related-doctor visibility rules.", category: "Consultation", price: 1, duration: "1 minute", consultationModes: ["online"], status: "published", visibility: "public", relatedDoctors: Object.values(ids) } });
+console.log("create", cr.status, JSON.stringify(cr.json).slice(0,300));
+const det = await api("GET", `/public/services/${slug}`);
+const rel = (det.json.data.service.relatedDoctors || []).map((d) => String(d.id));
+const okOnly = rel.length === 1 && rel[0] === ids.ok;
+console.log(okOnly ? "PASS" : "FAIL", "public service detail lists ONLY the approved+verified+active related doctor; got", rel.length, "of 4");
+await db.collection("services").deleteMany({ slug }); await m.disconnect();

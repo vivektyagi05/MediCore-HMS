@@ -57,9 +57,25 @@ const resolveMasterSelection = async (field, payload, options = {}) => {
   const legacyValue = payload?.[field];
   const otherValue = payload?.[config.otherField];
 
-  if (type === OTHER_VALUE && field === "city" && options.parentId) {
+  // Location levels (not specialization, which is required) can be explicitly
+  // cleared: every key of the level is present and blank. Without this a doctor
+  // who changes state (which resets district/city in the form) could never save
+  // the cleared child levels — the stored old district would be merged back in
+  // and rejected as belonging to a different state.
+  const isBlank = (value) => value === undefined || value === null || String(value).trim() === "";
+  if (field !== "specialization" && isBlank(id) && isBlank(type) && isBlank(otherValue) && isBlank(legacyValue)) {
+    return { type: OTHER_VALUE, masterId: null, otherValue: "", displayValue: "" };
+  }
+
+  // City is typed free text in the doctor forms. It is resolved against the
+  // canonical cities of the SELECTED district only (never a global name match):
+  // an exact (case/whitespace-insensitive) hit becomes MASTER, everything else
+  // is stored as OTHER. A client that already sends a canonical cityMasterId
+  // (type MASTER) is validated by id + parent below instead.
+  const isTypedCity = field === "city" && !id && type !== "MASTER" && (type === OTHER_VALUE || !type);
+  if (isTypedCity && (otherValue || legacyValue)) {
     const candidate = otherValue || legacyValue;
-    const canonicalCity = await getMasterByName(candidate, config.kind, options.parentId);
+    const canonicalCity = options.parentId ? await getMasterByName(candidate, config.kind, options.parentId) : null;
     if (canonicalCity) {
       return {
         type: "MASTER",
@@ -199,11 +215,25 @@ export const serializeDoctorMasterData = (doctor) => {
   return result;
 };
 
+const PARENT_KIND = Object.freeze({ district: MASTER_KINDS.STATE, city: MASTER_KINDS.DISTRICT });
+
+// Lists canonical master data. Districts and cities are ONLY ever listed under
+// an explicit, existing parent of the right kind (a state for districts, a
+// district for cities): an unscoped listing would return an arbitrary slice of
+// ~800 districts / ~5,000 cities and leak values across parents.
 export const listMasterData = async ({ kind, parentId } = {}) => {
   const filter = { kind, active: true };
-  if (parentId !== undefined) {
+  const parentKind = PARENT_KIND[kind];
+  if (parentKind) {
+    if (parentId === undefined || parentId === null || parentId === "") {
+      throw new AppError(`parent (${parentKind} id) is required to list ${kind} master data`, 400);
+    }
     if (!mongoose.Types.ObjectId.isValid(parentId)) throw new AppError("Invalid parent master-data id", 400);
-    filter.parentId = parentId;
+    const parent = await MasterData.findOne({ _id: parentId, kind: parentKind, active: true }).select("_id").lean();
+    if (!parent) throw new AppError(`Unknown ${parentKind} master-data value`, 422);
+    filter.parentId = parent._id;
+  } else if (parentId !== undefined) {
+    throw new AppError(`${kind} master data has no parent`, 400);
   }
   return MasterData.find(filter).select("_id kind name parentId").sort({ name: 1 }).limit(500).lean();
 };
@@ -272,7 +302,7 @@ export const bootstrapMasterDataFromDoctors = async () => {
 
   for (const doctor of doctors) {
     const set = {};
-    const specialization = applySelection(set, "specialization", doctor.specialization, MASTER_KINDS.SPECIALIZATION);
+    applySelection(set, "specialization", doctor.specialization, MASTER_KINDS.SPECIALIZATION);
     const state = applySelection(set, "state", doctor.state, MASTER_KINDS.STATE);
     const district = applySelection(set, "district", doctor.district, MASTER_KINDS.DISTRICT);
     const city = applySelection(set, "city", doctor.city, MASTER_KINDS.CITY);

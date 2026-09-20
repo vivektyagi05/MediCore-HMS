@@ -1,5 +1,22 @@
 import apiClient from "./axios";
 
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+// Every list a consumer maps over is guaranteed to be an array, whatever the
+// server (or a proxy/error page) returned.
+export const normalizeSearchMeta = (payload) => {
+  const data = payload && typeof payload === "object" ? payload : {};
+  return {
+    ...data,
+    specializations: asArray(data.specializations),
+    cities: asArray(data.cities),
+    states: asArray(data.states),
+    districts: asArray(data.districts),
+    languages: asArray(data.languages),
+    consultationModes: asArray(data.consultationModes),
+  };
+};
+
 export const publicApi = {
   getHomeSeo: () => apiClient.get("/public/seo/home", { cacheTtlMs: 300000 }).then((r) => r.data),
 
@@ -10,7 +27,7 @@ export const publicApi = {
     apiClient.get("/public/featured-doctors", { cacheTtlMs: 30000 }).then((r) => r.data),
 
   getSearchMeta: (params = {}) =>
-    apiClient.get("/public/search-meta", { params, cacheTtlMs: 60000 }).then((r) => r.data),
+    apiClient.get("/public/search-meta", { params, cacheTtlMs: 60000 }).then((r) => ({ ...r.data, data: normalizeSearchMeta(r.data?.data) })),
 
   getDoctorCoverage: (params = {}) =>
     apiClient.get("/public/doctor-coverage", { params, cacheTtlMs: 120000 }).then((r) => r.data),

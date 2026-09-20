@@ -25,7 +25,7 @@ export default [
     ignores: ["backend/**"],
     languageOptions: {
       ecmaVersion: 2020,
-      globals: globals.browser,
+      globals: { ...globals.browser, __MEDICORE_BUILD__: "readonly" },
       parserOptions: {
         ecmaVersion: "latest",
         ecmaFeatures: { jsx: true },

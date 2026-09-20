@@ -98,7 +98,8 @@ export const getDoctors = asyncHandler(async (req, res) => {
 
   const [doctors, total] = await Promise.all([
     Doctor.find(filter)
-      .populate("userId", "name email role isActive")
+      // Unauthenticated route: never expose the doctor's account email.
+      .populate("userId", "name role isActive")
       .sort({ rating: -1, createdAt: -1 })
       .skip(skip)
       .limit(limit)

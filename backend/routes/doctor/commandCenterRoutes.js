@@ -7,9 +7,15 @@ import { getDoctorCommandCenter, markReportReviewed } from "../../controllers/do
 
 const router = express.Router();
 
-router.use(protect, authorizeRoles(ROLES.DOCTOR), requireApprovedDoctor);
+// IMPORTANT: this router is mounted at /api/doctor BEFORE the onboarding router.
+// A router-level `router.use(..., requireApprovedDoctor)` (no path) runs for EVERY
+// /api/doctor/* request that reaches this router — including GET/POST/PUT
+// /api/doctor/onboarding — and returned 403 "Your doctor account is not yet
+// approved" to exactly the pending doctors who need onboarding. The approval
+// gate therefore belongs on the approved-only routes themselves.
+const approvedDoctorOnly = [protect, authorizeRoles(ROLES.DOCTOR), requireApprovedDoctor];
 
-router.get("/command-center", getDoctorCommandCenter);
-router.patch("/reports/:reportId/reviewed", markReportReviewed);
+router.get("/command-center", ...approvedDoctorOnly, getDoctorCommandCenter);
+router.patch("/reports/:reportId/reviewed", ...approvedDoctorOnly, markReportReviewed);
 
 export default router;

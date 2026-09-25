@@ -8,6 +8,7 @@ import { useRealtime } from "../../context/RealtimeContext";
 import { useI18n } from "../../i18n/I18nContext";
 
 const STATUS_META = {
+  not_submitted: { icon: AlertTriangle, color: "text-slate-500", bg: "bg-slate-50 border-slate-200", label: "Not Submitted" },
   approved: { icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200", label: "Approved" },
   pending: { icon: Clock3, color: "text-amber-600", bg: "bg-amber-50 border-amber-200", label: "Pending Review" },
   rejected: { icon: XCircle, color: "text-rose-600", bg: "bg-rose-50 border-rose-200", label: "Rejected" },
@@ -66,7 +67,7 @@ export default function DoctorVerificationCenter() {
     );
   }
 
-  const statusMeta = STATUS_META[data.verificationStatus] || STATUS_META.pending;
+  const statusMeta = STATUS_META[data.verificationStatus] || STATUS_META.not_submitted;
   const StatusIcon = statusMeta.icon;
 
   return (

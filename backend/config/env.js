@@ -12,6 +12,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../.env"), quiet: true });
 dotenv.config({ quiet: true });
 
+import {
+  assertProductionConfig,
+  resolveAiProviderKey,
+  resolvePaymentGatewayMode,
+  resolveStorageDriver,
+  validateCommonConfig,
+} from "./productionGuards.js";
+
 const requiredEnv = ["MONGO_URI", "JWT_SECRET"];
 
 for (const key of requiredEnv) {
@@ -23,26 +31,24 @@ for (const key of requiredEnv) {
 const isProduction = process.env.NODE_ENV === "production";
 
 // SECURITY: production must not silently fall back to defaults meant for
-// local development (a localhost CORS origin, unset payment-gateway
-// secrets, a weak/placeholder JWT secret). Fail fast at boot instead of
-// shipping a misconfigured deployment.
+// local development (a localhost CORS origin, the in-memory test payment
+// gateway, template AI output, ephemeral container storage, a placeholder
+// JWT secret). Every violation is collected and reported in ONE boot failure
+// (see config/productionGuards.js, which is unit-tested with hand-built
+// environments). Outside production only unrecognised values fail.
 if (isProduction) {
-  const requiredInProduction = [
-    "CORS_ORIGIN",
-    "RAZORPAY_KEY_ID",
-    "RAZORPAY_KEY_SECRET",
-    "RAZORPAY_WEBHOOK_SECRET",
-    "BREVO_API_KEY",
-    "BREVO_SENDER_EMAIL",
-  ];
-  const missing = requiredInProduction.filter((key) => !process.env[key]);
-  if (missing.length) {
-    throw new Error(`Missing required production environment variable(s): ${missing.join(", ")}`);
-  }
-  if (process.env.JWT_SECRET.length < 32) {
-    throw new Error("JWT_SECRET must be at least 32 characters in production");
+  assertProductionConfig(process.env);
+} else {
+  const problems = validateCommonConfig(process.env);
+  if (problems.length) {
+    throw new Error(`Invalid configuration:\n${problems.map((problem) => `  - ${problem}`).join("\n")}`);
   }
 }
+
+const positiveInt = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
 
 export const env = Object.freeze({
   nodeEnv: process.env.NODE_ENV || "development",
@@ -59,6 +65,44 @@ export const env = Object.freeze({
   razorpayKeyId: process.env.RAZORPAY_KEY_ID,
   razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,
   razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+  // "razorpay" (real gateway) or "test" (in-memory gateway, never allowed in
+  // production -- see productionGuards.js and payments/paymentGateway.js).
+  paymentGatewayMode: resolvePaymentGatewayMode(process.env),
+  // Generative AI. Native Google Gemini SDK; "template" is a deterministic
+  // development/test renderer and is rejected at production boot.
+  ai: {
+    provider: resolveAiProviderKey(process.env),
+    geminiApiKey: process.env.GEMINI_API_KEY || "",
+    // Development default only. Production must pin GEMINI_MODEL explicitly
+    // (enforced in productionGuards.js).
+    geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    timeoutMs: positiveInt(process.env.AI_TIMEOUT_MS, 30_000),
+    healthCacheMs: positiveInt(process.env.AI_HEALTH_CACHE_MS, 60_000),
+  },
+  // Clinical relationship rules (see services/clinicalAccessService.js).
+  clinical: {
+    // After a consultation is completed, doctor and patient may keep chatting
+    // about it for this many days (follow-up questions). Outside the window
+    // chat closes until a new appointment is active.
+    chatFollowUpWindowDays: positiveInt(process.env.CHAT_FOLLOWUP_WINDOW_DAYS, 30),
+  },
+  // Persistent file storage (see storage/storageService.js).
+  storage: {
+    driver: resolveStorageDriver(process.env),
+    // Absolute root for the local driver. Defaults to <backend>/storage so
+    // development keeps working; production must set it explicitly.
+    localRoot: process.env.STORAGE_LOCAL_ROOT
+      ? path.resolve(process.env.STORAGE_LOCAL_ROOT)
+      : path.resolve(__dirname, "../storage"),
+    s3: {
+      bucket: process.env.STORAGE_S3_BUCKET || "",
+      region: process.env.STORAGE_S3_REGION || "",
+      endpoint: process.env.STORAGE_S3_ENDPOINT || "",
+      accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID || "",
+      secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY || "",
+      forcePathStyle: ["1", "true", "yes"].includes(String(process.env.STORAGE_S3_FORCE_PATH_STYLE || "").toLowerCase()),
+    },
+  },
   hospital: {
     name: process.env.HOSPITAL_NAME || "HMS Pro Hospital",
     gstin: process.env.HOSPITAL_GSTIN || "UNREGISTERED",

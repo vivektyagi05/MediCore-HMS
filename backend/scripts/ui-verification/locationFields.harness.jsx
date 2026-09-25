@@ -14,7 +14,6 @@ const q = (tid) => document.querySelector(`[data-testid="${tid}"]`);
 const opts = (el) => [...el.querySelectorAll("option")].map((o) => o.textContent);
 const settle = async (ms = 400) => { await act(async () => { await new Promise((r) => setTimeout(r, ms)); }); };
 const setSelect = async (tid, value) => { await act(async () => { const el = q(tid); const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set; setter.call(el, value); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); };
-const typeInto = async (tid, text) => { await act(async () => { const el = q(tid); const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; setter.call(el, text); el.dispatchEvent(new window.Event("input", { bubbles: true })); }); };
 
 const root = createRoot(document.getElementById("root"));
 await act(async () => { root.render(<App />); });
@@ -24,8 +23,8 @@ const stateOpts = opts(q("location-state"));
 check("state dropdown shows real Indian states (not just 'Other')", stateOpts.length > 30, `options=${stateOpts.length}`);
 for (const s of ["Rajasthan", "Uttar Pradesh", "Delhi", "Maharashtra"]) check(`state dropdown contains ${s}`, stateOpts.includes(s));
 check("district select disabled before a state is chosen", q("location-district").disabled === true);
-check("city input disabled before a district is chosen", q("location-city").disabled === true);
-check("city is a text input, not a select", q("location-city").tagName === "INPUT" && q("location-city").type === "text");
+check("city select disabled before a district is chosen", q("location-city").disabled === true);
+check("city is a select, not a text input", q("location-city").tagName === "SELECT");
 
 const stateId = (name) => [...q("location-state").querySelectorAll("option")].find((o) => o.textContent === name).value;
 const raj = stateId("Rajasthan"), up = stateId("Uttar Pradesh");
@@ -33,15 +32,18 @@ await setSelect("location-state", raj); await settle(1500);
 let dOpts = opts(q("location-district"));
 check("Rajasthan selected -> districts load incl. Jaipur", dOpts.includes("Jaipur") && !dOpts.includes("Mathura"), `n=${dOpts.length}`);
 const jaipurId = [...q("location-district").querySelectorAll("option")].find((o) => o.textContent === "Jaipur").value;
-await setSelect("location-district", jaipurId); await settle(300);
-check("district chosen -> city input enabled", q("location-city").disabled === false);
-await typeInto("location-city", "Jaipur"); await settle(100);
+await setSelect("location-district", jaipurId); await settle(1500);
+check("district chosen -> city select enabled", q("location-city").disabled === false);
+const cityOpts = opts(q("location-city"));
+check("Jaipur district selected -> cities load incl. Jaipur city", cityOpts.includes("Jaipur"), `n=${cityOpts.length}`);
+const jaipurCityId = [...q("location-city").querySelectorAll("option")].find((o) => o.textContent === "Jaipur").value;
+await setSelect("location-city", jaipurCityId); await settle(100);
 let p = buildLocationPayload(latest);
-check("payload: canonical state+district ids and typed city", p.stateType === "MASTER" && p.districtType === "MASTER" && p.city === "Jaipur" && p.cityType === "OTHER" && p.cityMasterId === "", JSON.stringify({ s: p.state, d: p.district, c: p.city }));
+check("payload: canonical state+district+city ids", p.stateType === "MASTER" && p.districtType === "MASTER" && p.cityType === "MASTER" && p.cityMasterId === jaipurCityId, JSON.stringify({ s: p.state, d: p.district, c: p.city }));
 
 // reset semantics
 await setSelect("location-state", up); await settle(1500);
-check("state change clears district + city (no stale values)", latest.districtMasterId === "" && latest.city === "" && q("location-city").value === "" && q("location-city").disabled === true);
+check("state change clears district + city (no stale values)", latest.districtMasterId === "" && latest.cityMasterId === "" && q("location-city").value === "" && q("location-city").disabled === true);
 dOpts = opts(q("location-district"));
 check("UP selected -> districts load incl. Mathura, no Jaipur (no cross-parent leakage)", dOpts.includes("Mathura") && !dOpts.includes("Jaipur"), `n=${dOpts.length}`);
 

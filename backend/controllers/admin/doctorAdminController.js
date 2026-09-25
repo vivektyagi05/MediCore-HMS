@@ -13,6 +13,8 @@
 //    (buildDoctorAnalyticsIntelligence / buildDoctorRevenueIntelligence /
 //    buildDoctorReviewIntelligence / buildDoctorReputationIntelligence), so
 //    the admin view and the doctor's own dashboard can never disagree.
+import { storageService, StorageNotFoundError } from "../../storage/storageService.js";
+import { containsRegex } from "../../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Doctor from "../../models/Doctor.js";
 import User from "../../models/User.js";
@@ -74,7 +76,7 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
     const specialization = await resolveCanonicalFilterValue(req.query.specialization, MASTER_KINDS.SPECIALIZATION, "specialization");
     match.specializationMasterId = specialization._id;
   } else if (req.query.specialization) {
-    match.specialization = new RegExp(req.query.specialization, "i");
+    match.specialization = containsRegex(req.query.specialization);
   }
 
   const canonicalLocation = await validateCanonicalLocationFilters({
@@ -86,9 +88,9 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
   if (canonicalLocation.district) match.districtMasterId = canonicalLocation.district._id;
   if (canonicalLocation.city) match.cityMasterId = canonicalLocation.city._id;
 
-  if (req.query.state && !mongoose.Types.ObjectId.isValid(req.query.state) && !req.query.stateMasterId) match.state = new RegExp(req.query.state, "i");
-  if (req.query.district && !mongoose.Types.ObjectId.isValid(req.query.district) && !req.query.districtMasterId) match.district = new RegExp(req.query.district, "i");
-  if (req.query.city && !mongoose.Types.ObjectId.isValid(req.query.city) && !req.query.cityMasterId) match.city = new RegExp(req.query.city, "i");
+  if (req.query.state && !mongoose.Types.ObjectId.isValid(req.query.state) && !req.query.stateMasterId) match.state = containsRegex(req.query.state);
+  if (req.query.district && !mongoose.Types.ObjectId.isValid(req.query.district) && !req.query.districtMasterId) match.district = containsRegex(req.query.district);
+  if (req.query.city && !mongoose.Types.ObjectId.isValid(req.query.city) && !req.query.cityMasterId) match.city = containsRegex(req.query.city);
   if (req.query.consultationMode) match.consultationMode = req.query.consultationMode;
   if (req.query.status === "active") match.isActive = true;
   if (req.query.status === "inactive") match.isActive = false;
@@ -117,7 +119,7 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
   ];
 
   if (req.query.search) {
-    const term = new RegExp(req.query.search, "i");
+    const term = containsRegex(req.query.search);
     pipeline.push({ $match: { $or: [{ "user.name": term }, { "user.email": term }] } });
   }
 
@@ -154,7 +156,7 @@ export const listDoctorsAdmin = asyncHandler(async (req, res) => {
 
   const countPipeline = [{ $match: match }];
   if (req.query.search) {
-    const term = new RegExp(req.query.search, "i");
+    const term = containsRegex(req.query.search);
     countPipeline.push(
       { $lookup: { from: "users", localField: "userId", foreignField: "_id", as: "user" } },
       { $unwind: "$user" },
@@ -214,6 +216,9 @@ export const getDoctorDetailAdmin = asyncHandler(async (req, res) => {
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new AppError("Invalid doctor id", 400);
 
   const doctor = await Doctor.findById(req.params.id).populate("userId", "name email isActive createdAt").lean();
+  // storageKey is an internal storage-service detail, never serialised;
+  // an admin downloads a document through downloadDoctorDocumentAdmin below.
+  if (doctor) doctor.documents = (doctor.documents || []).map(({ storageKey: _storageKey, ...rest }) => rest);
   if (!doctor) throw new AppError("Doctor not found", 404);
 
   const [analytics, reviews, reputation, appointmentCount, canViewFinance] = await Promise.all([
@@ -283,9 +288,18 @@ export const downloadDoctorDocumentAdmin = asyncHandler(async (req, res) => {
   const document = doctor.documents.find((doc) => doc._id.toString() === req.params.documentId);
   if (!document) throw new AppError("Document not found", 404);
 
-  res.download(document.filePath, document.fileName, (err) => {
-    if (err && !res.headersSent) {
-      res.status(404).json({ success: false, message: "Document file could not be found on disk" });
-    }
-  });
+  // Streams through storageService.read() (local or S3, per env.storage.driver).
+  // The old approach -- an fs-based download of a stored disk path -- only
+  // ever worked for the local driver, and depended on a raw filesystem path
+  // that must never be stored or returned to a client in the first place.
+  let buffer;
+  try {
+    buffer = await storageService.read(document.storageKey);
+  } catch (error) {
+    if (error instanceof StorageNotFoundError) throw new AppError("Document file could not be found in storage", 404);
+    throw error;
+  }
+  res.setHeader("Content-Type", document.mimeType || "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(document.fileName || "document")}"`);
+  res.send(buffer);
 });

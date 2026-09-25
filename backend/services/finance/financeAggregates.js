@@ -25,7 +25,7 @@
 // rather than re-implemented, so Finance's attention queue can never drift
 // from what the Payments/Refunds workspaces themselves consider "needs
 // attention".
-import Payment, { PAYMENT_STATUS } from "../../models/Payment.js";
+import Payment, { PAYMENT_STATUS, CAPTURED_LIKE_PAYMENT_STATUSES } from "../../models/Payment.js";
 import RefundRequest from "../../models/RefundRequest.js";
 import Invoice from "../../models/Invoice.js";
 import Doctor from "../../models/Doctor.js";
@@ -36,7 +36,6 @@ import { reconciliationService } from "../../payments/reconciliationService.js";
 
 const PAYMENT_MAX_RETRIES = 3; // mirrors paymentRetryService.js / paymentAdminController.js
 
-const CAPTURED_LIKE = [PAYMENT_STATUS.CAPTURED, PAYMENT_STATUS.REFUNDED, PAYMENT_STATUS.PARTIALLY_REFUNDED];
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -51,7 +50,7 @@ export async function buildFinanceOverview() {
 
   const [capturedLikeAgg, statusAgg, invoiceAgg, pendingRefundAgg, todayAgg] = await Promise.all([
     Payment.aggregate([
-      { $match: { status: { $in: CAPTURED_LIKE } } },
+      { $match: { status: { $in: CAPTURED_LIKE_PAYMENT_STATUSES } } },
       {
         $group: {
           _id: null,
@@ -75,7 +74,7 @@ export async function buildFinanceOverview() {
       { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: "$amount" } } },
     ]),
     Payment.aggregate([
-      { $match: { paidAt: { $gte: startOfToday }, status: { $in: CAPTURED_LIKE } } },
+      { $match: { paidAt: { $gte: startOfToday }, status: { $in: CAPTURED_LIKE_PAYMENT_STATUSES } } },
       { $group: { _id: null, count: { $sum: 1 }, totalAmount: { $sum: "$totalAmount" } } },
     ]),
   ]);
@@ -196,7 +195,7 @@ export async function buildRevenueTrend({ period = "daily", from, to } = {}) {
 
   const [revenueRows, failedRows, refundRows] = await Promise.all([
     Payment.aggregate([
-      { $match: { status: { $in: CAPTURED_LIKE }, paidAt: { $ne: null, ...dateMatch } } },
+      { $match: { status: { $in: CAPTURED_LIKE_PAYMENT_STATUSES }, paidAt: { $ne: null, ...dateMatch } } },
       {
         $group: {
           _id: { $dateToString: { format, date: "$paidAt" } },
@@ -238,7 +237,7 @@ export async function buildRevenueTrend({ period = "daily", from, to } = {}) {
 export async function buildRevenueBreakdown() {
   const [byDoctor, byStatus] = await Promise.all([
     Payment.aggregate([
-      { $match: { status: { $in: CAPTURED_LIKE } } },
+      { $match: { status: { $in: CAPTURED_LIKE_PAYMENT_STATUSES } } },
       { $group: { _id: "$doctorId", grossRevenue: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
       { $sort: { grossRevenue: -1 } },
       { $limit: 10 },
@@ -277,7 +276,7 @@ export async function buildRevenueBreakdown() {
   ]);
 
   const overview = await Payment.aggregate([
-    { $match: { status: { $in: CAPTURED_LIKE } } },
+    { $match: { status: { $in: CAPTURED_LIKE_PAYMENT_STATUSES } } },
     { $group: { _id: null, gatewayCollected: { $sum: { $ifNull: ["$gatewayAmount", 0] } }, walletCollected: { $sum: { $ifNull: ["$walletAmount", 0] } } } },
   ]);
 

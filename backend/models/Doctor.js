@@ -145,7 +145,15 @@ const doctorSchema = new mongoose.Schema(
           },
           title: { type: String, required: true, trim: true },
           fileName: { type: String, required: true },
-          filePath: { type: String, required: true },
+          // Opaque storage key (e.g. "doctor-documents/<uuid>.pdf"), resolved
+          // through storage/storageService.js -- never a raw filesystem path.
+          // Previously this field WAS a raw disk path (filePath) that was
+          // both stored in the DB and returned verbatim in
+          // getDoctorDocuments' JSON response straight to the doctor's own
+          // browser. Renamed as part of that fix; see
+          // migrations/007_doctor_documents_storage_key.js for any
+          // previously-uploaded documents.
+          storageKey: { type: String, required: true },
           mimeType: { type: String, required: true },
           // Verification Center (Phase D4, additive): real file size in bytes,
           // captured at upload time from multer's req.file.size. Optional/
@@ -381,10 +389,18 @@ const doctorSchema = new mongoose.Schema(
         index: true,
       },
 
+      // "not_submitted" is the real initial state for a doctor who has never
+      // completed onboarding. Before this fix the default was "pending" —
+      // indistinguishable from "submitted and awaiting admin review" — so a
+      // brand-new doctor's FIRST submitOnboarding() call was rejected with
+      // "already under review" (409), permanently blocking them. See
+      // services/doctorLifecycleService.js for the canonical state machine
+      // this field now follows, and migrations/006_doctor_verification_not_submitted.js
+      // for the one-time backfill of existing data.
       verificationStatus: {
         type: String,
-        enum: ["pending", "approved", "rejected"],
-        default: "pending",
+        enum: ["not_submitted", "pending", "approved", "rejected"],
+        default: "not_submitted",
       },
 
       verificationNotes: {

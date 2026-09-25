@@ -2,6 +2,7 @@ import { Router } from "express";
 import { ROLES } from "../constants/roles.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import { requireFeatureEnabled } from "../services/featureToggleService.js";
 import {
   approveDraft,
   appointmentPrepChecklist,
@@ -46,6 +47,10 @@ import {
 const router = Router();
 
 router.use(protect);
+// Every route in this file is a genuine generative-AI feature (the Gemini
+// clinical copilot, consultation-summary drafting, etc.) -- gated as one
+// block behind the ai_features toggle rather than per-route.
+router.use(requireFeatureEnabled("ai_features", "AI features"));
 
 // Doctor AI Assistant
 router.post("/consultation-summary", authorizeRoles(ROLES.DOCTOR), draftConsultationSummary);

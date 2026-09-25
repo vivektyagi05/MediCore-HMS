@@ -18,7 +18,7 @@ assert.match(admin, /match\.stateMasterId = canonicalLocation\.state\._id/);
 assert.match(admin, /match\.districtMasterId = canonicalLocation\.district\._id/);
 assert.match(admin, /match\.cityMasterId = canonicalLocation\.city\._id/);
 assert.match(admin, /validateCanonicalLocationFilters/);
-assert.match(admin, /req\.query\.specialization\) \{\n    match\.specialization = new RegExp/);
+assert.match(admin, /req\.query\.specialization\) \{\n    match\.specialization = containsRegex/);
 assert.doesNotMatch(admin, /specializationMasterId[^\n]*new RegExp/);
 assert.match(publicController, /filter\.specializationMasterId = specialization\._id/);
 assert.match(publicController, /primary\.stateMasterId = canonicalLocation\.state\._id/);

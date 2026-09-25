@@ -20,6 +20,13 @@ const SIGNATURES = {
 
 const matchesSignature = (buffer, signature) => signature.every((byte, i) => buffer[i] === byte);
 
+/** True only if `buffer`'s real magic bytes match one of the signatures registered for `declaredMimeType`. */
+export const bufferMatchesDeclaredType = (buffer, declaredMimeType) => {
+  const signatures = SIGNATURES[declaredMimeType];
+  if (!signatures || !buffer) return false;
+  return signatures.some((signature) => matchesSignature(buffer, signature));
+};
+
 // Returns true only if the file's real bytes match ONE of the signatures
 // registered for the declared mimetype. Unknown mimetypes (not in SIGNATURES)
 // fail closed (return false) rather than being silently accepted.
@@ -45,6 +52,15 @@ export const assertValidUploadOrDelete = (file) => {
   const isValid = validateFileSignature(file.path, file.mimetype);
   if (!isValid) {
     fs.unlink(file.path, () => {});
+    throw new AppError("Uploaded file content does not match its declared type", 400);
+  }
+};
+
+// Same check for a multer memoryStorage() upload (file.buffer, no disk path
+// to clean up -- there is nothing on disk yet for a memory-storage upload).
+export const assertValidBufferUpload = (file) => {
+  if (!file) return;
+  if (!bufferMatchesDeclaredType(file.buffer, file.mimetype)) {
     throw new AppError("Uploaded file content does not match its declared type", 400);
   }
 };

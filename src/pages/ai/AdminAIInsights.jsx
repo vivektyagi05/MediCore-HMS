@@ -63,10 +63,17 @@ function AISystemHealthCard({ health, isLoading, error, onRetry }) {
               {provider.available ? "Available" : "Unavailable"}
             </StatusBadge>
           </div>
-          <p className="mt-2 text-sm font-semibold text-slate-700">{provider.activeProvider || "None active"}</p>
-          {provider.isDeterministicFallback && (
+          <p className="mt-2 text-sm font-semibold text-slate-700">
+            {provider.activeProvider || "None active"}
+            {provider.model ? ` · ${provider.model}` : ""}
+          </p>
+          {provider.isDeterministicFallback ? (
+            <p className="mt-1 text-xs font-semibold text-amber-700">
+              Template renderer (development/test only) — deterministic text built from platform data. This is not a language model.
+            </p>
+          ) : (
             <p className="mt-1 text-xs font-semibold text-slate-500">
-              Deterministic template engine — grounded strictly in real platform data, never a network call.
+              Generative model{provider.probed && provider.checkedAt ? ` · verified ${new Date(provider.checkedAt).toLocaleTimeString()}` : ""}
             </p>
           )}
           {provider.error && <p className="mt-1 text-xs font-bold text-rose-600">{provider.error}</p>}

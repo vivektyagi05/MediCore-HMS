@@ -66,6 +66,14 @@ export const doctorWorkflowApi = {
   deleteDocument(id) {
     return apiClient.delete(`/doctor/documents/${id}`).then((res) => res.data);
   },
+  // Authenticated-blob pattern (same as downloadCertificate/downloadPrescription
+  // below). Previously there was no way at all for a doctor to view a document
+  // they had uploaded -- the backend never served it and returned only a raw
+  // server filesystem path in the JSON list, which the UI never used for
+  // anything.
+  downloadDocument(id) {
+    return apiClient.get(`/doctor/documents/${id}/download`, { responseType: "blob" }).then((res) => res.data);
+  },
   getDocumentCenterOverview() {
     return apiClient.get("/doctor/documents/overview").then((res) => res.data);
   },

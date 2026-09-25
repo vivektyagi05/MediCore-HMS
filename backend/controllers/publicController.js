@@ -4,6 +4,7 @@
  * Security: never expose email, mobile, internal IDs beyond doctor profile ID,
  * financial data, documents, or private notes.
  */
+import { containsRegex, exactRegex } from "../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Appointment from "../models/Appointment.js";
 import Doctor from "../models/Doctor.js";
@@ -227,7 +228,7 @@ export const searchDoctors = asyncHandler(async (req, res) => {
     const specialization = await resolveCanonicalFilterValue(req.query.specialization, MASTER_KINDS.SPECIALIZATION, "specialization");
     filter.specializationMasterId = specialization._id;
   } else if (req.query.specialization) {
-    filter.specialization = new RegExp(req.query.specialization.trim(), "i");
+    filter.specialization = containsRegex(req.query.specialization.trim());
   }
 
   const canonicalLocation = await validateCanonicalLocationFilters({
@@ -250,13 +251,13 @@ export const searchDoctors = asyncHandler(async (req, res) => {
     if (geographicFilter) Object.assign(filter, geographicFilter);
   }
   if (req.query.hospital) {
-    filter.hospitalName = new RegExp(req.query.hospital.trim(), "i");
+    filter.hospitalName = containsRegex(req.query.hospital.trim());
   }
   if (req.query.mode) {
     filter.consultationMode = { $in: [req.query.mode] };
   }
   if (req.query.language) {
-    filter.languages = { $in: [new RegExp(req.query.language.trim(), "i")] };
+    filter.languages = { $in: [containsRegex(req.query.language.trim())] };
   }
   if (req.query.minExp) {
     filter.experience = { ...filter.experience, $gte: Number(req.query.minExp) };
@@ -291,7 +292,7 @@ export const searchDoctors = asyncHandler(async (req, res) => {
     // Join with User model — real field, doctor's display name
     const matchingUsers = await mongoose
       .model("User")
-      .find({ name: new RegExp(req.query.name.trim(), "i"), role: "doctor", isActive: true }, "_id")
+      .find({ name: containsRegex(req.query.name.trim()), role: "doctor", isActive: true }, "_id")
       .lean();
     filter.userId = { $in: matchingUsers.map((u) => u._id) };
   }
@@ -368,15 +369,15 @@ export const searchDoctors = asyncHandler(async (req, res) => {
 // ─── P12 Geographic Coverage ─────────────────────────────────────────────────
 export const getDoctorCoverage = asyncHandler(async (req, res) => {
   const baseFilter = publicDoctorFilter(await getPublicDoctorUserIds());
-  if (req.query.specialization) baseFilter.specialization = new RegExp(req.query.specialization.trim(), "i");
+  if (req.query.specialization) baseFilter.specialization = containsRegex(req.query.specialization.trim());
   if (req.query.mode) baseFilter.consultationMode = { $in: [req.query.mode] };
-  if (req.query.language) baseFilter.languages = { $in: [new RegExp(req.query.language.trim(), "i")] };
+  if (req.query.language) baseFilter.languages = { $in: [containsRegex(req.query.language.trim())] };
   if (req.query.minExp) baseFilter.experience = { ...(baseFilter.experience || {}), $gte: Number(req.query.minExp) };
   if (req.query.maxFees) baseFilter.fees = { ...(baseFilter.fees || {}), $lte: Number(req.query.maxFees) };
   if (req.query.minRating) baseFilter.rating = { $gte: Number(req.query.minRating) };
   if (req.query.name) {
     const matchingUsers = await mongoose.model("User")
-      .find({ name: new RegExp(req.query.name.trim(), "i"), role: "doctor", isActive: true }, "_id")
+      .find({ name: containsRegex(req.query.name.trim()), role: "doctor", isActive: true }, "_id")
       .lean();
     baseFilter.userId = { $in: matchingUsers.map((user) => user._id) };
   }
@@ -1072,7 +1073,7 @@ const populateArticleRelations = (query) => query
 export const getPublicServices = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filter = { $and: [publishedServiceFilter] };
-  if (req.query.category) filter.$and.push({ category: new RegExp(`^${req.query.category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") });
+  if (req.query.category) filter.$and.push({ category: exactRegex(req.query.category.trim()) });
   if (req.query.search) filter.$and.push({ $text: { $search: req.query.search.trim() } });
   if (req.query.featured === "true") filter.$and.push({ featured: true });
   const sortMap = { price_asc: { price: 1 }, price_desc: { price: -1 }, newest: { createdAt: -1 }, featured: { featured: -1, displayOrder: 1, title: 1 }, title_asc: { title: 1 } };

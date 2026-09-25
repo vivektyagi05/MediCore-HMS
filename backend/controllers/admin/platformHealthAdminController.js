@@ -130,7 +130,7 @@ export const buildInfrastructureStatus = async () => {
     storage: await storageStatus(),
     webhook,
     paymentProvider: paymentProviderStatus(),
-    aiProvider: getAIProviderStatus(),
+    aiProvider: await getAIProviderStatus(),
   };
 };
 

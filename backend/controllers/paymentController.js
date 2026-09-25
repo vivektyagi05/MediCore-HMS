@@ -1,3 +1,4 @@
+import { getTaxRatePercent } from "../services/hospitalSettingsService.js";
 import mongoose from "mongoose";
 import Appointment from "../models/Appointment.js";
 import Coupon from "../models/Coupon.js";
@@ -344,17 +345,19 @@ export const createPaymentOrder = asyncHandler(async (req, res) => {
     );
   }
 
-  const baseAmounts = calculateInvoiceAmounts(appointment.doctorId.fees);
+  const baseAmounts = await calculateInvoiceAmounts(appointment.doctorId.fees);
   const { coupon, discountAmount } = await couponService.validateAndCalculate({
     code: couponCode,
     userId: req.user._id,
     appointmentId: appointment._id,
     amount: baseAmounts.subtotal,
   });
-  const configuredTaxRate = Number(process.env.CONSULTATION_TAX_RATE);
-  const taxRate = Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && configuredTaxRate <= 100
-    ? configuredTaxRate
-    : 0;
+  // FIX (billing accuracy): this used to read a disconnected env var
+  // (CONSULTATION_TAX_RATE, defaulting to 0% if unset), completely ignoring
+  // the admin-editable HospitalSetting.paymentSettings.taxRate that
+  // controllers/publicController.js already shows patients. The rate an
+  // admin configures in the dashboard now genuinely is what gets charged.
+  const taxRate = await getTaxRatePercent();
   const bill = calculateBill({ subtotal: baseAmounts.subtotal, discount: discountAmount, taxRate });
   const taxableSubtotal = bill.taxableSubtotal;
   const taxAmount = bill.tax;

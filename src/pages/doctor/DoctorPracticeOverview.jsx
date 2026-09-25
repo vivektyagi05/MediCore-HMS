@@ -20,9 +20,16 @@ import { useI18n } from "../../i18n/I18nContext";
 // Small label map for the raw verificationStatus enum (approved/pending/
 // rejected) — mirrors the same values DoctorVerificationCenter.jsx already
 // displays, just capitalized rather than shown raw on this summary card.
+const VERIFICATION_STATUS_LABELS = {
+  not_submitted: "Not Submitted",
+  pending: "Pending Review",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
 function formatVerificationStatus(status) {
   if (!status) return "—";
-  return status.charAt(0).toUpperCase() + status.slice(1);
+  return VERIFICATION_STATUS_LABELS[status] || (status.charAt(0).toUpperCase() + status.slice(1));
 }
 
 // Practice Management Platform hub (Phase D4) -- connects Profile Strength,

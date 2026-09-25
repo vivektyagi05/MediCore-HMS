@@ -1,3 +1,5 @@
+import { containsRegex } from "../utils/regexSafe.js";
+import { serializeDoctorPublicProfile } from "../services/doctorPublicSerializer.js";
 import mongoose from "mongoose";
 import Doctor from "../models/Doctor.js";
 import User from "../models/User.js";
@@ -72,15 +74,27 @@ const validateDoctorPayload = (payload, partial = false) => {
   };
 };
 
+// SECURITY FIX: this route is mounted at /api/doctors and reachable without
+// auth. It used to return raw Doctor.find(...).lean() documents straight to
+// the client -- unmasked licenseNumber, the internal `documents[]` array
+// (each entry's server filePath), verificationNotes/verificationHistory,
+// and every internal master-data id, none of which any public or doctor-role
+// caller should ever see. It also built its RegExp straight from
+// req.query.specialization with no escaping (ReDoS / regex-injection). Every
+// other public doctor surface (controllers/publicController.js) already goes
+// through serializeDoctorPublicProfile() for exactly this reason; this
+// legacy endpoint now does too. SUPER_ADMIN keeps its unrestricted filter
+// (the dedicated admin endpoint is the management surface, but this route
+// predates it and may still be called by an external/legacy client) --
+// admins still get the safe serialized shape, never the raw document.
 export const getDoctors = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filter = {};
 
   if (req.query.specialization) {
-    filter.specialization = new RegExp(req.query.specialization, "i");
+    filter.specialization = containsRegex(req.query.specialization);
   }
 
-  // This route is mounted at /api/doctors and is reachable without auth.
   // Public/doctor-role callers must receive only publishable doctors; the
   // SUPER_ADMIN management surface uses the dedicated admin endpoint and is
   // intentionally the only role allowed to see pending/rejected records here.
@@ -110,7 +124,7 @@ export const getDoctors = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data: {
-      doctors,
+      doctors: doctors.map((doctor) => serializeDoctorPublicProfile(doctor, req)),
       pagination: {
         page,
         limit,
@@ -658,6 +672,20 @@ export const approveDoctor = asyncHandler(
       });
     }
 
+    // AUDIT FIX (GLOBAL-FLOW-INTEGRITY-AUDIT-2026-09-25, item ONB-002):
+    // approveDoctor trusted verificationStatus === "pending" as proof the
+    // application was reviewable, but nothing upstream ever guaranteed that
+    // -- a doctor record could reach "pending" with zero uploaded documents
+    // (see ONB-001). This is the last line of defense: even if a future
+    // change reopens that gap, an admin physically cannot approve a doctor
+    // with no evidence on file.
+    if (!Array.isArray(existing.documents) || existing.documents.length === 0) {
+      throw new AppError(
+        "Cannot approve: this doctor has no uploaded verification documents on file.",
+        409,
+      );
+    }
+
     const cycleId = getVerificationCycleId(existing);
 
     const doctor = await Doctor.findOneAndUpdate(
@@ -933,5 +961,7 @@ export const verifyDoctorDocument = asyncHandler(async (req, res) => {
     // Realtime/notification failure should never block the verification itself.
   }
 
-  res.status(200).json({ success: true, data: { document }, message: `Document ${status} successfully` });
+  // storageKey is an internal storage-service detail, never serialised.
+  const { storageKey: _storageKey, ...safeDocument } = document.toObject();
+  res.status(200).json({ success: true, data: { document: safeDocument }, message: `Document ${status} successfully` });
 });

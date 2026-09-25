@@ -75,7 +75,15 @@ export function buildDoctorProfileIntelligence(doctor, { trustScore = 0 } = {}) 
     });
   });
 
-  if (doctor.verificationStatus === "pending") {
+  if (doctor.verificationStatus === "not_submitted") {
+    attention.unshift({
+      key: "verification-not-submitted",
+      severity: "high",
+      title: "Verification not yet submitted",
+      detail: "Complete your onboarding application so an admin can review and approve your account.",
+      action: "/doctor/onboarding",
+    });
+  } else if (doctor.verificationStatus === "pending") {
     attention.unshift({
       key: "verification-pending",
       severity: "high",

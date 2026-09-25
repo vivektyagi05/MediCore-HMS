@@ -19,6 +19,20 @@ export const PAYMENT_STATUS = Object.freeze({
   PARTIALLY_REFUNDED: "partially_refunded",
 });
 
+// A payment is "collected" — money has actually reached the platform, even
+// if some or all of it was later returned — in exactly these three states.
+// This is the ONE canonical revenue-recognition group; every consumer
+// (doctor earnings, admin finance, analytics, revenue funnels) must use it
+// instead of redefining its own copy or comparing against the string
+// "paid" (which is not a value of this enum at all -- Appointment.paymentStatus
+// has its own, deliberately simpler PENDING/PAID/FAILED/REFUNDED vocabulary
+// for booking-flow gating and must never be confused with Payment.status).
+export const CAPTURED_LIKE_PAYMENT_STATUSES = Object.freeze([
+  PAYMENT_STATUS.CAPTURED,
+  PAYMENT_STATUS.REFUNDED,
+  PAYMENT_STATUS.PARTIALLY_REFUNDED,
+]);
+
 export const REFUND_STATUS = Object.freeze({
   NONE: "none",
   PENDING: "pending",

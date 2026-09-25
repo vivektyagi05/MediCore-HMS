@@ -1,3 +1,4 @@
+import { areRefundsEnabled } from "../services/hospitalSettingsService.js";
 import mongoose from "mongoose";
 import Appointment from "../models/Appointment.js";
 import Payment, { PAYMENT_STATUS, REFUND_STATUS } from "../models/Payment.js";
@@ -400,6 +401,17 @@ const processRefund = async ({ paymentId, refundAmount, reason, actorId, refundR
 const buildRefundRequestForEntryPoint = async ({ req, res, entryPoint }) => {
   validatePaymentId(req.params.paymentId);
 
+  // FIX: HospitalSetting.paymentSettings.refundsEnabled was only ever read
+  // back for public display (controllers/publicController.js) -- an admin
+  // switching it off changed nothing about whether a refund could actually
+  // be requested or processed. Gated here for the patient-facing intake
+  // path; a super_admin using this same entry point is an authorized
+  // override and is not blocked (matches initiateRefund's existing
+  // "admin path... not bound by the patient-facing restriction" policy).
+  if (req.user.role === ROLES.PATIENT && !(await areRefundsEnabled())) {
+    throw new AppError("Refund requests are currently unavailable. Please contact support.", 503);
+  }
+
   const payment = await Payment.findById(req.params.paymentId).populate("userId", "name email");
   if (!payment) throw new AppError("Payment not found", 404);
   if (req.user.role === ROLES.PATIENT && payment.userId._id.toString() !== req.user._id.toString()) {
@@ -543,6 +555,12 @@ export const approveRefundRequest = asyncHandler(async (req, res) => {
   const current = await RefundRequest.findById(req.params.id);
   if (!current) throw new AppError("Refund request not found", 404);
   if (current.status !== "pending") throw new AppError("Only pending refund requests can be approved", 400);
+
+  // FIX: refundsEnabled is a real platform-wide kill switch now -- it must
+  // stop actual money movement, not just patient-facing intake.
+  if (!(await areRefundsEnabled())) {
+    throw new AppError("Refund processing is currently unavailable. Please try again later.", 503);
+  }
   const fromState = current.refundState;
   assertRefundTransition(fromState, REFUND_STATES.APPROVED);
 
@@ -664,6 +682,12 @@ export const retryRefundRequest = asyncHandler(async (req, res) => {
   const current = await RefundRequest.findById(req.params.id);
   if (!current) throw new AppError("Refund request not found", 404);
   if (current.status !== "failed") throw new AppError("Only failed refund requests can be retried", 400);
+
+  // FIX: refundsEnabled is a real platform-wide kill switch now -- it must
+  // stop actual money movement, not just patient-facing intake.
+  if (!(await areRefundsEnabled())) {
+    throw new AppError("Refund processing is currently unavailable. Please try again later.", 503);
+  }
   const fromState = current.refundState;
   assertRefundTransition(fromState, REFUND_STATES.RETRY_REQUIRED);
   assertRefundTransition(REFUND_STATES.RETRY_REQUIRED, REFUND_STATES.APPROVED);
@@ -831,6 +855,12 @@ export const getRefundRequestDetail = asyncHandler(async (req, res) => {
 
 export const initiateRefund = asyncHandler(async (req, res) => {
   validatePaymentId(req.params.paymentId);
+
+  // FIX: refundsEnabled is a real platform-wide kill switch now -- it must
+  // stop actual money movement, not just patient-facing intake.
+  if (!(await areRefundsEnabled())) {
+    throw new AppError("Refund processing is currently unavailable. Please try again later.", 503);
+  }
 
   const payment = await Payment.findById(req.params.paymentId).populate("userId", "name email");
   if (!payment) throw new AppError("Payment not found", 404);

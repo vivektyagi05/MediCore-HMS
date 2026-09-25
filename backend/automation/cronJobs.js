@@ -68,3 +68,28 @@ export const automationCronJobs = {
     return summary;
   },
 };
+
+// SCHEDULER FIX (Phase 14): before this, automationCronJobs.runAll() had NO
+// standalone entrypoint at all -- unlike cron/expirePaymentWindows.js,
+// cron/reconciliationCron.js, cron/retryFailedPayments.js and
+// cron/subscriptionRenewals.js (each runnable as `node cron/<name>.js`),
+// this file could ONLY be invoked through the admin on-demand API. That
+// meant every reminder it drives (appointment/payment/follow-up/insurance-
+// expiry/prescription-renewal/missed-follow-up), AI insights, and the smart
+// assignment sweep never ran unless an admin manually clicked a button --
+// there was no automatic path at all. See docs/SCHEDULER-ARCHITECTURE.md
+// for how this is wired into production.
+import { connectDB } from "../config/db.js";
+
+if (process.argv[1]?.endsWith("cronJobs.js")) {
+  connectDB()
+    .then(() => automationCronJobs.runAll())
+    .then((summary) => {
+      logger.info("automation/cronJobs.js standalone run completed", summary);
+      process.exit(0);
+    })
+    .catch((error) => {
+      logger.error("automation/cronJobs.js standalone run failed", { message: error.message, stack: error.stack });
+      process.exit(1);
+    });
+}

@@ -388,7 +388,7 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
 
   const loadInspectorAndRuns = () => {
     if (!flowId) return;
-    automationStudioApi.getFlowInspector(flowId).then((res) => setInspector(res.data)).catch(() => {});
+    automationStudioApi.getInspector(flowId).then((res) => setInspector(res.data)).catch(() => {});
     automationStudioApi.getRunHistory(flowId).then((res) => setRuns(res.data)).catch(() => {});
   };
 
@@ -491,19 +491,30 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
     }
   };
 
-  const runAi = async (kind) => {
-    if (!flow?._id) return toast.error("Save the automation first.");
-    setAiLoading(true);
-    setAiText("");
-    try {
-      const res = kind === "explain" ? await automationStudioApi.explainFlow(flow._id) : await automationStudioApi.advisorFlow(flow._id);
-      setAiText(res.data.content);
-    } catch (err) {
-      toast.error(getApiErrorMessage(err));
-    } finally {
-      setAiLoading(false);
-    }
-  };
+    const runAi = async (kind) => {
+      if (!flow?._id) {
+        return toast.error("Save the automation first.");
+      }
+
+      setAiLoading(true);
+      setAiText(null);
+
+      try {
+        const data =
+          kind === "explain"
+            ? await automationStudioApi.explainFlow(flow._id)
+            : await automationStudioApi.advisorFlow(flow._id);
+
+        console.log("AI RESPONSE:", data);
+
+        setAiText(data.data.content);
+      } catch (err) {
+        console.error("AI ERROR:", err);
+        toast.error(getApiErrorMessage(err));
+      } finally {
+        setAiLoading(false);
+      }
+    };
 
   if (loading) return <Loader label="Loading automation" />;
 
@@ -714,10 +725,43 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
       {tab === "ai" && (
         <Card title="AI Workflow Builder">
           <div className="flex gap-2">
-            <Button variant="secondary" isLoading={aiLoading} onClick={() => runAi("explain")}><Sparkles size={15} /> Explain Flow</Button>
-            <Button variant="secondary" isLoading={aiLoading} onClick={() => runAi("advisor")}><Sparkles size={15} /> Advise (risks / gaps)</Button>
+            <Button
+              variant="secondary"
+              isLoading={aiLoading}
+              onClick={() => runAi("explain")}
+            >
+              <Sparkles size={15} />
+              Explain Flow
+            </Button>
+
+            <Button
+              variant="secondary"
+              isLoading={aiLoading}
+              onClick={() => runAi("advisor")}
+            >
+              <Sparkles size={15} />
+              Advise (risks / gaps)
+            </Button>
           </div>
-          {aiText && <p className="mt-4 whitespace-pre-wrap rounded-xl bg-blue-50 p-4 text-sm text-slate-800">{aiText}</p>}
+
+          {aiText && (
+            <div className="mt-4 rounded-xl bg-blue-50 p-4 text-sm text-slate-800">
+              <div>
+                <p className="font-bold">What it does</p>
+                <p className="mt-1">{aiText.whatItDoes}</p>
+              </div>
+
+              <div className="mt-3">
+                <p className="font-bold">Condition summary</p>
+                <p className="mt-1">{aiText.conditionSummary}</p>
+              </div>
+
+              <div className="mt-3">
+                <p className="font-bold">Action summary</p>
+                <p className="mt-1">{aiText.actionSummary}</p>
+              </div>
+            </div>
+          )}
         </Card>
       )}
     </div>

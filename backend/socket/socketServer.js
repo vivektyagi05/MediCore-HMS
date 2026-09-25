@@ -46,7 +46,7 @@ export const initSocketServer = (httpServer) => {
       userId: socket.user._id,
       role: socket.user.role,
       rooms,
-      onlineUsers: presenceManager.snapshot(),
+      onlineUsers: presenceManager.snapshotFor(socket.user),
     });
 
     registerEventHandlers(io, socket);

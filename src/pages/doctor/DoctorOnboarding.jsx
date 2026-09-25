@@ -10,12 +10,13 @@ import {
   CheckCircle,
 } from "lucide-react";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { doctorApi } from "../../api/doctorApi";
 import { masterDataApi } from "../../api/masterDataApi";
 import DoctorLocationFields from "../../components/doctor/DoctorLocationFields";
 import { EMPTY_LOCATION, LOCATION_KEYS, buildLocationPayload, locationFromDoctor } from "../../utils/doctorLocation";
+import { getOnboardingMissingRequirements, describeMissingRequirements } from "../../utils/doctorOnboardingValidation";
 import { getApiErrorMessage } from "../../api/axios";
 import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
@@ -67,6 +68,18 @@ function DoctorOnboarding() {
   const [documents, setDocuments] =
     useState([]);
   const [master, setMaster] = useState({ specializations: [] });
+  const [specializationsLoading, setSpecializationsLoading] = useState(true);
+  const [specializationsError, setSpecializationsError] = useState(false);
+
+  // ONB-001 frontend mirror (see src/utils/doctorOnboardingValidation.js):
+  // errors only render once the doctor has tried to submit at least once,
+  // so an empty fresh form doesn't open already covered in red.
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [locationStatus, setLocationStatus] = useState({ loading: true, error: false });
+
+  const handleLocationStatusChange = useCallback((loading, error) => {
+    setLocationStatus((prev) => (prev.loading === loading && prev.error === error ? prev : { loading, error }));
+  }, []);
 
     const [uploading, setUploading] =
     useState(false);
@@ -206,9 +219,15 @@ const uploadDocument =
     let active = true;
     masterDataApi.getSpecializations()
       .then((specializations) => {
-        if (active) setMaster({ specializations: Array.isArray(specializations) ? specializations : [] });
+        if (!active) return;
+        setMaster({ specializations: Array.isArray(specializations) ? specializations : [] });
+        setSpecializationsLoading(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!active) return;
+        setSpecializationsLoading(false);
+        setSpecializationsError(true);
+      });
     loadProfile();
     return () => { active = false; };
   }, []);
@@ -233,8 +252,40 @@ const uploadDocument =
     setForm((current) => ({ ...current, specializationType: "OTHER", specializationMasterId: "", specialization: "Other" }));
   };
 
+  // ONB-001 frontend mirror. This changes UX only (what the doctor sees
+  // before submitting) — the backend gate in
+  // backend/controllers/doctorOnboardingController.js
+  // (getOnboardingMissingRequirements) is the authoritative check and
+  // rejects an incomplete submission independently of this.
+  const missingFields = useMemo(
+    () => getOnboardingMissingRequirements(form, documents),
+    [form, documents],
+  );
+  const dependenciesLoading = locationStatus.loading || specializationsLoading;
+  const dependenciesFailed = locationStatus.error || specializationsError;
+  const hasError = (field) => attemptedSubmit && missingFields.includes(field);
+
   const submitForm = async (e) => {
     e.preventDefault();
+    setAttemptedSubmit(true);
+
+    // Duplicate-submit guard: the submit button is already disabled while
+    // `saving`, but this closes the gap between a fast double-click/double-
+    // Enter and that disabled state actually re-rendering.
+    if (saving || status === "pending" || status === "approved") return;
+
+    if (dependenciesLoading) {
+      toast.warning("Please wait for specialization and location data to finish loading, then submit again.");
+      return;
+    }
+    if (dependenciesFailed) {
+      toast.error("Required reference data (specializations or location list) failed to load. Reload the page before submitting.");
+      return;
+    }
+    if (missingFields.length > 0) {
+      toast.error(`Required before you can submit: ${describeMissingRequirements(missingFields).join(", ")}.`);
+      return;
+    }
 
     try {
       setSaving(true);
@@ -336,13 +387,23 @@ const uploadDocument =
           <div className="grid gap-4 md:grid-cols-2">
 
             <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-700">{t("common.specialization")}</span>
-              <select value={form.specializationType === "OTHER" ? "__other__" : form.specializationMasterId} onChange={(e) => e.target.value === "__other__" ? selectOther() : selectMaster("specialization", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <option value="">Select specialization</option>
+              <span className="mb-2 block text-sm font-semibold text-slate-700">
+                {t("common.specialization")}
+                <span className="ml-1 text-rose-600">*</span>
+              </span>
+              <select
+                value={form.specializationType === "OTHER" ? "__other__" : form.specializationMasterId}
+                onChange={(e) => e.target.value === "__other__" ? selectOther() : selectMaster("specialization", e.target.value)}
+                disabled={specializationsLoading}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="">{specializationsLoading ? "Loading specializations…" : "Select specialization"}</option>
                 {master.specializations.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
                 <option value="__other__">Other</option>
               </select>
-              {form.specializationType === "OTHER" && <Input label="Other specialization" name="specializationOther" value={form.specializationOther} onChange={updateField} />}
+              {form.specializationType === "OTHER" && <Input label="Other specialization" name="specializationOther" value={form.specializationOther} onChange={updateField} required />}
+              {specializationsError && <p role="alert" className="mt-1.5 text-xs font-medium text-rose-600">Could not load the specialization list. Reload the page to retry.</p>}
+              {hasError("specialization") && !specializationsError && <p role="alert" className="mt-1.5 text-xs font-medium text-rose-600">Specialization is required.</p>}
             </label>
 
             <Input
@@ -350,6 +411,8 @@ const uploadDocument =
               name="qualification"
               value={form.qualification}
               onChange={updateField}
+              required
+              error={hasError("qualification") ? "Qualification is required." : undefined}
             />
 
             <Input
@@ -357,6 +420,8 @@ const uploadDocument =
               name="collegeName"
               value={form.collegeName}
               onChange={updateField}
+              required
+              error={hasError("collegeName") ? "College name is required." : undefined}
             />
 
             <Input
@@ -365,6 +430,8 @@ const uploadDocument =
               type="number"
               value={form.graduationYear}
               onChange={updateField}
+              required
+              error={hasError("graduationYear") ? "Graduation year is required." : undefined}
             />
           </div>
         </Card>
@@ -410,6 +477,8 @@ const uploadDocument =
               name="medicalCouncil"
               value={form.medicalCouncil}
               onChange={updateField}
+              required
+              error={hasError("medicalCouncil") ? "Medical council is required." : undefined}
             />
 
             <Input
@@ -417,6 +486,8 @@ const uploadDocument =
               name="licenseNumber"
               value={form.licenseNumber}
               onChange={updateField}
+              required
+              error={hasError("licenseNumber") ? "License number is required." : undefined}
             />
 
           </div>
@@ -426,7 +497,18 @@ const uploadDocument =
           <DoctorLocationFields
             value={locationValue}
             onChange={(next) => setForm((current) => ({ ...current, ...next }))}
+            onStatusChange={handleLocationStatusChange}
           />
+          {locationStatus.error && (
+            <p role="alert" className="mt-3 text-xs font-medium text-rose-600">
+              Could not load part of the location list. Reload the page before submitting.
+            </p>
+          )}
+          {attemptedSubmit && !locationStatus.error && (hasError("state") || hasError("district") || hasError("city")) && (
+            <p role="alert" className="mt-3 text-xs font-medium text-rose-600">
+              {["state", "district", "city"].filter((f) => hasError(f)).map((f) => f[0].toUpperCase() + f.slice(1)).join(", ")} {hasError("state") && hasError("district") && hasError("city") ? "are" : "is"} required.
+            </p>
+          )}
         </Card>
 
         <Card title="Profile Details">
@@ -464,6 +546,12 @@ const uploadDocument =
         <Card title="Documents">
 
             <div className="space-y-4">
+
+                {hasError("documents") && (
+                  <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-600">
+                    Required verification documents are missing.
+                  </p>
+                )}
 
                 <label
                 className="
@@ -551,10 +639,22 @@ const uploadDocument =
         <Button
           type="submit"
           isLoading={saving}
-          disabled={saving || status === "pending" || status === "approved"}
+          disabled={saving || status === "pending" || status === "approved" || dependenciesLoading}
         >
-          {status === "pending" ? "Application Under Review" : status === "approved" ? "Application Approved" : "Submit For Verification"}
+          {status === "pending"
+            ? "Application Under Review"
+            : status === "approved"
+              ? "Application Approved"
+              : dependenciesLoading
+                ? "Loading required data…"
+                : "Submit For Verification"}
         </Button>
+
+        {attemptedSubmit && !dependenciesLoading && !dependenciesFailed && missingFields.length > 0 && (
+          <p role="alert" className="text-sm font-bold text-rose-600">
+            Required before you can submit: {describeMissingRequirements(missingFields).join(", ")}.
+          </p>
+        )}
 
       </form>
     </div>

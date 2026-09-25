@@ -1419,6 +1419,10 @@ function renderCommandCenterExecutiveSummary(context) {
 
 export const templateProvider = {
   name: "hms-template-engine",
+  // TEMPLATE: deterministic rendering of already-fetched data. It is not a
+  // language model and must never be presented as one. Rejected at production
+  // boot (config/productionGuards.js).
+  kind: "TEMPLATE",
   async generate({ promptKey, context }) {
     const renderer = RENDERERS[promptKey];
     if (!renderer) throw new Error(`No template renderer registered for promptKey: ${promptKey}`);

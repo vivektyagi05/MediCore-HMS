@@ -1,3 +1,4 @@
+import { requireFeatureEnabled } from "../services/featureToggleService.js";
 import { Router } from "express";
 import { ROLES } from "../constants/roles.js";
 import { protect } from "../middleware/authMiddleware.js";
@@ -19,11 +20,11 @@ import {
 
 const router = Router();
 
-router.post("/symptoms/analyze", protect, authorizeRoles(ROLES.PATIENT), analyzeSymptoms);
-router.get("/doctors/recommend", protect, authorizeRoles(ROLES.PATIENT, ROLES.SUPER_ADMIN), recommendDoctors);
-router.post("/appointments/suggest-slots", protect, authorizeRoles(ROLES.PATIENT, ROLES.SUPER_ADMIN), suggestAppointmentSlots);
+router.post("/symptoms/analyze", protect, authorizeRoles(ROLES.PATIENT), requireFeatureEnabled("ai_features", "AI features"), analyzeSymptoms);
+router.get("/doctors/recommend", protect, authorizeRoles(ROLES.PATIENT, ROLES.SUPER_ADMIN), requireFeatureEnabled("ai_features", "AI features"), recommendDoctors);
+router.post("/appointments/suggest-slots", protect, authorizeRoles(ROLES.PATIENT, ROLES.SUPER_ADMIN), requireFeatureEnabled("ai_features", "AI features"), suggestAppointmentSlots);
 router.get("/search", protect, smartSearch);
-router.post("/chatbot", protect, chatbotReply);
+router.post("/chatbot", protect, requireFeatureEnabled("ai_features", "AI features"), chatbotReply);
 
 router.get("/insights", protect, authorizeRoles(ROLES.SUPER_ADMIN), getAdminInsights);
 router.post("/insights/generate", protect, authorizeRoles(ROLES.SUPER_ADMIN), generateAdminInsights);

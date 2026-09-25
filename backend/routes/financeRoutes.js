@@ -1,3 +1,4 @@
+import { requireFeatureEnabled } from "../services/featureToggleService.js";
 import { Router } from "express";
 import { ROLES } from "../constants/roles.js";
 import { protect } from "../middleware/authMiddleware.js";
@@ -33,11 +34,11 @@ router.patch("/coupons/:id", protect, authorizeRoles(ROLES.SUPER_ADMIN), updateC
 
 router.get("/subscriptions/plans", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getPlans);
 router.get("/subscriptions", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getSubscriptions);
-router.post("/subscriptions", protect, authorizeRoles(ROLES.DOCTOR), createSubscription);
+router.post("/subscriptions", protect, authorizeRoles(ROLES.DOCTOR), requireFeatureEnabled("subscriptions", "Doctor subscriptions"), createSubscription);
 router.patch("/subscriptions/:id/cancel", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), cancelSubscription);
 
 router.get("/ledger", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getLedger);
-router.post("/wallet/recharge/orders", protect, authorizeRoles(ROLES.PATIENT), createWalletRechargeOrder);
+router.post("/wallet/recharge/orders", protect, authorizeRoles(ROLES.PATIENT), requireFeatureEnabled("wallet_system", "The wallet system"), createWalletRechargeOrder);
 router.post("/wallet/recharge/verify", protect, authorizeRoles(ROLES.PATIENT), verifyWalletRecharge);
 router.post("/wallet/recharge/cancel", protect, authorizeRoles(ROLES.PATIENT), cancelWalletRecharge);
 router.get("/wallet/recharge/history", protect, authorizeRoles(ROLES.PATIENT), listWalletRecharges);

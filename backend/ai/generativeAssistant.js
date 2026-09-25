@@ -1,3 +1,4 @@
+import { assertDoctorPatientRecordAccess, buildSharedReportFilter } from "../services/clinicalAccessService.js";
 import AIDraft from "../models/AIDraft.js";
 import Appointment from "../models/Appointment.js";
 import Certificate from "../models/Certificate.js";
@@ -306,21 +307,23 @@ export const generativeAssistant = {
   // nothing here is ever inserted into a clinical record, so it
   // deliberately skips the generateText/saveDraft draft-review pipeline
   // (§17 only applies to content that could become part of documentation).
-  // Ownership: same doctor-treated-this-patient guard as every other
-  // patient-scoped doctor endpoint (ensureDoctorTreatedPatient equivalent).
+  // Ownership: the SAME clinical-access policy as every other patient-scoped
+  // doctor endpoint (services/clinicalAccessService.js). This data is
+  // forwarded to the generative provider, so it is scoped to exactly what the
+  // patient shared with this doctor.
   async clinicalCopilotAnswer({ patientId, doctorUserId, question }) {
     const doctor = await Doctor.findOne({ userId: doctorUserId }).lean();
     if (!doctor) throw new AppError("Doctor profile not found", 404);
 
-    const treated = await Appointment.exists({ doctorId: doctor._id, patientId });
-    if (!treated) throw new AppError("You can only ask about a patient you have an appointment history with", 403);
+    const scope = await assertDoctorPatientRecordAccess(doctor, patientId);
+    const sharedReportFilter = buildSharedReportFilter({ patientId, doctorId: doctor._id, scope });
 
     const [patientUser, appointments, prescriptions, notes, reports, certificates] = await Promise.all([
       User.findById(patientId).select("name patientProfile").lean(),
       Appointment.find({ doctorId: doctor._id, patientId }).sort({ date: -1 }).limit(50).lean(),
       Prescription.find({ doctorId: doctor._id, patientId }).sort({ createdAt: -1 }).limit(20).lean(),
       MedicalNote.find({ doctorId: doctor._id, patientId }).sort({ createdAt: -1 }).limit(20).lean(),
-      MedicalReport.find({ userId: patientId }).sort({ reportDate: -1 }).limit(20).lean(),
+      sharedReportFilter ? MedicalReport.find(sharedReportFilter).select("-filePath").sort({ reportDate: -1 }).limit(20).lean() : [],
       Certificate.find({ doctorId: doctor._id, patientId, status: "issued" }).sort({ createdAt: -1 }).limit(20).lean(),
     ]);
     if (!patientUser) throw new AppError("Patient not found", 404);

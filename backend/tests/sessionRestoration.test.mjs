@@ -28,6 +28,10 @@ console.log("sessionRestoration.test.mjs");
 const authRoutes = read("routes/authRoutes.js");
 const authController = read("controllers/authController.js");
 const authMiddleware = read("middleware/authMiddleware.js");
+// Session validity (active user + securityVersion) moved into a shared
+// service so REST and Socket.IO can never disagree (see
+// services/sessionAuthService.js); authMiddleware.js delegates to it.
+const sessionAuthService = read("services/sessionAuthService.js");
 const authApi = read("../src/api/authApi.js");
 const authContext = read("../src/context/AuthContext.jsx");
 const privateRoute = read("../src/routes/PrivateRoute.jsx");
@@ -58,11 +62,12 @@ test("getMe returns the live req.user set by protect (no separate lookup)", () =
 });
 
 test("protect middleware rejects inactive users and revoked security versions before getMe ever runs", () => {
-  assert.match(authMiddleware, /!user\.isActive/, "protect must keep rejecting deactivated accounts");
+  assert.match(authMiddleware, /authenticateAccessToken/, "protect must delegate session validity to the shared session service");
+  assert.match(sessionAuthService, /user\.isActive === false/, "the session service must keep rejecting deactivated accounts");
   assert.match(
-    authMiddleware,
-    /tokenSecurityVersion\s*!==\s*\(user\.securityVersion \|\| 0\)/,
-    "protect must keep rejecting tokens issued before a password reset",
+    sessionAuthService,
+    /\(tokenSecurityVersion \|\| 0\) !== \(user\.securityVersion \|\| 0\)/,
+    "the session service must keep rejecting tokens issued before a password reset",
   );
 });
 

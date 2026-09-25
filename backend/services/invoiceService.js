@@ -2,9 +2,7 @@ import Invoice from "../models/Invoice.js";
 import { env } from "../config/env.js";
 import { generateEnterpriseInvoicePDF } from "../invoices/generateInvoicePDF.js";
 import crypto from "crypto";
-
-const configuredTaxRate = Number(process.env.CONSULTATION_TAX_RATE);
-const TAX_RATE = Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && configuredTaxRate <= 100 ? configuredTaxRate : 0;
+import { getTaxRatePercent } from "./hospitalSettingsService.js";
 
 const invoiceNumber = () => {
   const date = new Date();
@@ -13,9 +11,19 @@ const invoiceNumber = () => {
   return `HMS-${stamp}-${entropy}`;
 };
 
-export const calculateInvoiceAmounts = (baseAmount) => {
+// FIX (billing accuracy): this used to read a disconnected env var
+// (CONSULTATION_TAX_RATE, defaulting to 0% if unset) instead of the
+// admin-editable HospitalSetting.paymentSettings.taxRate that
+// controllers/publicController.js already displays to patients as "our tax
+// rate" -- so an admin's configured rate never actually affected what was
+// invoiced. It also multiplied the 0-100 percentage value directly against
+// the subtotal with no /100, so a plausible real value like 18 would have
+// produced an 1800% tax line. Now async (reads the canonical setting) and
+// percentage-correct, matching payments/money.js#calculateBill.
+export const calculateInvoiceAmounts = async (baseAmount) => {
   const subtotal = Number(baseAmount);
-  const taxAmount = Number((subtotal * TAX_RATE).toFixed(2));
+  const taxRatePercent = await getTaxRatePercent();
+  const taxAmount = Number((subtotal * (taxRatePercent / 100)).toFixed(2));
   const totalAmount = Number((subtotal + taxAmount).toFixed(2));
 
   return { subtotal, taxAmount, totalAmount };
@@ -29,8 +37,9 @@ export const createSubscriptionInvoiceRecord = async ({ subscription, doctorUser
   const existingInvoice = await Invoice.findOne({ subscriptionId: subscription._id });
   if (existingInvoice) return existingInvoice;
 
-  const { subtotal, taxAmount } = calculateInvoiceAmounts(
-    Number((subscription.amount / (1 + TAX_RATE)).toFixed(2)),
+  const taxRatePercent = await getTaxRatePercent();
+  const { subtotal, taxAmount } = await calculateInvoiceAmounts(
+    Number((subscription.amount / (1 + taxRatePercent / 100)).toFixed(2)),
   );
 
   const invoice = await Invoice.create({

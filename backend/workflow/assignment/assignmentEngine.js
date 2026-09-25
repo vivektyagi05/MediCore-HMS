@@ -13,7 +13,21 @@ import { getCandidatePool, getPresenceMap, buildWorkloadSnapshots } from "./assi
 import { buildHistoryStatsForAdmins } from "./assignmentHistory.js";
 import { scoreCandidate, explainScore } from "./assignmentScoring.js";
 
-const { buildUnifiedQueue, findOperationItem } = _internal;
+// BUGFIX: this used to be `const { buildUnifiedQueue, findOperationItem } =
+// _internal;` at module top level. operationsAdminController.js is reached
+// through more than one import path in this module graph (directly here
+// and via assignmentScheduler.js, itself imported by automation/cronJobs.js
+// and controllers/admin/assignmentAdminController.js among others); when
+// the entry point into the graph is one of THOSE files rather than
+// operationsAdminController.js itself, this file's top-level destructuring
+// could run before operationsAdminController.js finished evaluating its own
+// module body -- `_internal` (its very last export) was still in the
+// temporal dead zone, and importing this file crashed outright with
+// "Cannot access '_internal' before initialization". Accessing the two
+// functions through `_internal.<fn>` at CALL time instead of destructuring
+// them at LOAD time defers the property read until every module has
+// finished initializing, which is the standard fix for this class of ESM
+// circular-import ordering issue.
 
 /**
  * Gathers every real input once and scores every eligible candidate for a
@@ -25,7 +39,7 @@ export async function rankCandidatesForItem(item) {
   const [pool, capacity, { items: unifiedItems }] = await Promise.all([
     getCandidatePool(),
     getCapacitySettings(),
-    buildUnifiedQueue({ status: "all" }),
+    _internal.buildUnifiedQueue({ status: "all" }),
   ]);
 
   const eligible = pool.filter((c) => EligibilityPolicy.isEligibleAssignee(c.role));
@@ -63,7 +77,7 @@ export async function rankCandidatesForItem(item) {
 
 /** Step 4/5: transparent ranked candidates for one item. Never auto-assigns — read-only. */
 export async function getRecommendations(operationKey, { limit = 5 } = {}) {
-  const item = await findOperationItem(operationKey);
+  const item = await _internal.findOperationItem(operationKey);
   const ranked = await rankCandidatesForItem(item);
   return { item: { id: item.id, type: item.type, typeLabel: item.typeLabel, priority: item.priority }, candidates: ranked.slice(0, limit) };
 }
@@ -73,7 +87,7 @@ export async function getRecommendations(operationKey, { limit = 5 } = {}) {
  * existing assign endpoint. Never executes a reassignment itself.
  */
 export async function getReassignmentRecommendation(operationKey) {
-  const item = await findOperationItem(operationKey);
+  const item = await _internal.findOperationItem(operationKey);
   const ranked = await rankCandidatesForItem(item);
 
   const currentAssigneeId = item.assignedTo?.id?.toString();
@@ -100,7 +114,7 @@ export async function getReassignmentRecommendation(operationKey) {
 
 // ── Step 9: Conflict Detection ──────────────────────────────────────────
 export async function detectConflicts() {
-  const [{ items }, capacity] = await Promise.all([buildUnifiedQueue({ status: "all" }), getCapacitySettings()]);
+  const [{ items }, capacity] = await Promise.all([_internal.buildUnifiedQueue({ status: "all" }), getCapacitySettings()]);
   const openItems = items.filter((i) => i.status !== "resolved" && i.status !== "cancelled");
   const conflicts = [];
 

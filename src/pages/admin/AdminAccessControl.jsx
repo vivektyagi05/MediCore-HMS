@@ -163,6 +163,12 @@ function AdminAccessControl() {
         </p>
       </div>
 
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <strong className="font-bold">super_admin currently has unconditional access to every admin action</strong> — permissions are
+        not consulted for it. There is also no lower-privileged admin role today, so the matrix below has no effect on what
+        anyone can actually do right now; it exists as forward-compatible infrastructure for if such a role is introduced.
+      </div>
+
       <Tabs tabs={tabs} activeTab={tab} onChange={setTab} />
 
       {tab === "permissions" && (

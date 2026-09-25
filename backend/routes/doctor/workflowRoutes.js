@@ -1,5 +1,3 @@
-import path from "path";
-import fs from "fs";
 import multer from "multer";
 import { Router } from "express";
 
@@ -12,6 +10,7 @@ import {
   createMedicineTemplate,
   createPrescription,
   deleteDoctorDocument,
+  downloadDoctorDocument,
   deleteMedicineTemplate,
   deleteScheduleTemplate,
   downloadCertificate,
@@ -59,19 +58,14 @@ import { requireApprovedDoctor } from "../../middleware/doctorAccessMiddleware.j
 // itself, not a post-approval feature.
 const authorizeApprovedDoctor = [authorizeRoles(ROLES.DOCTOR), requireApprovedDoctor];
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    fs.mkdirSync("storage/doctor-documents", { recursive: true });
-    cb(null, "storage/doctor-documents");
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
-  },
-});
-
+// Uploaded straight to memory: uploadDoctorDocument persists the bytes
+// through storage/storageService.js (local or S3, per env.storage.driver),
+// never through multer's own disk storage. This is the file-storage
+// abstraction's first fully migrated flow -- see uploadDoctorDocument,
+// deleteDoctorDocument, getDoctorDocuments, and the matching admin download
+// endpoint (downloadDoctorDocumentAdmin) for the rest of it.
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = [
@@ -202,6 +196,12 @@ router.delete(
   "/documents/:id",
   authorizeRoles(ROLES.DOCTOR),
   deleteDoctorDocument
+);
+
+router.get(
+  "/documents/:id/download",
+  authorizeRoles(ROLES.DOCTOR),
+  downloadDoctorDocument
 );
 
 router.get(

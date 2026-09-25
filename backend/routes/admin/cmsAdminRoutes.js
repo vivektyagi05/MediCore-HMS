@@ -1,6 +1,6 @@
+import { localCategoryDir } from "../../storage/storageService.js";
 import { Router } from "express";
 import multer from "multer";
-import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
 import { archiveCMSPage, deleteCMSPage, getCMSPage, listCMSPages, previewCMSPage, publishCMSPage, saveCMSPage, updateCMSPage, uploadCMSBanner } from "../../controllers/admin/cmsAdminController.js";
@@ -9,7 +9,8 @@ import { requireAdmin, requirePermission } from "../../middleware/adminMiddlewar
 import { AppError } from "../../middleware/errorMiddleware.js";
 const router = Router();
 const bannerStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => { fs.mkdirSync("storage/cms", { recursive: true }); cb(null, "storage/cms"); },
+  // DOCKER-PATH FIX: see storage/storageService.js.
+  destination: (_req, _file, cb) => cb(null, localCategoryDir("cms")),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, `${Date.now()}-${randomBytes(12).toString("hex")}${ext}`);

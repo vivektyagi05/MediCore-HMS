@@ -33,7 +33,9 @@ import { WORKFLOW_ACTIONS } from "../workflowStateMachine.js";
 import { rankCandidatesForItem } from "./assignmentEngine.js";
 import { emitAutoAssigned, emitSweepCompleted } from "./assignmentEvents.js";
 
-const { buildUnifiedQueue } = _internal;
+// BUGFIX: same class of circular-import ordering issue as
+// assignmentEngine.js -- accessed at call time, not destructured at load
+// time. See assignmentEngine.js for the full explanation.
 
 // Below this score there is no clearly-best candidate — leaving the item
 // for a human to pick from the (still fully visible) recommendation list is
@@ -116,7 +118,7 @@ async function autoEscalateOverdue(openItems) {
 
 /** The one entry point registered into backend/automation/cronJobs.js. */
 export async function runSweep() {
-  const { items } = await buildUnifiedQueue({ status: "all" });
+  const { items } = await _internal.buildUnifiedQueue({ status: "all" });
   const openItems = items.filter((i) => i.status !== "resolved" && i.status !== "cancelled");
 
   const [{ assigned, skipped: skippedAssign }, { escalated, skipped: skippedEscalate }] = await Promise.all([

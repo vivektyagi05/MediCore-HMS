@@ -94,7 +94,7 @@ export function summarizeDraftActivity(drafts, now = Date.now()) {
 // Top-level composition. Never throws — a failure here must not break the
 // AI Command page (Step 6: AI failure is a product state).
 export async function buildAISystemHealth() {
-  const provider = getAIProviderStatus();
+  const provider = await getAIProviderStatus();
   const registry = summarizeCapabilityRegistry();
 
   let activity = null;
@@ -116,11 +116,14 @@ export async function buildAISystemHealth() {
       available: provider.healthy,
       activeProvider: provider.activeProvider,
       configuredProvider: provider.configuredKey,
-      // The only provider implemented today is the deterministic template
-      // engine (never calls a network, never hallucinates data outside the
-      // supplied context) — surfaced explicitly so an admin never mistakes
-      // "provider healthy" for "a network LLM is running".
-      isDeterministicFallback: provider.activeProvider === "hms-template-engine" || provider.configuredKey === "template",
+      // TEMPLATE = deterministic rendering of already-fetched data (dev/test
+      // only, rejected at production boot). Surfaced so an admin never
+      // mistakes "provider healthy" for "a language model is answering".
+      kind: provider.kind,
+      model: provider.model || null,
+      probed: Boolean(provider.probed),
+      checkedAt: provider.checkedAt || null,
+      isDeterministicFallback: provider.kind === "TEMPLATE",
       error: provider.healthy ? null : provider.error,
     },
     capabilities: {

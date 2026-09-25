@@ -65,7 +65,7 @@ export const serializeDoctorPublicProfile = (doctor, req, metrics = {}) => {
       : null,
     medicalCouncil: doctor.medicalCouncil || "",
     isVerified: Boolean(doctor.isVerified && doctor.verificationStatus === "approved"),
-    verificationStatus: doctor.verificationStatus || "pending",
+    verificationStatus: doctor.verificationStatus || "not_submitted",
     verifiedAt: doctor.verifiedAt || null,
     verificationHistory: (doctor.verificationHistory || []).map((item) => ({
       status: item.status,

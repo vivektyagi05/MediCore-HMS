@@ -33,7 +33,7 @@ assert.ok(
 assert.ok(followUpBody.includes("ensureDoctorAvailable("), "scheduleFollowUpAppointment must call the real ensureDoctorAvailable check");
 assert.ok(followUpBody.includes("ACTIVE_STATUSES"), "scheduleFollowUpAppointment must gate conflicts using the shared ACTIVE_STATUSES list");
 assert.ok(followUpBody.includes("error?.code === 11000") || followUpBody.includes('error.code === 11000'), "scheduleFollowUpAppointment must handle the same DB-level race condition as createAppointment (E11000 -> structured conflict)");
-assert.ok(followUpBody.includes("ensureDoctorTreatedPatient("), "scheduleFollowUpAppointment must verify the doctor actually treated this patient before booking on their behalf");
+assert.ok(followUpBody.includes("requirePatientRecordAccess("), "scheduleFollowUpAppointment must verify the doctor actually treated this patient before booking on their behalf");
 console.log("PASS: scheduleFollowUpAppointment reuses the real availability/conflict engine, not a second one");
 
 // 3. getScheduleRange must reuse buildDayCapacity (the same engine Today view/next-available use) and stay bounded.

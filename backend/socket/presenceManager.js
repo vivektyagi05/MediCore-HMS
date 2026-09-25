@@ -1,4 +1,5 @@
 import OnlineSession from "../models/OnlineSession.js";
+import { ADMIN_ROLES } from "../constants/roles.js";
 import { roomManager } from "./roomManager.js";
 
 const activeUsers = new Map();
@@ -80,5 +81,14 @@ export const presenceManager = {
 
   snapshot() {
     return [...activeUsers.keys()].map((userId) => serializePresence(userId));
+  },
+
+  // Every online user's id was previously sent to every authenticated
+  // client, regardless of role (socket:ready payload and GET
+  // /realtime/presence both did this). A patient or doctor has no
+  // legitimate reason to see who else on the platform is online; only
+  // support/ops (super_admin) does. Non-admin roles get an empty list.
+  snapshotFor(user) {
+    return ADMIN_ROLES.includes(user?.role) ? this.snapshot() : [];
   },
 };

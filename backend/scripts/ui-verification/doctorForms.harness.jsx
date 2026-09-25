@@ -14,7 +14,6 @@ const settle = async (ms = 1500) => { await act(async () => { await new Promise(
 const opts = (el) => [...el.querySelectorAll("option")].map((o) => ({ v: o.value, t: o.textContent }));
 const q = (tid) => document.querySelector(`[data-testid="${tid}"]`);
 const setSelect = async (el, value) => { await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(el, value); el.dispatchEvent(new window.Event("change", { bubbles: true })); }); };
-const typeInto = async (el, text) => { await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(el, text); el.dispatchEvent(new window.Event("input", { bubbles: true })); }); };
 const selectedText = (el) => el.options[el.selectedIndex]?.textContent;
 const mount = async (Page) => {
   const host = document.getElementById("root"); host.innerHTML = "";
@@ -42,8 +41,10 @@ check("state dropdown lists real states incl. Rajasthan/UP/Delhi/Maharashtra", [
 await setSelect(q("location-state"), stateOptions.find((o) => o.t === "Rajasthan").v); await settle(1500);
 const jaipur = opts(q("location-district")).find((o) => o.t === "Jaipur");
 check("Jaipur loads under Rajasthan", !!jaipur);
-await setSelect(q("location-district"), jaipur.v); await settle(300);
-await typeInto(q("location-city"), "jaipur"); await settle(200);
+await setSelect(q("location-district"), jaipur.v); await settle(1500);
+const jaipurCity = opts(q("location-city")).find((o) => o.t === "Jaipur");
+check("Jaipur city loads under Jaipur district", !!jaipurCity, `n=${opts(q("location-city")).length}`);
+await setSelect(q("location-city"), jaipurCity.v); await settle(200);
 const specSel = [...document.querySelectorAll("select")].find((s) => opts(s).some((o) => o.t === "Cardiology"));
 await setSelect(specSel, opts(specSel).find((o) => o.t === "Cardiology").v); await settle(200);
 check("Save enabled after editing", saveBtn()?.disabled === false);
@@ -55,13 +56,13 @@ await unmount(root);
 root = await mount(DoctorProfessionalProfile);
 check("REFRESH: state persisted (Rajasthan selected)", selectedText(q("location-state")) === "Rajasthan", `got '${selectedText(q("location-state"))}'`);
 check("REFRESH: district persisted (Jaipur selected)", selectedText(q("location-district")) === "Jaipur", `got '${selectedText(q("location-district"))}'`);
-check("REFRESH: city persisted (canonical 'Jaipur' resolved from typed 'jaipur')", q("location-city").value === "Jaipur", `got '${q("location-city").value}'`);
+check("REFRESH: city persisted (canonical 'Jaipur' selected)", selectedText(q("location-city")) === "Jaipur", `got '${selectedText(q("location-city"))}'`);
 check("REFRESH: specialization persisted (Cardiology)", selectedText([...document.querySelectorAll("select")].find((s) => opts(s).some((o) => o.t === "Cardiology"))) === "Cardiology");
 check("REFRESH: form is clean (Save disabled)", saveBtn()?.disabled === true);
 // change state -> children cleared -> save -> persisted cleared
 const upOpt = opts(q("location-state")).find((o) => o.t === "Uttar Pradesh");
 await setSelect(q("location-state"), upOpt.v); await settle(1500);
-check("state change clears district select and city input", q("location-district").value === "" && q("location-city").value === "" && q("location-city").disabled === true);
+check("state change clears district select and city select", q("location-district").value === "" && q("location-city").value === "" && q("location-city").disabled === true);
 await act(async () => { saveBtn().click(); }); await settle(2500);
 await unmount(root);
 root = await mount(DoctorProfessionalProfile);
@@ -72,9 +73,10 @@ await unmount(root);
 root = await mount(DoctorOnboarding);
 check("onboarding page loads for a pending doctor (no 403 blocking)", !!q("doctor-location-fields") && !/not yet approved/i.test(document.body.textContent));
 check("ONBOARDING restores saved state (Uttar Pradesh)", selectedText(q("location-state")) === "Uttar Pradesh", `got '${selectedText(q("location-state"))}'`);
-await setSelect(q("location-district"), opts(q("location-district")).find((o) => o.t === "Mathura").v); await settle(300);
-await typeInto(q("location-city"), "Mathura"); await settle(200);
-check("onboarding city is a text input and district gate works", q("location-city").tagName === "INPUT" && q("location-city").disabled === false && q("location-city").value === "Mathura");
+await setSelect(q("location-district"), opts(q("location-district")).find((o) => o.t === "Mathura").v); await settle(1500);
+const mathuraCity = opts(q("location-city")).find((o) => o.t === "Mathura");
+await setSelect(q("location-city"), mathuraCity.v); await settle(200);
+check("onboarding city is a select and district gate works", q("location-city").tagName === "SELECT" && q("location-city").disabled === false && selectedText(q("location-city")) === "Mathura");
 await unmount(root);
 
 console.log("SUMMARY", results.filter(Boolean).length + "/" + results.length);

@@ -1,7 +1,6 @@
-import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
-import User from "../models/User.js";
 import { logger } from "../utils/logger.js";
+import { authenticateAccessToken, SessionRejectedError } from "../services/sessionAuthService.js";
 
 const getToken = (socket) => {
   const authToken = socket.handshake.auth?.token;
@@ -26,6 +25,13 @@ const getToken = (socket) => {
 // closes the connection) but makes the reason visible in server logs
 // instead of only ever surfacing as a generic connect_error in the
 // browser.
+//
+// Session validity (signature, expiry, active user, securityVersion) is
+// decided in ONE place -- services/sessionAuthService.js -- so REST and
+// Socket.IO can never disagree. Before this, the handshake checked
+// existence + isActive but NOT securityVersion, so a password reset (which
+// immediately kills every REST session) left an already-connected socket,
+// and its chat/notification room membership, alive.
 export const socketAuth = async (socket, next) => {
   try {
     const token = getToken(socket);
@@ -34,27 +40,20 @@ export const socketAuth = async (socket, next) => {
       return next(new Error("Socket authentication token is required"));
     }
 
+    let user;
     let payload;
     try {
-      payload = jwt.verify(token, env.jwtSecret);
+      ({ user, payload } = await authenticateAccessToken(token));
     } catch (error) {
-      logger.warn("Socket handshake rejected: invalid or expired token", {
-        socketId: socket.id,
-        errorName: error.name,
-      });
-      return next(new Error("Invalid or expired socket token"));
-    }
-
-    const user = await User.findById(payload.userId).select("-password");
-    if (!user || !user.isActive) {
-      logger.warn("Socket handshake rejected: user not found or inactive", {
-        socketId: socket.id,
-        userId: payload.userId,
-      });
-      return next(new Error("Authenticated user is no longer active"));
+      if (error instanceof SessionRejectedError) {
+        logger.warn("Socket handshake rejected", { socketId: socket.id, code: error.code });
+        return next(new Error(error.message));
+      }
+      throw error;
     }
 
     socket.user = user;
+    socket.tokenSecurityVersion = payload.securityVersion || 0;
     socket.session = {
       userId: user._id.toString(),
       role: user.role,

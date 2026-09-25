@@ -16,6 +16,7 @@ import User from "../../models/User.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { downloadFile } from "../../utils/fileDownload.js";
+import { pickFamilyMemberFields } from "../../utils/familyMemberFields.js";
 import { clampPagination, buildPaginationMeta } from "../../utils/paginationValidation.js";
 import {
   ACTIVE_STATUSES,
@@ -103,17 +104,57 @@ export const getReportCategories = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { categories: categories.filter(Boolean).sort() }, message: "Report categories fetched successfully" });
 });
 
+// A report is SHARED with a doctor only through an explicit tag the patient
+// chose (doctor and/or appointment). The tag is validated so a patient can
+// neither target a doctor who does not exist / is not approved, nor point at
+// somebody else's appointment, and cannot spam arbitrary doctors with
+// "critical report" notifications. See services/clinicalAccessService.js for
+// how the tag is later honoured.
+const resolveReportSharingTags = async (req) => {
+  const { doctorId, appointmentId } = req.body;
+  const isObjectId = (value) => /^[a-f\d]{24}$/i.test(String(value));
+
+  if (appointmentId) {
+    if (!isObjectId(appointmentId)) throw new AppError("Invalid appointment", 400);
+    const appointment = await Appointment.findOne({ _id: appointmentId, patientId: req.user._id }).select("doctorId status").lean();
+    if (!appointment || appointment.status === "cancelled") throw new AppError("Appointment not found", 404);
+    if (doctorId && String(doctorId) !== String(appointment.doctorId)) {
+      throw new AppError("The selected doctor does not match this appointment", 400);
+    }
+    return { doctorId: appointment.doctorId, appointmentId: appointment._id };
+  }
+
+  if (doctorId) {
+    if (!isObjectId(doctorId)) throw new AppError("Invalid doctor", 400);
+    const doctor = await Doctor.findOne({ _id: doctorId, verificationStatus: "approved", isVerified: true, isActive: { $ne: false } }).select("_id").lean();
+    if (!doctor) throw new AppError("Doctor not found", 404);
+    return { doctorId: doctor._id, appointmentId: undefined };
+  }
+
+  return { doctorId: undefined, appointmentId: undefined };
+};
+
 export const uploadReport = asyncHandler(async (req, res) => {
   if (!req.file) throw new AppError("Report file is required", 400);
   assertValidUploadOrDelete(req.file);
-  if (!req.body.title || !req.body.category || !req.body.reportDate) throw new AppError("Title, category, and report date are required", 400);
-  if (req.body.familyMemberId) await assertOwnedFamilyMember(req, req.body.familyMemberId);
+  // Everything that can reject the request is validated BEFORE the report is
+  // created, and the already-stored upload is removed on any rejection so a
+  // failed request never leaves an orphan file behind.
+  let sharing;
+  try {
+    if (!req.body.title || !req.body.category || !req.body.reportDate) throw new AppError("Title, category, and report date are required", 400);
+    if (req.body.familyMemberId) await assertOwnedFamilyMember(req, req.body.familyMemberId);
+    sharing = await resolveReportSharingTags(req);
+  } catch (error) {
+    await fs.promises.unlink(req.file.path).catch(() => {});
+    throw error;
+  }
   const severity = ["normal", "urgent", "critical"].includes(req.body.severity) ? req.body.severity : "normal";
   const report = await MedicalReport.create({
     userId: req.user._id,
     familyMemberId: req.body.familyMemberId || undefined,
-    doctorId: req.body.doctorId || undefined,
-    appointmentId: req.body.appointmentId || undefined,
+    doctorId: sharing.doctorId,
+    appointmentId: sharing.appointmentId,
     title: req.body.title,
     category: req.body.category,
     reportDate: new Date(req.body.reportDate),
@@ -313,12 +354,22 @@ export const getFamilyMemberWorkspace = asyncHandler(async (req, res) => {
 export const createFamilyMember = asyncHandler(async (req, res) => {
   const required = ["name", "relation", "age", "gender"];
   if (required.some((key) => req.body[key] === undefined || req.body[key] === "")) throw new AppError("Name, relation, age, and gender are required", 400);
-  const familyMember = await FamilyMember.create({ ...req.body, userId: req.user._id });
+  const familyMember = await FamilyMember.create({ ...pickFamilyMemberFields(req.body), userId: req.user._id });
   res.status(201).json({ success: true, data: { familyMember }, message: "Family member added successfully" });
 });
 
 export const updateFamilyMember = asyncHandler(async (req, res) => {
-  const familyMember = await FamilyMember.findOneAndUpdate({ _id: req.params.id, ...ownership(req) }, req.body, { returnDocument: "after", runValidators: true });
+  // Only allowlisted fields are writable; ownership (userId) and lifecycle
+  // (isActive) can never be changed through this endpoint. A deactivated
+  // member is not editable (404), so this cannot be used to bypass
+  // deactivateFamilyMember.
+  const patch = pickFamilyMemberFields(req.body);
+  if (Object.keys(patch).length === 0) throw new AppError("No editable family member fields were provided", 400);
+  const familyMember = await FamilyMember.findOneAndUpdate(
+    { _id: req.params.id, ...ownership(req), isActive: { $ne: false } },
+    { $set: patch },
+    { returnDocument: "after", runValidators: true },
+  );
   if (!familyMember) throw new AppError("Family member not found", 404);
   res.status(200).json({ success: true, data: { familyMember }, message: "Family member updated successfully" });
 });
@@ -347,8 +398,15 @@ export const createInsurance = asyncHandler(async (req, res) => {
       409
     );
   }
+  // Explicit allowlist: claimStatus / claimHistory / claimAmount are
+  // workflow-controlled and must never be settable through a create payload
+  // (a patient could otherwise forge an "approved" claim).
   const policy = await Insurance.create({
-    ...req.body,
+    provider: req.body.provider,
+    policyNumber: req.body.policyNumber,
+    policyHolder: req.body.policyHolder,
+    validTill: req.body.validTill,
+    coverageAmount: req.body.coverageAmount,
     familyMemberId: req.body.familyMemberId || undefined,
     userId: req.user._id,
     document: req.file ? { fileName: req.file.originalname, filePath: req.file.path, mimeType: req.file.mimetype, uploadedAt: new Date() } : undefined,

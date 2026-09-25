@@ -1,3 +1,4 @@
+import { containsRegex } from "../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Appointment from "../models/Appointment.js";
 import Doctor from "../models/Doctor.js";
@@ -39,6 +40,8 @@ import {
   canonicalizeConsultationMode,
   isKnownDoctorConsultationMode,
 } from "../constants/consultationMode.js";
+import { enforceAppointmentBookingPolicy } from "../services/appointmentBookingPolicyService.js";
+import { getAppointmentLimits } from "../services/hospitalSettingsService.js";
 
 const getPagination = (query) => {
   const page = Math.max(Number(query.page) || 1, 1);
@@ -141,7 +144,7 @@ export const buildDateRangeFilter = (query = {}) => {
 // admin's own resolveSearchFilter, which also matches doctor name — not
 // useful here since the caller already knows which doctor they are).
 export const resolvePatientSearchFilter = async (term) => {
-  const regex = new RegExp(term, "i");
+  const regex = containsRegex(term);
   const matchingPatients = await User.find({ role: "patient", $or: [{ name: regex }, { email: regex }] })
     .select("_id")
     .lean();
@@ -192,6 +195,23 @@ export const getAvailableSlots = asyncHandler(async (req, res) => {
 
   if (date < today) {
     return res.status(200).json({ success: true, data: { slots: [], reason: "past_date" }, message: "No slots available for a past date" });
+  }
+
+  // Appointment Engine Remediation (2026-09-24): keep this display endpoint
+  // consistent with the now-enforced server-side booking window
+  // (HospitalSetting.appointmentLimits.bookingWindowDays) so a patient
+  // never sees "available" slots that createAppointment would then reject
+  // — mirrors the past_date short-circuit immediately above rather than
+  // letting the two disagree.
+  const { bookingWindowDays } = await getAppointmentLimits();
+  const maxBookableDate = new Date(today);
+  maxBookableDate.setUTCDate(maxBookableDate.getUTCDate() + bookingWindowDays);
+  if (date > maxBookableDate) {
+    return res.status(200).json({
+      success: true,
+      data: { slots: [], reason: "beyond_booking_window", bookingWindowDays },
+      message: `Appointments can only be booked up to ${bookingWindowDays} days in advance`,
+    });
   }
 
   const blockedDate = findBlockedDate(doctor, date);
@@ -376,10 +396,17 @@ export const createAppointment = asyncHandler(async (req, res) => {
   }
 
   const appointmentDate = normalizeDate(req.body.date);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
 
-  if (appointmentDate < today) throw new AppError("Past appointments are not allowed", 400);
+  // Canonical, server-authoritative timing/window policy (Appointment
+  // Engine Remediation, 2026-09-24) — see appointmentBookingPolicyService.js.
+  // Replaces the previous date-only comparison, which could not catch a
+  // past TIME on today's date (e.g. booking 09:00 when the real server
+  // time is already 12:00 the same day).
+  await enforceAppointmentBookingPolicy({
+    date: appointmentDate,
+    timeSlot: req.body.timeSlot,
+    doctorId: doctor._id,
+  });
 
   ensureDoctorAvailable(doctor, appointmentDate, req.body.timeSlot);
 
@@ -1029,9 +1056,18 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
   if (!doctorDoc) throw new AppError("Doctor profile not found", 404);
 
   const newDate = normalizeDate(newDateRaw);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  if (newDate < today) throw new AppError("Past appointments are not allowed", 400);
+
+  // Same canonical timing/window policy as booking — Phase 10's explicit
+  // requirement that rescheduling go through the SAME validation pipeline
+  // as a new appointment, not a second, weaker path. excludeAppointmentId
+  // stops this appointment's OWN current slot from counting against the
+  // doctor's daily cap when rescheduling within the same date.
+  await enforceAppointmentBookingPolicy({
+    date: newDate,
+    timeSlot: newTimeSlot,
+    doctorId: doctorDoc._id,
+    excludeAppointmentId: appointment._id,
+  });
 
   // Same real conflict/availability rules as booking — never a UI-only date
   // picker (Step 7's explicit requirement).

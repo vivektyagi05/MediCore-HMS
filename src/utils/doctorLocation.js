@@ -1,11 +1,14 @@
 // Doctor location model shared by DoctorOnboarding and DoctorProfessionalProfile.
 //
-//   STATE (select)  →  DISTRICT (select)  →  CITY (free text)
+//   STATE (select)  →  DISTRICT (select)  →  CITY (select)
 //
+// Every level follows the same MASTER/OTHER shape: a canonical selection sets
+// `<level>MasterId`/`<level>Type="MASTER"`, and an explicit "Other" choice sets
+// `<level>Type="OTHER"` with the free-typed value in `<level>Other` (the
+// display name field itself is never trusted for OTHER — see levelFromDoctor).
 // Pure functions only (unit-tested in backend/tests/doctorLocationForm.test.mjs).
-// Geography itself is NEVER defined here: states/districts come from the
-// canonical MasterData API; city is typed and resolved server-side against the
-// canonical cities of the selected district.
+// Geography itself is NEVER defined here: states/districts/cities come from
+// the canonical MasterData API.
 
 export const OTHER_OPTION = "__other__";
 
@@ -35,17 +38,7 @@ export const locationFromDoctor = (doctor) => {
   const state = levelFromDoctor(doctor, "state");
   const district = levelFromDoctor(doctor, "district");
   const city = levelFromDoctor(doctor, "city");
-  // City is displayed as plain text whether it resolved to a canonical city or not.
-  const cityText = text(doctor?.city) || text(doctor?.cityOther);
-  return {
-    ...state,
-    ...district,
-    ...city,
-    city: cityText,
-    cityMasterId: city.cityMasterId,
-    cityType: cityText ? (city.cityMasterId ? "MASTER" : "OTHER") : "",
-    cityOther: city.cityMasterId ? "" : cityText,
-  };
+  return { ...state, ...district, ...city };
 };
 
 const CHILDREN = { state: ["district", "city"], district: ["city"], city: [] };
@@ -72,17 +65,8 @@ export const changeLevel = (location, level, selection) => {
   return next;
 };
 
-/** Typing into an "Other" state/district text box. Does not clear children. */
+/** Typing into an "Other" state/district/city text box. Does not clear children. */
 export const setOtherText = (location, level, value) => ({ ...location, [keys(level).other]: value });
-
-/** Typing the city. Any previously matched canonical city id is dropped. */
-export const setCityText = (location, value) => ({
-  ...location,
-  city: value,
-  cityMasterId: "",
-  cityType: text(value) ? "OTHER" : "",
-  cityOther: value,
-});
 
 export const selectValueFor = (location, level) => {
   const k = keys(level);
@@ -106,17 +90,14 @@ const levelPayload = (location, level) => {
 };
 
 /**
- * Complete, explicit payload for all three levels. City is sent as typed text;
- * the API resolves it against canonical cities of the selected district only
- * (exact match → MASTER, otherwise OTHER).
+ * Complete, explicit payload for all three levels, each independently
+ * MASTER/OTHER/unset. A level below an unset/cleared parent is never sent
+ * (mirrors changeLevel's clearing behavior instead of relying on the caller).
  */
 export const buildLocationPayload = (location) => {
   const state = levelPayload(location, "state");
   const district = state.stateType ? levelPayload(location, "district") : levelPayload({}, "district");
-  const cityText = text(location.city);
-  const city = district.districtType && cityText
-    ? { city: cityText, cityMasterId: "", cityType: "OTHER", cityOther: cityText }
-    : { city: "", cityMasterId: "", cityType: "", cityOther: "" };
+  const city = district.districtType ? levelPayload(location, "city") : levelPayload({}, "city");
   return { ...state, ...district, ...city };
 };
 

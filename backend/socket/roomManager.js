@@ -2,7 +2,7 @@ import Appointment from "../models/Appointment.js";
 import Doctor from "../models/Doctor.js";
 import User from "../models/User.js";
 import { ADMIN_ROLES, ROLES } from "../constants/roles.js";
-import { usersCanChat } from "../utils/chatAuthorization.js";
+import { usersCanChat } from "../services/clinicalAccessService.js";
 
 export const roomManager = {
   userRoom(userId) {
@@ -74,7 +74,7 @@ export const roomManager = {
       const [idA, idB] = key.split(":");
       if (![idA, idB].includes(user._id.toString())) return false;
       const otherUserId = idA === user._id.toString() ? idB : idA;
-      const otherUser = await User.findById(otherUserId).select("_id role").lean();
+      const otherUser = await User.findById(otherUserId).select("_id role isActive").lean();
       if (!otherUser) return false;
       return usersCanChat(user, otherUser);
     }

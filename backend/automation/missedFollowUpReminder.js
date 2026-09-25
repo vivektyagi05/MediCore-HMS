@@ -33,6 +33,9 @@ export const missedFollowUpReminder = {
         doctorId: prescription.doctorId,
         patientId: prescription.patientId._id,
         date: { $gt: prescription.followUpDate },
+        // A cancelled booking is not a follow-up that
+        // actually happened; only a live booking counts as "rebooked".
+        status: { $ne: "cancelled" },
       });
       if (rebooked) continue;
 

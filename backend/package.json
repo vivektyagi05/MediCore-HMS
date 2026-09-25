@@ -19,6 +19,8 @@
     "update:lgd-manifest": "node scripts/updateLgdManifest.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1137.0",
+    "@google/genai": "^2.23.0",
     "bcrypt": "latest",
     "compression": "^1.8.1",
     "cors": "latest",

@@ -27,7 +27,7 @@
 import mongoose from "mongoose";
 import Doctor from "../../models/Doctor.js";
 import DoctorPayout from "../../models/DoctorPayout.js";
-import Payment, { PAYMENT_STATUS } from "../../models/Payment.js";
+import Payment, { PAYMENT_STATUS, CAPTURED_LIKE_PAYMENT_STATUSES } from "../../models/Payment.js";
 import RefundRequest from "../../models/RefundRequest.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
@@ -40,13 +40,6 @@ import { computeDoctorWithdrawableBalance } from "../../services/finance/withdra
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Payment truth: a "collected" amount can only ever mean money the gateway
-// actually captured. captured/refunded/partially_refunded all started as a
-// real capture (a later refund doesn't retroactively mean the money was
-// never collected) — mirrors financeAggregates.js's own CAPTURED_LIKE, kept
-// as a separate constant here since that file is admin-global and this one
-// must stay doctor-scoped.
-const CAPTURED_LIKE = [PAYMENT_STATUS.CAPTURED, PAYMENT_STATUS.REFUNDED, PAYMENT_STATUS.PARTIALLY_REFUNDED];
 
 async function resolveDoctorId(req) {
   const doctor = await Doctor.findOne({ userId: req.user._id }).select("_id").lean();
@@ -97,7 +90,7 @@ export async function buildDoctorRevenueIntelligence(doctorId) {
       {
         $group: {
           _id: null,
-          collected: { $sum: { $cond: [{ $in: ["$status", CAPTURED_LIKE] }, "$totalAmount", 0] } },
+          collected: { $sum: { $cond: [{ $in: ["$status", CAPTURED_LIKE_PAYMENT_STATUSES] }, "$totalAmount", 0] } },
           tax: { $sum: { $ifNull: ["$taxAmount", 0] } },
           refunded: { $sum: { $ifNull: ["$refundedAmount", 0] } },
         },
@@ -441,7 +434,7 @@ export const getDoctorFinancialPosition = asyncHandler(async (req, res) => {
         {
           $group: {
             _id: null,
-            collected: { $sum: { $cond: [{ $in: ["$status", CAPTURED_LIKE] }, "$totalAmount", 0] } },
+            collected: { $sum: { $cond: [{ $in: ["$status", CAPTURED_LIKE_PAYMENT_STATUSES] }, "$totalAmount", 0] } },
             refunded: { $sum: { $ifNull: ["$refundedAmount", 0] } },
           },
         },

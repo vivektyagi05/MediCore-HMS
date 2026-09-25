@@ -98,6 +98,13 @@ vi.mock("../models/Doctor.js", () => ({
               userId: DOCTOR_USER_ID,
               verificationStatus: currentDoctorStatus,
               specialization: "Cardiology",
+              // AUDIT FIX (GLOBAL-FLOW-INTEGRITY-AUDIT-2026-09-25, ONB-002):
+              // approveDoctor now requires at least one uploaded document
+              // before it will approve. Without this, every "approve
+              // succeeds" case below would 409 instead of 200 — not because
+              // the body-contract fix regressed, but because this fixture
+              // doctor would (correctly) no longer be approvable.
+              documents: [{ title: "Medical License", fileName: "license.pdf" }],
             },
       ),
     findOneAndUpdate: (filter) => {

@@ -1,5 +1,6 @@
+import { requireFeatureEnabled } from "../../services/featureToggleService.js";
+import { localCategoryDir } from "../../storage/storageService.js";
 import path from "path";
-import fs from "fs";
 import multer from "multer";
 import { Router } from "express";
 import {
@@ -43,12 +44,15 @@ import { ROLES } from "../../constants/roles.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { authorizeRoles } from "../../middleware/roleMiddleware.js";
 
-const makeStorage = (destination) =>
+const makeStorage = (category) =>
   multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      fs.mkdirSync(destination, { recursive: true });
-      cb(null, destination);
-    },
+    // DOCKER-PATH FIX: was a bare "storage/..." string resolved against
+    // process.cwd() -- inside the built image that is /app, not
+    // /app/backend/storage (the actual persistent volume mount point; see
+    // docker-compose.yml and storage/storageService.js). localCategoryDir()
+    // resolves against the same absolute, Docker-volume-matching root every
+    // other storage consumer now uses.
+    destination: (_req, _file, cb) => cb(null, localCategoryDir(category)),
     filename: (_req, file, cb) => {
       const ext = path.extname(file.originalname);
       cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
@@ -61,13 +65,13 @@ const fileFilter = (_req, file, cb) => {
 };
 
 const reportUpload = multer({
-  storage: makeStorage("storage/patient-reports"),
+  storage: makeStorage("patient-reports"),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter,
 });
 
 const insuranceUpload = multer({
-  storage: makeStorage("storage/insurance-documents"),
+  storage: makeStorage("insurance-documents"),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter,
 });
@@ -105,7 +109,7 @@ router.post("/insurance/:id/claim", submitInsuranceClaim);
 router.get("/insurance/:id/utilization", getInsuranceUtilization);
 
 router.get("/reviews", listReviews);
-router.post("/reviews", upsertReview);
+router.post("/reviews", requireFeatureEnabled("reviews", "Reviews"), upsertReview);
 
 router.get("/saved-doctors", listSavedDoctors);
 router.post("/saved-doctors", saveDoctor);

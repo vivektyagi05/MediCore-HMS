@@ -1,4 +1,6 @@
+import crypto from "crypto";
 import { connectDB } from "./config/db.js";
+import { env } from "./config/env.js";
 import { logger } from "./utils/logger.js";
 import Permission, { PERMISSION_KEYS } from "./models/Permission.js";
 import Service from "./models/Service.js";
@@ -8,8 +10,25 @@ import FeatureToggle from "./models/FeatureToggle.js";
 import HospitalSetting from "./models/HospitalSetting.js";
 
 const adminEmail = process.env.SEED_SUPER_ADMIN_EMAIL || "superadmin@hms.local";
-const adminPassword = process.env.SEED_SUPER_ADMIN_PASSWORD || "ChangeMe123!";
 const adminName = process.env.SEED_SUPER_ADMIN_NAME || "HMS Super Admin";
+
+// SECURITY FIX: this used to fall back to one specific hardcoded literal
+// password whenever SEED_SUPER_ADMIN_PASSWORD was unset -- in
+// production that meant every deployment that forgot to set the variable
+// silently got the exact same super_admin password, publishable in this
+// very file. Production now REFUSES to seed without an explicit password
+// (env.isProduction is the same guard config/productionGuards.js already
+// uses). Development/test may still run with zero setup: a fresh random
+// password is generated per run and printed once, never hardcoded.
+let adminPassword = process.env.SEED_SUPER_ADMIN_PASSWORD;
+let generatedAdminPassword = false;
+if (!adminPassword) {
+  if (env.isProduction) {
+    throw new Error("SEED_SUPER_ADMIN_PASSWORD is required to seed the super_admin account in production");
+  }
+  adminPassword = crypto.randomBytes(18).toString("base64url");
+  generatedAdminPassword = true;
+}
 
 const allPermissions = PERMISSION_KEYS.reduce((acc, key) => {
   acc[key] = true;
@@ -117,6 +136,14 @@ const seed = async () => {
     defaultArticles: defaultArticles.length,
     defaultFeatures: defaultFeatures.length,
   });
+  if (generatedAdminPassword) {
+    // Printed once, at the end, so it isn't lost among the earlier
+    // per-collection log lines above.
+    logger.warn("Generated a random super_admin password for this development run -- set SEED_SUPER_ADMIN_PASSWORD to pin it next time", {
+      email: adminEmail,
+      password: adminPassword,
+    });
+  }
 };
 
 if (process.argv[1]?.endsWith("seed.js")) {

@@ -9,6 +9,7 @@ import { emailService } from "../services/emailService.js";
 import { ROLES } from "../constants/roles.js";
 import User from "../models/User.js";
 import { applyDoctorMasterData, resolveDoctorMasterData } from "../services/masterDataService.js";
+import { canTransitionDoctorVerification, onboardingStatusForUser } from "../services/doctorLifecycleService.js";
 
 // SECURITY BUGFIX: both submitOnboarding and updateOnboarding used
 // `Object.assign(doctor, req.body)` with NO field whitelist — a classic mass
@@ -71,6 +72,45 @@ const pickOnboardingFields = (body) => {
   return picked;
 };
 
+// AUDIT FIX (GLOBAL-FLOW-INTEGRITY-AUDIT-2026-09-25, item ONB-001):
+// submitOnboarding previously transitioned verificationStatus straight to
+// "pending" for ANY payload, including an entirely empty one. Every
+// credential/location field on the Doctor schema is `default: ""` /
+// `default: null` rather than `required: true` (specialization is the only
+// schema-required field, and it silently falls back to "General Medicine"),
+// and this route had no validation middleware at all -- so a doctor could
+// submit with zero real information and land in the same "pending" queue an
+// admin trusts to mean "ready to review." This function is the single
+// backend gate for what "complete enough to submit" means; it is
+// intentionally NOT reused by updateOnboarding, since an approved doctor
+// must remain able to save incremental edits without hitting an
+// onboarding-completeness wall.
+const isBlank = (value) => value === undefined || value === null || String(value).trim() === "";
+
+const effectiveMasterValue = (doctor, field) => {
+  const config = { specialization: "specializationOther", state: "stateOther", district: "districtOther", city: "cityOther" }[field];
+  const typeField = `${field}Type`;
+  if (doctor[typeField] === "OTHER") return doctor[config];
+  return doctor[`${field}MasterId`] || doctor[field];
+};
+
+export const getOnboardingMissingRequirements = (doctor) => {
+  const missing = [];
+
+  if (isBlank(effectiveMasterValue(doctor, "specialization"))) missing.push("specialization");
+  if (isBlank(doctor.licenseNumber)) missing.push("licenseNumber");
+  if (isBlank(doctor.medicalCouncil)) missing.push("medicalCouncil");
+  if (isBlank(doctor.qualification)) missing.push("qualification");
+  if (isBlank(doctor.collegeName)) missing.push("collegeName");
+  if (doctor.graduationYear === null || doctor.graduationYear === undefined) missing.push("graduationYear");
+  if (isBlank(effectiveMasterValue(doctor, "state"))) missing.push("state");
+  if (isBlank(effectiveMasterValue(doctor, "district"))) missing.push("district");
+  if (isBlank(effectiveMasterValue(doctor, "city"))) missing.push("city");
+  if (!Array.isArray(doctor.documents) || doctor.documents.length === 0) missing.push("documents");
+
+  return missing;
+};
+
 export const getMyOnboarding = asyncHandler(async (req, res) => {
   const doctor = await Doctor.findOne({
     userId: req.user._id,
@@ -91,6 +131,11 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
     throw new AppError("Doctor profile not found", 404);
   }
 
+  // Canonical transitions (services/doctorLifecycleService.js):
+  // not_submitted|rejected -> pending. A doctor may (re)submit from
+  // not_submitted (first-ever submission) or rejected (resubmission); a
+  // pending or approved doctor may not, with the specific reason surfaced
+  // below so the two 409s stay distinguishable to the frontend.
   if (doctor.verificationStatus === "pending") {
     throw new AppError("Your application is already under review.", 409);
   }
@@ -99,11 +144,32 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
     throw new AppError("Your doctor application is already approved.", 409);
   }
 
+  if (!canTransitionDoctorVerification(doctor.verificationStatus, "pending")) {
+    throw new AppError("Your application cannot be submitted from its current state.", 409);
+  }
+
   const submittedAt = new Date();
   const updates = pickOnboardingFields(req.body);
   const masterData = await resolveDoctorMasterData(updates, { allowLegacyOther: true });
   Object.assign(doctor, updates);
   applyDoctorMasterData(doctor, masterData);
+
+  // MANDATORY dependency check (see getOnboardingMissingRequirements above).
+  // This must run on the merged doctor state -- after master-data resolution,
+  // before any lifecycle/status mutation -- so a doctor filling in a
+  // previously-missing field on resubmission is judged on their real,
+  // current data, not just this request's diff. A failure here stops the
+  // flow entirely: no verificationStatus change, no save, no admin
+  // notification, no email -- matching the "STOP THE FLOW" business rule
+  // rather than creating a partially-submitted "pending" record.
+  const missing = getOnboardingMissingRequirements(doctor);
+  if (missing.length > 0) {
+    throw new AppError(
+      `Cannot submit: the following are required before your application can be reviewed: ${missing.join(", ")}.`,
+      400,
+    );
+  }
+
   doctor.verificationStatus = "pending";
   doctor.isVerified = false;
   doctor.verificationNotes = "";
@@ -117,7 +183,7 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
   await doctor.save();
 
   await User.findByIdAndUpdate(req.user._id, {
-    doctorOnboardingStatus: "pending",
+    doctorOnboardingStatus: onboardingStatusForUser(doctor),
     doctorVerification: {
       submittedAt,
       reviewedAt: null,

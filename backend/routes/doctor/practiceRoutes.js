@@ -1,6 +1,6 @@
+import { localCategoryDir } from "../../storage/storageService.js";
 import { Router } from "express";
 import path from "path";
-import fs from "fs";
 import multer from "multer";
 import { randomBytes } from "crypto";
 import { ROLES } from "../../constants/roles.js";
@@ -24,10 +24,8 @@ import {
 
 
 const profilePhotoStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    fs.mkdirSync("storage/doctor-profile", { recursive: true });
-    cb(null, "storage/doctor-profile");
-  },
+  // DOCKER-PATH FIX: see storage/storageService.js.
+  destination: (_req, _file, cb) => cb(null, localCategoryDir("doctor-profile")),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, `${Date.now()}-${randomBytes(12).toString("hex")}${ext}`);

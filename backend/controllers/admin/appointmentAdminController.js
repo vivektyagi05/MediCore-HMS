@@ -14,6 +14,7 @@
 //  - cancellation reuses the shared appointmentCancellationService.js core
 //    (see that file's header) so the admin cancel path can never drift
 //    from the patient cancel path's rules.
+import { containsRegex } from "../../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Appointment from "../../models/Appointment.js";
 import Payment from "../../models/Payment.js";
@@ -65,7 +66,7 @@ export const ATTENTION_MATCH = buildAttentionMatch();
 // rather than downloading the full appointment collection to filter in
 // memory (the mission explicitly rules out the latter).
 const resolveSearchFilter = async (term) => {
-  const regex = new RegExp(term, "i");
+  const regex = containsRegex(term);
   const [matchingPatients, matchingDoctorUsers] = await Promise.all([
     User.find({ role: "patient", name: regex }).select("_id").lean(),
     User.find({ role: "doctor", name: regex }).select("_id").lean(),

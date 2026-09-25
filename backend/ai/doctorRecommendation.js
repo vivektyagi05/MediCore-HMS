@@ -1,3 +1,4 @@
+import { containsRegex } from "../utils/regexSafe.js";
 import Appointment from "../models/Appointment.js";
 import Doctor from "../models/Doctor.js";
 
@@ -14,7 +15,7 @@ const hasAvailability = (doctor, date, timeSlot) => {
 
 export const doctorRecommendation = {
   async recommend({ patientId, symptoms = [], departments = [], date, timeSlot, limit = 8 }) {
-    const specializationRegexes = departments.map((department) => new RegExp(department, "i"));
+    const specializationRegexes = departments.map((department) => containsRegex(department));
     const filter = specializationRegexes.length ? { specialization: { $in: specializationRegexes } } : {};
 
     const [doctors, patientHistory] = await Promise.all([

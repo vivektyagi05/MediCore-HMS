@@ -82,10 +82,18 @@ apiClient.get = (url, config = {}) => {
 
   const request = rawGet(url, config)
     .then((response) => {
-      getCache.set(key, {
-        response,
-        expiresAt: Date.now() + (config.cacheTtlMs ?? GET_CACHE_TTL_MS),
-      });
+      // Some endpoints (e.g. master-data lists) are only meaningfully empty
+      // once — after a not-yet-imported/backfilled dataset is populated, an
+      // empty response cached here would keep hiding the real data for up to
+      // cacheTtlMs even though the server now has it. `shouldCache` lets a
+      // caller opt out of caching such "empty" responses; everything else is
+      // cached as before.
+      if (!config.shouldCache || config.shouldCache(response)) {
+        getCache.set(key, {
+          response,
+          expiresAt: Date.now() + (config.cacheTtlMs ?? GET_CACHE_TTL_MS),
+        });
+      }
       return response;
     })
     .finally(() => {

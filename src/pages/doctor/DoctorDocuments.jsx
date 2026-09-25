@@ -129,6 +129,20 @@ function DoctorDocuments() {
     }
   };
 
+  const downloadDocument = async (row) => {
+    try {
+      const blob = await doctorWorkflowApi.downloadDocument(row._id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = row.fileName || `document-${row._id}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error));
+    }
+  };
+
   const downloadCertificate = async (id) => {
     const blob = await doctorWorkflowApi.downloadCertificate(id);
     const url = URL.createObjectURL(blob);
@@ -245,7 +259,18 @@ function DoctorDocuments() {
                 { key: "status", header: "Status", render: (r) => <span className={`rounded-full px-2 py-1 text-xs font-bold ${STATUS_STYLES[r.status] || "bg-slate-100 text-slate-600"}`}>{r.status}</span> },
                 { key: "expiryDate", header: "Expiry", render: (r) => (r.expiryDate ? new Date(r.expiryDate).toLocaleDateString() : "—") },
                 { key: "uploadedAt", header: "Uploaded", render: (r) => new Date(r.uploadedAt).toLocaleDateString() },
-                { key: "actions", header: "", render: (r) => <Button variant="secondary" onClick={() => deleteDocument(r._id)}><Trash2 size={14} /></Button> },
+                {
+                  key: "actions",
+                  header: "",
+                  render: (r) => (
+                    <div className="flex items-center gap-1">
+                      <Button variant="secondary" onClick={() => downloadDocument(r)}><Download size={14} /></Button>
+                      {r.status !== "verified" && (
+                        <Button variant="secondary" onClick={() => deleteDocument(r._id)}><Trash2 size={14} /></Button>
+                      )}
+                    </div>
+                  ),
+                },
               ]}
               data={filteredDocuments}
               highlightRowId={highlightedDocumentId}

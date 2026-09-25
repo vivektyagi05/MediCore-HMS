@@ -15,7 +15,7 @@ import { getIO } from "../socket/socketServer.js";
 import { selectUnreadMessageIdsForReader } from "../utils/chatReadState.js";
 import { onlineFilter } from "../socket/presenceQuery.js";
 import { clampPagination, buildPaginationMeta } from "../utils/paginationValidation.js";
-import { usersCanChat } from "../utils/chatAuthorization.js";
+import { usersCanReadConversationHistory } from "../services/clinicalAccessService.js";
 import User from "../models/User.js";
 import { resolveCategory, classifyPriority, resolveAction, priorityWeight, PRIORITY } from "../services/doctorInboxAggregates.js";
 
@@ -228,7 +228,7 @@ export const getPresence = asyncHandler(async (req, res) => {
 
   res.status(200).json({
     success: true,
-    data: { onlineUsers: presenceManager.snapshot(), activeSessions },
+    data: { onlineUsers: presenceManager.snapshotFor(req.user), activeSessions },
     message: "Online presence fetched successfully",
   });
 });
@@ -241,9 +241,9 @@ export const getConversation = asyncHandler(async (req, res) => {
   // read the full message history of any two users by supplying their id
   // (an IDOR). Now requires a real doctor-patient relationship (or an
   // admin participant), same shared check as chat:send/roomManager.
-  const otherUser = await User.findById(req.params.userId).select("_id role").lean();
+  const otherUser = await User.findById(req.params.userId).select("_id role isActive").lean();
   if (!otherUser) throw new AppError("Conversation participant not found", 404);
-  const allowed = await usersCanChat(req.user, otherUser);
+  const allowed = await usersCanReadConversationHistory(req.user, otherUser);
   if (!allowed) throw new AppError("You are not authorized to view this conversation", 403);
 
   const { page, limit, skip } = getPagination(req.query);

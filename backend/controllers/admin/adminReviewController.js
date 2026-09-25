@@ -18,6 +18,7 @@
 //  - attention-queue and KPI math are pure functions imported from
 //    reviewAdminAggregates.js so they can be regression-tested without a DB
 //    and can never drift between the summary and attention-queue endpoints.
+import { containsRegex } from "../../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Review from "../../models/Review.js";
 import User from "../../models/User.js";
@@ -43,7 +44,7 @@ const getPagination = (query) => {
 // than downloading the full review collection to filter in memory. Same
 // pattern as appointmentAdminController.resolveSearchFilter.
 const resolveSearchFilter = async (term) => {
-  const regex = new RegExp(term, "i");
+  const regex = containsRegex(term);
   const [matchingPatients, matchingDoctorUsers] = await Promise.all([
     User.find({ role: "patient", $or: [{ name: regex }, { email: regex }] }).select("_id").lean(),
     User.find({ role: "doctor", name: regex }).select("_id").lean(),

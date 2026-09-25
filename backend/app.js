@@ -213,8 +213,15 @@ app.use(
   }),
 );
 app.use(compression());
-app.use("/uploads/doctor-profile", express.static(path.resolve(process.cwd(), "storage/doctor-profile"), { index: false, dotfiles: "deny", fallthrough: false }));
-app.use("/uploads/cms", express.static(path.resolve(process.cwd(), "storage/cms"), { index: false, dotfiles: "deny", fallthrough: false }));
+// DOCKER-PATH FIX: these used to be served from process.cwd()-relative
+// "storage/..." (/app/storage/* inside the built image) while the Docker
+// volume that is meant to persist uploads across deploys is mounted at
+// /app/backend/storage (see docker-compose.yml). env.storage.localRoot
+// resolves to that same volume mount point (config/env.js), so every
+// upload category is now served from -- and, via storage/storageService.js
+// or localCategoryDir(), written to -- the SAME absolute root.
+app.use("/uploads/doctor-profile", express.static(path.resolve(env.storage.localRoot, "doctor-profile"), { index: false, dotfiles: "deny", fallthrough: false }));
+app.use("/uploads/cms", express.static(path.resolve(env.storage.localRoot, "cms"), { index: false, dotfiles: "deny", fallthrough: false }));
 app.post("/api/payments/webhooks/razorpay", express.raw({ type: "application/json" }), razorpayWebhookHandler);
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));

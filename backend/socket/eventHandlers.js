@@ -3,9 +3,12 @@ import NotificationDelivery from "../models/NotificationDelivery.js";
 import User from "../models/User.js";
 import { notificationEmitter } from "../realtime/notificationEmitter.js";
 import { presenceManager } from "./presenceManager.js";
+import { revalidateSession, SESSION_REJECTION_MESSAGES } from "../services/sessionAuthService.js";
 import { roomManager } from "./roomManager.js";
 import { wrapAsyncSocketHandler } from "./asyncSocketHandler.js";
-import { usersCanChat } from "../utils/chatAuthorization.js";
+import { usersCanChat } from "../services/clinicalAccessService.js";
+import { isFeatureEnabled } from "../services/featureToggleService.js";
+import { ADMIN_ROLES } from "../constants/roles.js";
 
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_MAX = 40;
@@ -81,6 +84,19 @@ export const registerEventHandlers = (io, socket) => {
 
   on("presence:ping", async (_payload, ack) => {
     if (!assertAllowedEvent(socket, "presence:ping")) return;
+    // Long-lived sockets bypass the (per-connection) handshake check, so a
+    // deactivation or password reset that happens mid-connection would
+    // otherwise never be enforced until the client reconnects. The
+    // heartbeat the frontend already sends every interval is reused as the
+    // revalidation tick; on rejection the socket is force-disconnected, the
+    // same outcome protect() gives REST callers immediately.
+    const rejection = await revalidateSession(socket.user._id, socket.tokenSecurityVersion);
+    if (rejection) {
+      ack?.({ success: false, message: SESSION_REJECTION_MESSAGES[rejection] });
+      socket.emit("auth:invalidated", { reason: rejection });
+      socket.disconnect(true);
+      return;
+    }
     await presenceManager.heartbeat(socket);
     ack?.({ success: true, serverTime: new Date() });
   });
@@ -126,6 +142,12 @@ export const registerEventHandlers = (io, socket) => {
 
   on("chat:send", async (payload, ack) => {
     if (!assertAllowedEvent(socket, "chat:send")) return;
+    // Super admin support chat is never gated by this toggle -- disabling
+    // patient/doctor chat must not also cut off support escalations.
+    if (!ADMIN_ROLES.includes(socket.user.role) && !(await isFeatureEnabled("chat", { userId: socket.user._id.toString() }))) {
+      ack?.({ success: false, message: "Chat is currently unavailable" });
+      return;
+    }
     const { recipientId, body, appointmentId } = payload || {};
     if (!recipientId || !body?.trim()) {
       ack?.({ success: false, message: "Recipient and message are required" });

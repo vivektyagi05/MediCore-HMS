@@ -16,15 +16,18 @@ assert.match(doctorSearch, /master\.specializations\.map/);
 for (const file of ["src/pages/doctor/DoctorOnboarding.jsx", "src/pages/doctor/DoctorProfessionalProfile.jsx"]) {
   const source = read(file);
   // Both doctor forms share ONE location implementation (state select,
-  // district select, city text) — no per-form geography arrays.
+  // district select, city select, each with an Other fallback) — no
+  // per-form geography arrays.
   assert.match(source, /DoctorLocationFields/);
   assert.match(source, /buildLocationPayload/);
   assert.doesNotMatch(source, /master\.(states|districts|cities)\.map/);
 }
 const locationFields = read("src/components/doctor/DoctorLocationFields.jsx");
-assert.match(locationFields, /placeholder="Enter city"/);
-assert.match(locationFields, /<input[\s\S]{0,120}data-testid="location-city"|data-testid="location-city"[\s\S]{0,80}type="text"/);
-assert.doesNotMatch(locationFields, /cities\.map/);
+// City is a canonical dropdown (options.cities), sourced from the district's
+// cities, with an explicit "Other" fallback for a typed locality.
+assert.match(locationFields, /options\.cities\.map/);
+assert.match(locationFields, /placeholder="Other city\/locality"/);
+assert.match(locationFields, /data-testid="location-city"/);
 
 const service = read("backend/services/masterDataService.js");
 assert.match(service, /getMasterByName = async \(value, kind, parentId/);

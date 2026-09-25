@@ -1,10 +1,10 @@
+import { useEffect } from "react";
 import { useLocationOptions } from "../../hooks/useLocationOptions";
 import {
   OTHER_OPTION,
   changeLevel,
   isDistrictChosen,
   selectValueFor,
-  setCityText,
   setOtherText,
 } from "../../utils/doctorLocation";
 
@@ -13,14 +13,46 @@ const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-3 py-2
 const labelClass = "mb-1 block text-xs font-bold text-slate-500";
 
 /**
- * State (select) → District (select) → City (free text).
+ * State (select) → District (select) → City (select), each with an explicit
+ * "Other" option and free-text fallback so a locality outside the canonical
+ * dataset can still be entered and saved.
  * Controlled: `value` is a location object (see utils/doctorLocation.js) and
  * `onChange` receives the next location object.
+ *
+ * `onStatusChange` (optional, additive): called with (loading, error)
+ * booleans whenever this component's own master-data fetch state changes,
+ * so a parent form (DoctorOnboarding) can block submit while location data
+ * is still loading or block it after a load failure, without this
+ * component needing to know anything about submission. Existing callers
+ * that don't pass it (e.g. DoctorProfessionalProfile) are unaffected.
  */
-export default function DoctorLocationFields({ value, onChange, disabled = false, labels = {} }) {
-  const options = useLocationOptions(value.stateType === "MASTER" ? value.stateMasterId : "");
+export default function DoctorLocationFields({ value, onChange, disabled = false, labels = {}, onStatusChange }) {
+  const options = useLocationOptions(
+    value.stateType === "MASTER" ? value.stateMasterId : "",
+    value.districtType === "MASTER" ? value.districtMasterId : "",
+  );
+
+  useEffect(() => {
+    const loading =
+      options.statesLoading ||
+      (Boolean(value.stateMasterId) && options.districtsLoading) ||
+      (Boolean(value.districtMasterId) && options.citiesLoading);
+    const error = Boolean(options.statesError || options.districtsError || options.citiesError);
+    onStatusChange?.(loading, error);
+  }, [
+    options.statesLoading,
+    options.districtsLoading,
+    options.citiesLoading,
+    options.statesError,
+    options.districtsError,
+    options.citiesError,
+    value.stateMasterId,
+    value.districtMasterId,
+    onStatusChange,
+  ]);
   const stateIsOther = value.stateType === "OTHER";
   const districtChosen = isDistrictChosen(value);
+  const cityIsOther = value.cityType === "OTHER";
   const l = { state: "State", district: "District", city: "City", ...labels };
 
   const pick = (level, list) => (event) => {
@@ -100,17 +132,43 @@ export default function DoctorLocationFields({ value, onChange, disabled = false
 
       <label className="block">
         <span className={labelClass}>{l.city}</span>
-        <input
-          data-testid="location-city"
-          type="text"
-          disabled={disabled || !districtChosen}
-          value={value.city || ""}
-          onChange={(e) => onChange(setCityText(value, e.target.value))}
-          placeholder="Enter city"
-          className={inputClass}
-        />
-        {value.districtType === "MASTER" && value.districtMasterId && (
-          <p className="mt-1 text-xs text-slate-500">An exact match with a city of the selected district is linked automatically; otherwise it is saved as entered.</p>
+        {!districtChosen ? (
+          <select data-testid="location-city" disabled className={selectClass}>
+            <option value="">Select a district first</option>
+          </select>
+        ) : value.districtType === "OTHER" ? (
+          <input
+            data-testid="location-city-text"
+            disabled={disabled}
+            value={value.cityOther}
+            onChange={(e) => onChange({ ...setOtherText(value, "city", e.target.value), cityType: "OTHER" })}
+            placeholder="Enter city"
+            className={inputClass}
+          />
+        ) : (
+          <>
+            <select
+              data-testid="location-city"
+              disabled={disabled}
+              value={selectValueFor(value, "city")}
+              onChange={pick("city", options.cities)}
+              className={selectClass}
+            >
+              <option value="">{options.citiesLoading ? "Loading cities…" : "Select city"}</option>
+              {options.cities.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+              <option value={OTHER_OPTION}>Other</option>
+            </select>
+            {cityIsOther && (
+              <input
+                disabled={disabled}
+                value={value.cityOther}
+                onChange={(e) => onChange(setOtherText(value, "city", e.target.value))}
+                placeholder="Other city/locality"
+                className={`mt-2 ${inputClass}`}
+              />
+            )}
+            {options.citiesError && <p role="alert" className="mt-1 text-xs text-red-600">Could not load cities for this district.</p>}
+          </>
         )}
       </label>
     </div>

@@ -6,6 +6,7 @@ import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { ensureDoctorProfileForUser } from "../../services/doctorProfileService.js";
 import { APPOINTMENT_STATUS } from "../../constants/appointmentStatus.js";
+import { CLINICAL_RECORD_STATUSES, markSharedReportReviewed } from "../../services/clinicalAccessService.js";
 import { computeReportAttentionItems } from "../../services/reportAttentionAggregates.js";
 import { resolveScheduledFollowUps } from "../../services/doctorPatientRelationshipService.js";
 
@@ -96,7 +97,15 @@ export async function buildDoctorCommandCenterData(doctor) {
       severity: { $in: ["critical", "warning"] },
     }),
 
-    MedicalReport.find({ doctorId: doctor._id, reviewedAt: null })
+    // Only reports from patients this doctor has a paid consultation-stage
+    // relationship with — a patient tagging an arbitrary doctor id at upload
+    // must not surface their report in that doctor's queue.
+    MedicalReport.find({
+      doctorId: doctor._id,
+      reviewedAt: null,
+      userId: { $in: await Appointment.distinct("patientId", { doctorId: doctor._id, status: { $in: CLINICAL_RECORD_STATUSES } }) },
+      $or: [{ familyMemberId: { $exists: false } }, { familyMemberId: null }],
+    })
       .select("title category reportDate severity userId")
       .populate("userId", "name")
       .sort({ reportDate: -1 })
@@ -337,13 +346,16 @@ export const getDoctorCommandCenter = asyncHandler(async (req, res) => {
 
 export const markReportReviewed = asyncHandler(async (req, res) => {
   const doctor = await ensureDoctorProfileForUser(req.user);
-  const report = await MedicalReport.findOneAndUpdate(
-    { _id: req.params.reportId, doctorId: doctor._id },
-    { reviewedAt: new Date(), reviewedBy: req.user._id },
-    { new: true },
-  ).lean();
-  if (!report) {
-    throw new AppError("Report not found for this doctor", 404);
-  }
+  // Same policy and implementation as the patient-workspace entry point.
+  const candidate = /^[a-f\d]{24}$/i.test(String(req.params.reportId))
+    ? await MedicalReport.findOne({ _id: req.params.reportId, doctorId: doctor._id }).select("userId").lean()
+    : null;
+  if (!candidate) throw new AppError("Report not found for this doctor", 404);
+  const report = await markSharedReportReviewed({
+    doctor,
+    patientId: candidate.userId,
+    reportId: req.params.reportId,
+    reviewerUserId: req.user._id,
+  });
   res.status(200).json({ success: true, data: { report }, message: "Report marked as reviewed" });
 });

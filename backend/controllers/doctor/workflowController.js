@@ -2,7 +2,8 @@ import fs from "fs";
 import path from "path";
 import mongoose from "mongoose";
 import PDFDocument from "pdfkit";
-import { assertValidUploadOrDelete } from "../../utils/fileValidation.js";
+import { assertValidBufferUpload } from "../../utils/fileValidation.js";
+import { storageService, StorageNotFoundError } from "../../storage/storageService.js";
 import Appointment from "../../models/Appointment.js";
 import Certificate from "../../models/Certificate.js";
 import ConsultationHistory from "../../models/ConsultationHistory.js";
@@ -12,7 +13,7 @@ import Insurance from "../../models/Insurance.js";
 import LeaveRequest from "../../models/LeaveRequest.js";
 import MedicalNote from "../../models/MedicalNote.js";
 import MedicalReport from "../../models/MedicalReport.js";
-import Payment from "../../models/Payment.js";
+import Payment, { CAPTURED_LIKE_PAYMENT_STATUSES } from "../../models/Payment.js";
 import Prescription from "../../models/Prescription.js";
 import User from "../../models/User.js";
 import ChatMessage from "../../models/ChatMessage.js";
@@ -29,6 +30,13 @@ import { ensureDoctorProfileForUser } from "../../services/doctorProfileService.
 import { validateAndDeriveAvailability } from "../../utils/slotEngine.js";
 import { buildDayCapacity } from "../../utils/capacityAggregates.js";
 import { roomManager } from "../../socket/roomManager.js";
+import {
+  assertDoctorPatientRecordAccess,
+  buildSharedFamilyFilter,
+  buildSharedInsuranceFilter,
+  buildSharedReportFilter,
+  markSharedReportReviewed,
+} from "../../services/clinicalAccessService.js";
 // Phase DOC-07 final pass — reuse the EXACT patient-booking availability
 // engine for doctor-initiated follow-up scheduling. No second scheduling
 // engine is introduced; these are the same functions createAppointment
@@ -45,9 +53,20 @@ import {
 } from "../../services/doctorPatientRelationshipService.js";
 import { buildSinceLastVisitComparison, buildMedicationReconciliation } from "../../services/clinicalComparisonService.js";
 import { canonicalizeConsultationMode, isKnownDoctorConsultationMode } from "../../constants/consultationMode.js";
+import { enforceAppointmentBookingPolicy } from "../../services/appointmentBookingPolicyService.js";
 
 const getDoctorProfile = async (userId) => {
   return ensureDoctorProfileForUser(userId);
+};
+
+// storageKey is an internal storage-service implementation detail (a bare
+// object key, meaningless and potentially informative to a client) -- never
+// serialised in any response. Downloading a document goes through
+// downloadDoctorDocument below, not by resolving storageKey client-side.
+const sanitizeDoctorDocument = (document) => {
+  const plain = typeof document.toObject === "function" ? document.toObject() : { ...document };
+  delete plain.storageKey;
+  return plain;
 };
 
 const ensureAppointmentOwned = async (doctorId, appointmentId) => {
@@ -592,36 +611,75 @@ export const updateLeaveStatus = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { leave }, message: "Leave request updated successfully" });
 });
 
+// The file's bytes go through storage/storageService.js (local disk under
+// the persistent Docker volume, or S3 -- see env.storage.driver), never
+// multer's own disk storage; the DB only ever holds the opaque storageKey.
 export const uploadDoctorDocument = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   if (!req.file) throw new AppError("Document file is required", 400);
-  assertValidUploadOrDelete(req.file);
+  assertValidBufferUpload(req.file);
+  const { key } = await storageService.upload("doctor-documents", req.file.buffer, {
+    originalName: req.file.originalname,
+    contentType: req.file.mimetype,
+  });
   const document = {
     type: req.body.type || "other",
     title: req.body.title || req.file.originalname,
     fileName: req.file.originalname,
-    filePath: req.file.path,
+    storageKey: key,
     mimeType: req.file.mimetype,
     fileSize: req.file.size || null,
     expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : null,
   };
   doctor.documents.push(document);
   await doctor.save();
-  res.status(201).json({ success: true, data: { document: doctor.documents.at(-1) }, message: "Document uploaded successfully" });
+  res.status(201).json({ success: true, data: { document: sanitizeDoctorDocument(doctor.documents.at(-1)) }, message: "Document uploaded successfully" });
 });
 
+// Verified documents are not deletable through this endpoint (Phase 10:
+// "prevent deletion of verified documents unless a valid replacement/audit
+// workflow exists" -- there is no replacement workflow today, so a verified
+// document can only be superseded by an admin action, never removed by the
+// doctor themself). Deleting an unverified/rejected document now also
+// removes the actual stored object -- it used to be a DB-only delete,
+// leaving the file orphaned in storage forever.
 export const deleteDoctorDocument = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   const document = doctor.documents.id(req.params.id);
   if (!document) throw new AppError("Document not found", 404);
+  if (document.status === "verified") {
+    throw new AppError("A verified document cannot be deleted. Upload a new one to have it reviewed instead.", 409);
+  }
+  const { storageKey } = document;
   document.deleteOne();
   await doctor.save();
+  await storageService.delete(storageKey);
   res.status(200).json({ success: true, data: { documentId: req.params.id }, message: "Document deleted successfully" });
 });
 
 export const getDoctorDocuments = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
-  res.status(200).json({ success: true, data: { documents: doctor.documents }, message: "Documents fetched successfully" });
+  res.status(200).json({ success: true, data: { documents: doctor.documents.map(sanitizeDoctorDocument) }, message: "Documents fetched successfully" });
+});
+
+// A doctor downloading their OWN document. Streams through
+// storageService.read() so this works identically on the local and S3
+// drivers -- never res.download(filePath), which only ever worked for local
+// disk and (before this fix) would have handed the client a raw server path.
+export const downloadDoctorDocument = asyncHandler(async (req, res) => {
+  const doctor = await getDoctorProfile(req.user._id);
+  const document = doctor.documents.id(req.params.id);
+  if (!document) throw new AppError("Document not found", 404);
+  let buffer;
+  try {
+    buffer = await storageService.read(document.storageKey);
+  } catch (error) {
+    if (error instanceof StorageNotFoundError) throw new AppError("Document file could not be found in storage", 404);
+    throw error;
+  }
+  res.setHeader("Content-Type", document.mimeType || "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(document.fileName || "document")}"`);
+  res.send(buffer);
 });
 
 // ── Document Center overview (Step 5) ──
@@ -670,7 +728,7 @@ export async function buildDoctorAnalyticsIntelligence(doctor) {
   const [appointments, revenue, paidPayments] = await Promise.all([
     Appointment.find({ doctorId: doctor._id }).lean(),
     Payment.aggregate([{ $match: { doctorId: doctor._id } }, { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } }]),
-    Payment.find({ doctorId: doctor._id, status: "paid" }).select("totalAmount paidAt createdAt").lean(),
+    Payment.find({ doctorId: doctor._id, status: { $in: CAPTURED_LIKE_PAYMENT_STATUSES } }).select("totalAmount paidAt createdAt").lean(),
   ]);
 
   const completed = appointments.filter((item) => item.status === APPOINTMENT_STATUS.COMPLETED || item.status === APPOINTMENT_STATUS.REVIEW_ELIGIBLE).length;
@@ -776,7 +834,7 @@ export async function buildDoctorAnalyticsIntelligence(doctor) {
   const allPayments = await Payment.find({ doctorId: doctor._id }).select("status refundStatus totalAmount").lean();
   const revenueFunnel = {
     created: allPayments.length,
-    paid: allPayments.filter((p) => p.status === "paid").length,
+    paid: allPayments.filter((p) => CAPTURED_LIKE_PAYMENT_STATUSES.includes(p.status)).length,
     refunded: allPayments.filter((p) => p.refundStatus && p.refundStatus !== "none").length,
   };
 
@@ -973,13 +1031,13 @@ export const removeFavouriteMedicine = asyncHandler(async (req, res) => {
 });
 
 // ── Certificate Generator (Step 3/5) ──
-// A certificate can only be issued for a patient the doctor has actually
-// treated (at least one appointment together) — the same wrong-patient
-// guard the rest of the clinical workflow already relies on.
-export const ensureDoctorTreatedPatient = async (doctorId, patientId) => {
-  const treated = await Appointment.exists({ doctorId, patientId });
-  if (!treated) throw new AppError("You can only issue a certificate for a patient you have an appointment history with", 403);
-};
+// Every doctor→patient clinical read/write goes through ONE policy
+// (services/clinicalAccessService.js): the doctor must be currently
+// approved+active, the patient active, and a PAID consultation-stage
+// appointment must exist between them. A bare "some appointment once
+// existed" (including cancelled / never-approved requests) is not a care
+// relationship. Returns the scope of records actually shared with this doctor.
+export const requirePatientRecordAccess = (doctor, patientId) => assertDoctorPatientRecordAccess(doctor, patientId);
 
 const createCertificatePdf = async (certificate, patientName, doctorName) => {
   const dir = path.resolve(process.cwd(), "storage/certificates");
@@ -1026,7 +1084,7 @@ export const createCertificate = asyncHandler(async (req, res) => {
   if (!patientId) throw new AppError("Patient is required", 400);
   if (!title?.trim()) throw new AppError("Certificate title is required", 400);
   if (!["fitness", "sick_leave", "referral", "other"].includes(type)) throw new AppError("Invalid certificate type", 400);
-  await ensureDoctorTreatedPatient(doctor._id, patientId);
+  await requirePatientRecordAccess(doctor, patientId);
 
   if (appointmentId) {
     // Wrong-patient/wrong-appointment guard: if an appointment is linked, it
@@ -1082,18 +1140,26 @@ export const revokeCertificate = asyncHandler(async (req, res) => {
 // list/download reports for a patient they have treated, never any patient.
 export const getPatientReportsForDoctor = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
-  await ensureDoctorTreatedPatient(doctor._id, req.params.patientId);
-  const reports = await MedicalReport.find({ userId: req.params.patientId })
-    .sort({ reportDate: -1, createdAt: -1 })
-    .limit(200)
-    .lean();
+  const { patientId } = req.params;
+  const scope = await requirePatientRecordAccess(doctor, patientId);
+  const filter = buildSharedReportFilter({ patientId, doctorId: doctor._id, scope });
+  // Only reports actually shared with THIS doctor; the storage path is never
+  // exposed to clients (downloads go through the authorised endpoint below).
+  const reports = filter
+    ? await MedicalReport.find(filter).select("-filePath").sort({ reportDate: -1, createdAt: -1 }).limit(200).lean()
+    : [];
   res.status(200).json({ success: true, data: { reports }, message: "Patient reports fetched successfully" });
 });
 
 export const downloadPatientReportForDoctor = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
-  await ensureDoctorTreatedPatient(doctor._id, req.params.patientId);
-  const report = await MedicalReport.findOne({ _id: req.params.reportId, userId: req.params.patientId }).lean();
+  const { patientId, reportId } = req.params;
+  const scope = await requirePatientRecordAccess(doctor, patientId);
+  const filter = buildSharedReportFilter({ patientId, doctorId: doctor._id, scope });
+  // 404 (not 403) for an unshared report so report ids cannot be probed.
+  const report = filter && mongoose.Types.ObjectId.isValid(reportId)
+    ? await MedicalReport.findOne({ userId: filter.userId, $and: [{ _id: reportId }, ...filter.$and] }).lean()
+    : null;
   if (!report?.filePath || !fs.existsSync(report.filePath)) throw new AppError("Report file not found", 404);
   res.download(report.filePath, report.fileName || `report-${report._id}`);
 });
@@ -1107,16 +1173,23 @@ export const downloadPatientReportForDoctor = asyncHandler(async (req, res) => {
 export const getPatientClinicalProfile = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   const { patientId } = req.params;
-  await ensureDoctorTreatedPatient(doctor._id, patientId);
+  const scope = await requirePatientRecordAccess(doctor, patientId);
+  const reportFilter = buildSharedReportFilter({ patientId, doctorId: doctor._id, scope });
+  const insuranceFilter = buildSharedInsuranceFilter({ patientId, scope });
+  const familyFilter = buildSharedFamilyFilter({ patientId, scope });
 
   const [patient, appointments, prescriptions, notes, reports, insurance, family, certificates, reviews] = await Promise.all([
     User.findById(patientId).select("name email gender bloodGroup dateOfBirth patientProfile").lean(),
     Appointment.find({ doctorId: doctor._id, patientId }).sort({ date: -1, createdAt: -1 }).limit(50).lean(),
     Prescription.find({ doctorId: doctor._id, patientId }).sort({ createdAt: -1 }).limit(20).lean(),
     MedicalNote.find({ doctorId: doctor._id, patientId }).sort({ createdAt: -1 }).limit(20).lean(),
-    MedicalReport.find({ userId: patientId }).sort({ reportDate: -1 }).limit(20).lean(),
-    Insurance.find({ userId: patientId }).lean(),
-    FamilyMember.find({ userId: patientId, isActive: { $ne: false } }).lean(),
+    // Only records the patient actually shared with THIS doctor (report
+    // tagged to them / linked or attached to a paid appointment with them;
+    // insurance attached to such an appointment; family members the
+    // appointment was booked for). No storage paths are returned.
+    reportFilter ? MedicalReport.find(reportFilter).select("-filePath").sort({ reportDate: -1 }).limit(20).lean() : [],
+    insuranceFilter ? Insurance.find(insuranceFilter).select("-document.filePath").lean() : [],
+    familyFilter ? FamilyMember.find(familyFilter).lean() : [],
     Certificate.find({ doctorId: doctor._id, patientId, status: "issued" }).sort({ createdAt: -1 }).limit(20).lean(),
     // PHASE P3 — this patient's real reviews of THIS doctor. Reuses the
     // existing Review model/fields exactly as doctorReviewController.js
@@ -1132,7 +1205,7 @@ export const getPatientClinicalProfile = asyncHandler(async (req, res) => {
 
   if (!patient) throw new AppError("Patient not found", 404);
 
-  const outstandingBills = await Payment.find({ userId: patientId, status: { $in: ["pending", "failed"] } }).select("amount status createdAt").lean();
+  const outstandingBills = await Payment.find({ userId: patientId, doctorId: doctor._id, status: { $in: ["pending", "failed"] } }).select("amount status createdAt").lean();
 
   // Timeline: merge appointment/prescription/note/report events into one
   // real, date-sorted list — no synthetic events.
@@ -1279,21 +1352,14 @@ export const getPatientClinicalProfile = asyncHandler(async (req, res) => {
 // already exists in commandCenterController.js, but it's scoped to
 // `report.doctorId === this doctor`, which is only set when a patient
 // explicitly tags a report to a doctor at upload time. A report the doctor
-// can legitimately see here (via ensureDoctorTreatedPatient, same guard as
+// can legitimately see here (via requirePatientRecordAccess, same guard as
 // getPatientReportsForDoctor) could still 404 on that stricter check. This
 // is a second, correctly-scoped entry point for the SAME persisted fields
 // — not a duplicate review engine, not a second status model.
 export const markPatientReportReviewed = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   const { patientId, reportId } = req.params;
-  await ensureDoctorTreatedPatient(doctor._id, patientId);
-
-  const report = await MedicalReport.findOneAndUpdate(
-    { _id: reportId, userId: patientId },
-    { reviewedAt: new Date(), reviewedBy: req.user._id },
-    { new: true },
-  ).lean();
-  if (!report) throw new AppError("Report not found for this patient", 404);
+  const report = await markSharedReportReviewed({ doctor, patientId, reportId, reviewerUserId: req.user._id });
 
   try {
     clinicalEmitter.reportReviewed(doctor._id, patientId, report);
@@ -1322,9 +1388,9 @@ export const scheduleFollowUpAppointment = asyncHandler(async (req, res) => {
   if (!dateInput || Number.isNaN(Date.parse(dateInput))) throw new AppError("A valid date is required", 400);
 
   // Wrong-patient guard: a doctor may only schedule a follow-up for a
-  // patient they have an actual appointment history with — same guard the
-  // certificate/report endpoints already use.
-  await ensureDoctorTreatedPatient(doctorProfile._id, patientId);
+  // patient they have a paid consultation-stage relationship with — same
+  // guard the certificate/report endpoints use.
+  await requirePatientRecordAccess(doctorProfile, patientId);
 
   const doctor = await Doctor.findById(doctorProfile._id);
   if (!doctor) throw new AppError("Doctor profile not found", 404);
@@ -1396,8 +1462,24 @@ export const scheduleFollowUpAppointment = asyncHandler(async (req, res) => {
   }
 
   const date = normalizeDate(dateInput);
-  const today = normalizeDate(new Date());
-  if (date < today) throw new AppError("Past dates are not allowed", 400);
+
+  // Same canonical timing/window policy the patient booking path uses
+  // (Appointment Engine Remediation, 2026-09-24) — see
+  // appointmentBookingPolicyService.js. Replaces the previous date-only
+  // comparison, which could not catch a past TIME on today's date.
+  //
+  // KNOWN PRE-EXISTING LIMITATION (found during this remediation, not
+  // introduced by it, and not fixed here — out of this pass's scope):
+  // if any check between the atomic follow-up-slot claim above and the
+  // Appointment.create() try/catch below throws, the Prescription's
+  // followUpScheduledAppointmentId claim is left dangling — only a
+  // failure of Appointment.create() itself is rolled back (see the
+  // catch block below). This was already true of the pre-existing
+  // ensureDoctorAvailable/activeLeave/conflicting checks that also sit
+  // in this same gap; this change does not widen that gap, but doesn't
+  // close it either. Documented in the remediation doc as a real,
+  // disclosed follow-up item.
+  await enforceAppointmentBookingPolicy({ date, timeSlot, doctorId: doctor._id });
 
   // Real availability check — throws the same specific errors a patient
   // booking would get (not a working day / blocked date).

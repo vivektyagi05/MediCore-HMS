@@ -63,22 +63,34 @@ test("resolveCopilotQuestionKey: unsupported question returns null (never guesse
 // patient-scoped data read in each new gap-closure endpoint, so neither
 // can be edited later to query before authorizing without this test
 // catching it.
-test("security: markPatientReportReviewed checks ensureDoctorTreatedPatient before reading the report", () => {
-  const src = fs.readFileSync(path.join(__dirname, "../controllers/doctor/workflowController.js"), "utf8");
-  const fnStart = src.indexOf("export const markPatientReportReviewed");
-  const fnBody = src.slice(fnStart, src.indexOf("\n});", fnStart));
-  const guardIndex = fnBody.indexOf("ensureDoctorTreatedPatient");
-  const readIndex = fnBody.indexOf("MedicalReport.findOneAndUpdate");
-  assert.ok(guardIndex > -1 && readIndex > -1, "expected both the guard and the report read to be present");
+// PHASE (this pass): markPatientReportReviewed and the command-center
+// endpoint now share ONE implementation, markSharedReportReviewed()
+// (services/clinicalAccessService.js), which itself enforces the guard
+// before the read. Confirmed there, and confirmed the controller delegates
+// to it rather than reading the report inline.
+test("security: markPatientReportReviewed delegates to the shared, guard-enforcing report-review service", () => {
+  const controllerSrc = fs.readFileSync(path.join(__dirname, "../controllers/doctor/workflowController.js"), "utf8");
+  const fnStart = controllerSrc.indexOf("export const markPatientReportReviewed");
+  const fnBody = controllerSrc.slice(fnStart, controllerSrc.indexOf("\n});", fnStart));
+  assert.ok(fnBody.includes("markSharedReportReviewed("), "must delegate to the shared service, not read the report inline");
+  assert.ok(!/MedicalReport\.(findOneAndUpdate|findOne)/.test(fnBody), "must not query MedicalReport directly, bypassing the shared guard");
+
+  const serviceSrc = fs.readFileSync(path.join(__dirname, "../services/clinicalAccessService.js"), "utf8");
+  const svcStart = serviceSrc.indexOf("export async function markSharedReportReviewed");
+  const svcBody = serviceSrc.slice(svcStart, serviceSrc.indexOf("\n}", svcStart));
+  const guardIndex = svcBody.indexOf("assertDoctorPatientRecordAccess");
+  const readIndex = svcBody.indexOf("MedicalReport.findOneAndUpdate");
+  assert.ok(guardIndex > -1 && readIndex > -1, "expected both the guard and the report write to be present");
   assert.ok(guardIndex < readIndex, "ownership guard must run before the report is read/updated");
 });
 
-test("security: clinicalCopilotAnswer checks doctor-treated-patient before reading any clinical data", () => {
+test("security: clinicalCopilotAnswer checks record access (paid consultation-stage relationship) before reading any clinical data", () => {
   const src = fs.readFileSync(path.join(__dirname, "../ai/generativeAssistant.js"), "utf8");
   const fnStart = src.indexOf("async clinicalCopilotAnswer");
   const fnBody = src.slice(fnStart, src.indexOf("\n  },", fnStart));
-  const guardIndex = fnBody.indexOf("Appointment.exists");
+  const guardIndex = fnBody.indexOf("assertDoctorPatientRecordAccess");
   const readIndex = fnBody.indexOf("Promise.all([");
   assert.ok(guardIndex > -1 && readIndex > -1, "expected both the ownership check and the data fetch to be present");
   assert.ok(guardIndex < readIndex, "ownership check must run before any patient/appointment/prescription/report data is fetched");
+  assert.ok(!fnBody.slice(0, readIndex).includes("Appointment.exists"), "must use the real clinical-access policy, not the old any-appointment-exists check");
 });

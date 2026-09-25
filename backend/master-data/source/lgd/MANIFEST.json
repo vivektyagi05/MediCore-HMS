@@ -14,7 +14,7 @@
       "file": "states.csv",
       "role": "State layer",
       "dataRows": 36,
-      "sha256": "17c44a8e083f767f729887efe42388dd9aebfbca7152a0dc33eee7ac1aa0ddaa",
+      "sha256": "fe215799067264138560c357d75159700f2d61c593ccbcbb1bc658961e011495",
       "sourceArchive": "states.19Sep2026.csv.7z",
       "sourceArchiveSha256": "50f8130ccfe38d5973a279f8e887793776ffb70e6eb301edb32f75749dbdf10e",
       "sourceUrl": "https://github.com/ramSeraph/opendata/releases/download/lgd-latest-extra1/states.19Sep2026.csv.7z"

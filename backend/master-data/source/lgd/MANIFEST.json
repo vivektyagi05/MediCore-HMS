@@ -23,7 +23,7 @@
       "file": "districts.csv",
       "role": "District layer",
       "dataRows": 784,
-      "sha256": "ff37eb5ac4fdfad369ef792b13410fff635294f50104b1061fc94b5800be4b2b",
+      "sha256": "0abb7cdb8e45830498bc76f39eb42accbe7e401e25a157a7bb231b61976308b7",
       "sourceArchive": "districts.19Sep2026.csv.7z",
       "sourceArchiveSha256": "556cfdac07c863cb517b55b97e23787fc3fe867bb762c26ade2a4896238e8e65",
       "sourceUrl": "https://github.com/ramSeraph/opendata/releases/download/lgd-latest-extra1/districts.19Sep2026.csv.7z"
@@ -32,7 +32,7 @@
       "file": "statewise_ulbs_coverage.csv",
       "role": "City/Town layer (urban local bodies mapped to district)",
       "dataRows": 35008,
-      "sha256": "adf3e51d837eb78fc874f807ddfb42245d02fa535068a478fdae2f7943e9c0f5",
+      "sha256": "5c21f6e362fdd12c32a7df1653794b7183c5261e1bc2ae37b1cea6f12abdc836",
       "sourceArchive": "statewise_ulbs_coverage.19Sep2026.csv.7z",
       "sourceArchiveSha256": "796e0a77ab5cdc1c0c2311ff4a681fedc4c311a36d2aea9bdd9c903370a1df89",
       "sourceUrl": "https://github.com/ramSeraph/opendata/releases/download/lgd-latest-extra1/statewise_ulbs_coverage.19Sep2026.csv.7z"

@@ -41,4 +41,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["sh", "-c", "echo === STATES SHA IN RENDER CONTAINER === && sha256sum backend/master-data/source/lgd/states.csv && echo === MANIFEST SHA === && grep -A 5 "states.csv" backend/master-data/source/lgd/MANIFEST.json && node backend/migrations/005_import_lgd_master_data.js && node backend/server.js"]
+CMD ["sh", "-c", "node backend/migrations/005_import_lgd_master_data.js && node backend/server.js"]

@@ -42,7 +42,18 @@ function PrivateRoute({ allowedRoles }) {
   }
 
   if (allowedRoles?.length && !allowedRoles.includes(role)) {
-    return <Unauthorized />;
+    const dashboardPath =
+      role === "super_admin" ? "/admin/dashboard"
+      
+        : role === "doctor" ? user?.doctorOnboardingStatus === "approved"
+            ? "/doctor/dashboard"
+            : "/doctor/onboarding"
+
+          : role === "patient"
+            ? "/patient/dashboard"
+            : "/login";
+
+    return <Navigate to={dashboardPath} replace />;
   }
 
   if (

@@ -74,7 +74,7 @@ const read = (f) => fs.readFileSync(path.join(root, f), "utf8");
 assert.match(read("routes/financeRoutes.js"), /requireFeatureEnabled\("wallet_system"/);
 assert.match(read("routes/financeRoutes.js"), /requireFeatureEnabled\("subscriptions"/);
 assert.match(read("routes/patient/workflowRoutes.js"), /requireFeatureEnabled\("reviews"/);
-assert.match(read("socket/eventHandlers.js"), /isFeatureEnabled\("chat"/);
+assert.match(read("services/chat/chatEngine.js"), /isFeatureEnabled\("chat"/);
 assert.match(read("routes/aiRoutes.js"), /requireFeatureEnabled\("ai_features"/);
 assert.match(read("routes/aiAssistRoutes.js"), /requireFeatureEnabled\("ai_features"/);
 console.log("PASS: wallet_system, subscriptions, reviews, chat, and ai_features each gate a real route/socket entry point");
@@ -86,8 +86,16 @@ assert.doesNotMatch(adminSection, /requireFeatureEnabled/, "admin insight/health
 console.log("PASS: admin AI monitoring/automation endpoints remain reachable regardless of the ai_features toggle");
 
 // ── super_admin support chat is never blocked by the chat toggle ─────────
-const eventHandlersSrc = read("socket/eventHandlers.js");
-const chatSendStart = eventHandlersSrc.indexOf('on("chat:send"');
-const chatSendFn = eventHandlersSrc.slice(chatSendStart, eventHandlersSrc.indexOf("const conversationKey", chatSendStart));
-assert.match(chatSendFn, /ADMIN_ROLES\.includes\(socket\.user\.role\)/, "an admin participant must bypass the chat toggle so support escalations are never cut off");
+// The chat toggle is enforced in the ONE conversation engine (used by both
+// the socket handlers and the REST fallback); admin participants bypass it.
+const engineSrc = read("services/chat/conversationEngine.js");
+const gateStart = engineSrc.indexOf("const requireChatEnabled");
+const gateFn = engineSrc.slice(gateStart, engineSrc.indexOf("const requireObjectId", gateStart));
+assert.match(gateFn, /ADMIN_ROLES\.includes\(user\.role\)/, "an admin participant must bypass the chat toggle so support escalations are never cut off");
+assert.match(gateFn, /FEATURE_DISABLED/, "a disabled chat feature must produce a structured chat error");
+for (const fn of ["sendMessage", "sendAttachment", "typing"]) {
+  const start = engineSrc.indexOf(`async function ${fn}`);
+  assert.ok(start > 0, `${fn} exists`);
+  assert.match(engineSrc.slice(start, start + 600), /requireChatEnabled\(user\)/, `${fn} must be gated by the chat toggle`);
+}
 console.log("PASS: disabling chat never blocks super_admin support conversations");

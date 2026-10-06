@@ -505,7 +505,6 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
             ? await automationStudioApi.explainFlow(flow._id)
             : await automationStudioApi.advisorFlow(flow._id);
 
-        console.log("AI RESPONSE:", data);
 
         setAiText(data.data.content);
       } catch (err) {

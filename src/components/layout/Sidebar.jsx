@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronsLeft, ChevronsRight, X } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nContext";
+import { useRealtime } from "../../context/RealtimeContext";
 import { buildNavigation, GROUP_ORDER } from "../../config/navigation";
 import { adminApi } from "../../api/adminApi";
 import Tooltip from "../ui/Tooltip";
@@ -82,6 +83,7 @@ function Sidebar({ isOpen, onClose, collapsed = false, onToggleCollapsed }) {
   const role = JSON.parse(localStorage.getItem("hms_user") || "null")?.role;
   const visibleNavigation = navigation.filter((item) => item.roles.includes(role));
   const isAdmin = role === "super_admin";
+  const { chatUnreadCount } = useRealtime();
 
   // Group role-visible items by their configured group, preserving
   // GROUP_ORDER and skipping any group with no visible items for this role
@@ -144,7 +146,7 @@ function Sidebar({ isOpen, onClose, collapsed = false, onToggleCollapsed }) {
                       onClick={onClose}
                       title={collapsed ? item.name : undefined}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 rounded-control px-3 py-2.5 text-sm font-semibold transition duration-150 ease-standard ${
+                        `relative flex items-center gap-3 rounded-control px-3 py-2.5 text-sm font-semibold transition duration-150 ease-standard ${
                           collapsed ? "justify-center" : ""
                         } ${
                           isActive
@@ -157,6 +159,11 @@ function Sidebar({ isOpen, onClose, collapsed = false, onToggleCollapsed }) {
                     >
                       <item.icon size={18} className="shrink-0" />
                       {!collapsed && <span className="truncate">{item.name}</span>}
+                      {item.path.endsWith("/communication") && chatUnreadCount > 0 && (
+                        <span className={`${collapsed ? "absolute -right-1 -top-1" : "ml-auto"} min-w-5 rounded-full bg-blue-600 px-1.5 text-center text-[11px] font-black text-white`} aria-label={`${chatUnreadCount} unread messages`}>
+                          {chatUnreadCount > 99 ? "99+" : chatUnreadCount}
+                        </span>
+                      )}
                     </NavLink>
                   );
 

@@ -113,7 +113,7 @@ function PatientActions({ patient, onOpen }) {
       <Button variant="secondary" onClick={() => onOpen(patient, `/doctor/clinical?patientId=${patient._id}&tab=history`)}>
         History
       </Button>
-      <Button variant="secondary" onClick={() => onOpen(patient, `/doctor/patients/${patient._id}?tab=communication`)}>
+      <Button variant="secondary" onClick={() => onOpen(patient, `/doctor/communication/${patient._id}`)}>
         <MessageSquare size={14} className="mr-1 inline" /> Chat
         {patient.unreadMessages > 0 && (
           <span className="ml-1.5 rounded-full bg-royal-100 px-1.5 text-[10px] text-royal-700">{patient.unreadMessages}</span>

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { getApiErrorMessage } from "../api/axios";
 import { realtimeApi } from "../api/realtimeApi";
 import { SOCKET_EVENTS } from "../socket/socketEvents";
+import { CHAT_UNREAD_EVENT } from "../utils/chatEvents";
 import { connectSocket, disconnectSocket } from "../socket/socketClient";
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
@@ -15,6 +16,7 @@ export function RealtimeProvider({ children }) {
   const [connectionStatus, setConnectionStatus] = useState("offline");
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [dashboardSyncTick, setDashboardSyncTick] = useState(0);
   const [topAnnouncement, setTopAnnouncement] = useState(null);
@@ -32,6 +34,17 @@ export function RealtimeProvider({ children }) {
       toast.error(getApiErrorMessage(error));
     }
   }, [isAuthenticated, toast]);
+
+  // Server-authoritative unread chat count (same data the conversation list shows).
+  const loadChatUnread = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const response = await realtimeApi.getChatUnreadCount();
+      setChatUnreadCount(response.data.unreadMessages || 0);
+    } catch {
+      // Non-critical badge: keep the last known value rather than interrupting the user.
+    }
+  }, [isAuthenticated]);
 
   const loadPresence = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -51,6 +64,7 @@ export function RealtimeProvider({ children }) {
       setNotifications([]);
       notificationIdsRef.current.clear();
       setUnreadCount(0);
+      setChatUnreadCount(0);
       setTopAnnouncement(null);
       return undefined;
     }
@@ -65,6 +79,7 @@ export function RealtimeProvider({ children }) {
     // a genuine reconnect needs a fresh persisted-state sync.
     loadNotifications();
     loadPresence();
+    loadChatUnread();
     let initialConnection = true;
 
     const onConnect = () => {
@@ -73,6 +88,7 @@ export function RealtimeProvider({ children }) {
         initialConnection = false;
         return;
       }
+      loadChatUnread();
       loadNotifications();
       loadPresence();
     };
@@ -112,6 +128,19 @@ export function RealtimeProvider({ children }) {
         setDashboardSyncTick((current) => current + 1);
       }, 300);
     };
+    // Chat state changed (new message, read here or in another tab): refresh the
+    // badge AND the bell, since reading a thread also clears its chat notifications.
+    let chatRefreshTimer;
+    const onChatChanged = () => {
+      window.clearTimeout(chatRefreshTimer);
+      chatRefreshTimer = window.setTimeout(() => { loadChatUnread(); loadNotifications(); }, 400);
+    };
+    // The server revoked this session (password reset / deactivation): same outcome as a REST 401.
+    const onAuthInvalidated = () => {
+      localStorage.removeItem("hms_token");
+      localStorage.removeItem("hms_user");
+      window.dispatchEvent(new Event("hms:unauthorized"));
+    };
     const onRealtimeError = (payload) => toast.error(payload.message || "Realtime event failed");
 
     activeSocket.on("connect", onConnect);
@@ -125,6 +154,10 @@ export function RealtimeProvider({ children }) {
     activeSocket.on(SOCKET_EVENTS.PAYMENT_CAPTURED, onDashboardSync);
     activeSocket.on(SOCKET_EVENTS.PAYMENT_REFUND, onDashboardSync);
     activeSocket.on(SOCKET_EVENTS.ERROR, onRealtimeError);
+    activeSocket.on(SOCKET_EVENTS.CHAT_MESSAGE, onChatChanged);
+    activeSocket.on(SOCKET_EVENTS.CHAT_READ, onChatChanged);
+    activeSocket.on(SOCKET_EVENTS.AUTH_INVALIDATED, onAuthInvalidated);
+    window.addEventListener(CHAT_UNREAD_EVENT, onChatChanged);
 
     const heartbeat = window.setInterval(() => {
       activeSocket.emit("presence:ping", {});
@@ -144,9 +177,14 @@ export function RealtimeProvider({ children }) {
       activeSocket.off(SOCKET_EVENTS.PAYMENT_CAPTURED, onDashboardSync);
       activeSocket.off(SOCKET_EVENTS.PAYMENT_REFUND, onDashboardSync);
       activeSocket.off(SOCKET_EVENTS.ERROR, onRealtimeError);
+      activeSocket.off(SOCKET_EVENTS.CHAT_MESSAGE, onChatChanged);
+      activeSocket.off(SOCKET_EVENTS.CHAT_READ, onChatChanged);
+      activeSocket.off(SOCKET_EVENTS.AUTH_INVALIDATED, onAuthInvalidated);
+      window.removeEventListener(CHAT_UNREAD_EVENT, onChatChanged);
+      window.clearTimeout(chatRefreshTimer);
       disconnectSocket();
     };
-  }, [isAuthenticated, loadNotifications, loadPresence, toast, token]);
+  }, [isAuthenticated, loadChatUnread, loadNotifications, loadPresence, toast, token]);
 
   const markNotificationRead = useCallback(async (id) => {
     await realtimeApi.markNotificationRead(id);
@@ -162,6 +200,7 @@ export function RealtimeProvider({ children }) {
       connectionStatus,
       notifications,
       unreadCount,
+      chatUnreadCount,
       onlineUsers,
       dashboardSyncTick,
       loadNotifications,
@@ -169,7 +208,7 @@ export function RealtimeProvider({ children }) {
       topAnnouncement,
       setTopAnnouncement,
     }),
-    [connectionStatus, dashboardSyncTick, loadNotifications, markNotificationRead, notifications, onlineUsers, socket, unreadCount, topAnnouncement],
+    [connectionStatus, dashboardSyncTick, loadNotifications, markNotificationRead, notifications, onlineUsers, socket, unreadCount, chatUnreadCount, topAnnouncement],
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

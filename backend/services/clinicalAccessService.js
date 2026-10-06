@@ -27,12 +27,24 @@
 //      A family-member report is only ever visible through an appointment
 //      that was booked for that same family member.
 //
-//  CHAT
-//    - doctor approved+active, patient active
-//    - an appointment in an ACTIVE status (approved .. consultation_completed)
-//      or a completed/review_eligible one within CHAT_FOLLOWUP_WINDOW_DAYS
-//      of its date. Cancelled / pending appointments never open chat.
-//    - super_admin (support) may always chat, as before.
+//  CHAT (ONE policy — resolveChatAccess — used by REST history, conversation
+//  list, socket room join, send, typing, read/delivery receipts, attachment
+//  upload and attachment download, and notification creation)
+//    - relationship: an appointment in an ACTIVE status (approved ..
+//      consultation_completed) or a completed/review_eligible one. Cancelled /
+//      pending-only pairings have NO relationship and therefore no access.
+//    - status "active"    => canRead + canSend: the doctor is approved+active
+//      and there is an ACTIVE appointment, or a completed/review_eligible one
+//      within CHAT_FOLLOWUP_WINDOW_DAYS of its date.
+//    - status "read_only" => canRead only: a real relationship existed but the
+//      communication window expired (COMMUNICATION_WINDOW_EXPIRED) or the
+//      doctor is no longer eligible (DOCTOR_NOT_ELIGIBLE, patient side only).
+//      A patient never loses their own history; sending is blocked and the UI
+//      says so. Read access is deliberately NOT the same as send access, and
+//      socket room join follows READ access so REST and socket never disagree.
+//    - a DOCTOR whose own account is no longer eligible has no access at all.
+//    - super_admin (support) may chat with any participant (admin<->user
+//      conversations only; it never grants access to a doctor<->patient pair).
 //
 // The decision functions below are PURE (they take already-fetched
 // appointments) so the policy is unit-testable without a database; the
@@ -152,14 +164,13 @@ export function buildSharedFamilyFilter({ patientId, scope }) {
  * @param {number} [windowDays]
  */
 export function chatEligibleFromAppointments(appointments = [], now = Date.now(), windowDays = env.clinical.chatFollowUpWindowDays) {
-  return appointments.some((appointment) => {
-    if (CHAT_ACTIVE_STATUSES.includes(appointment.status)) return true;
-    if (CHAT_FOLLOWUP_STATUSES.includes(appointment.status)) {
-      const at = new Date(appointment.date).getTime();
-      return Number.isFinite(at) && now - at <= windowDays * DAY_MS;
-    }
-    return false;
-  });
+  return evaluateChatAccess({
+    summary: summarizeChatRelationship(appointments),
+    doctorEligible: true,
+    requesterIsDoctor: false,
+    now,
+    windowDays,
+  }).canSend;
 }
 
 // ── Data access ─────────────────────────────────────────────────────────
@@ -205,55 +216,181 @@ export async function getDoctorPatientRecordScope(doctor, patientId) {
   }
 }
 
+export const CHAT_ACCESS = Object.freeze({ ACTIVE: "active", READ_ONLY: "read_only", NONE: "none" });
+
+export const CHAT_DENIAL_REASON = Object.freeze({
+  NO_RELATIONSHIP: "NO_CARE_RELATIONSHIP",
+  WINDOW_EXPIRED: "COMMUNICATION_WINDOW_EXPIRED",
+  DOCTOR_NOT_ELIGIBLE: "DOCTOR_NOT_ELIGIBLE",
+  ACCOUNT_INACTIVE: "ACCOUNT_INACTIVE",
+  INVALID_PARTICIPANTS: "INVALID_PARTICIPANTS",
+});
+
 /**
- * The one chat-authorisation decision, shared by REST, socket join and
- * socket send. `userA`/`userB` are User documents (needs _id, role,
- * isActive). Never throws for a denial — returns a boolean.
+ * PURE. Collapse a doctor<->patient appointment list into the only facts the
+ * chat policy needs. Also the shape the contact-list aggregation produces, so
+ * the list and the per-request decision can never disagree.
+ * @returns {{ hasRelationship: boolean, hasActive: boolean, latestFollowUpAt: number|null }}
  */
-export async function usersCanChat(userA, userB) {
-  if (!userA?._id || !userB?._id) return false;
-  if (String(userA._id) === String(userB._id)) return false;
-  if (userA.isActive === false || userB.isActive === false) return false;
-
-  if (ADMIN_ROLES.includes(userA.role) || ADMIN_ROLES.includes(userB.role)) return true;
-
-  const doctorUser = userA.role === ROLES.DOCTOR ? userA : userB.role === ROLES.DOCTOR ? userB : null;
-  const patientUser = userA.role === ROLES.PATIENT ? userA : userB.role === ROLES.PATIENT ? userB : null;
-  if (!doctorUser || !patientUser) return false;
-
-  const doctor = await Doctor.findOne({ userId: doctorUser._id }).select("_id verificationStatus isVerified isActive").lean();
-  if (!isDoctorClinicallyEligible(doctor)) return false;
-
-  const appointments = await fetchPairAppointments(doctor._id, patientUser._id, [...CHAT_ACTIVE_STATUSES, ...CHAT_FOLLOWUP_STATUSES]);
-  return chatEligibleFromAppointments(appointments);
+export function summarizeChatRelationship(appointments = []) {
+  let hasRelationship = false;
+  let hasActive = false;
+  let latestFollowUpAt = null;
+  for (const appointment of appointments) {
+    if (CHAT_ACTIVE_STATUSES.includes(appointment.status)) {
+      hasRelationship = true;
+      hasActive = true;
+    } else if (CHAT_FOLLOWUP_STATUSES.includes(appointment.status)) {
+      hasRelationship = true;
+      const at = new Date(appointment.date).getTime();
+      if (Number.isFinite(at) && (latestFollowUpAt === null || at > latestFollowUpAt)) latestFollowUpAt = at;
+    }
+  }
+  return { hasRelationship, hasActive, latestFollowUpAt };
 }
 
 /**
- * Reading an EXISTING conversation. Deliberately looser than sending: a
- * patient must not lose access to their own past messages just because the
- * follow-up window closed, but a relationship must still have existed (no
- * cancelled/never-approved pairings) and a doctor must still be eligible.
+ * PURE. The single decision function behind every chat entry point.
+ * @param {{ summary: ReturnType<typeof summarizeChatRelationship>, doctorEligible: boolean, requesterIsDoctor: boolean, now?: number, windowDays?: number }} input
  */
-export async function usersCanReadConversationHistory(requester, other) {
-  if (!requester?._id || !other?._id) return false;
-  if (String(requester._id) === String(other._id)) return false;
-  if (requester.isActive === false || other.isActive === false) return false;
-  if (ADMIN_ROLES.includes(requester.role) || ADMIN_ROLES.includes(other.role)) return true;
+export function evaluateChatAccess({ summary, doctorEligible, requesterIsDoctor, now = Date.now(), windowDays = env.clinical.chatFollowUpWindowDays }) {
+  const deny = (reason) => ({ status: CHAT_ACCESS.NONE, canRead: false, canSend: false, readOnlyReason: null, denialReason: reason });
+  if (!summary?.hasRelationship) return deny(CHAT_DENIAL_REASON.NO_RELATIONSHIP);
+  if (requesterIsDoctor && !doctorEligible) return deny(CHAT_DENIAL_REASON.DOCTOR_NOT_ELIGIBLE);
+
+  const readOnly = (reason) => ({ status: CHAT_ACCESS.READ_ONLY, canRead: true, canSend: false, readOnlyReason: reason, denialReason: null });
+  if (!doctorEligible) return readOnly(CHAT_DENIAL_REASON.DOCTOR_NOT_ELIGIBLE);
+
+  const withinWindow = summary.latestFollowUpAt !== null && now - summary.latestFollowUpAt <= windowDays * DAY_MS;
+  if (summary.hasActive || withinWindow) {
+    return { status: CHAT_ACCESS.ACTIVE, canRead: true, canSend: true, readOnlyReason: null, denialReason: null };
+  }
+  return readOnly(CHAT_DENIAL_REASON.WINDOW_EXPIRED);
+}
+
+const NO_ACCESS = (reason) => ({ status: CHAT_ACCESS.NONE, canRead: false, canSend: false, readOnlyReason: null, denialReason: reason });
+
+/**
+ * THE chat-authorisation decision. `requester`/`other` are User documents
+ * (needs _id, role, isActive). Never throws for a denial. Callers choose the
+ * capability they need (canRead for history/join/receipts/download, canSend
+ * for send/typing/upload) — they must not re-derive access themselves.
+ */
+export async function resolveChatAccess(requester, other) {
+  if (!requester?._id || !other?._id) return NO_ACCESS(CHAT_DENIAL_REASON.INVALID_PARTICIPANTS);
+  if (String(requester._id) === String(other._id)) return NO_ACCESS(CHAT_DENIAL_REASON.INVALID_PARTICIPANTS);
+  if (requester.isActive === false || other.isActive === false) return NO_ACCESS(CHAT_DENIAL_REASON.ACCOUNT_INACTIVE);
+
+  if (ADMIN_ROLES.includes(requester.role) || ADMIN_ROLES.includes(other.role)) {
+    return { status: CHAT_ACCESS.ACTIVE, canRead: true, canSend: true, readOnlyReason: null, denialReason: null, adminSupport: true };
+  }
 
   const doctorUser = requester.role === ROLES.DOCTOR ? requester : other.role === ROLES.DOCTOR ? other : null;
   const patientUser = requester.role === ROLES.PATIENT ? requester : other.role === ROLES.PATIENT ? other : null;
-  if (!doctorUser || !patientUser) return false;
+  if (!doctorUser || !patientUser) return NO_ACCESS(CHAT_DENIAL_REASON.INVALID_PARTICIPANTS);
 
   const doctor = await Doctor.findOne({ userId: doctorUser._id }).select("_id verificationStatus isVerified isActive").lean();
-  if (!doctor) return false;
-  if (String(requester._id) === String(doctorUser._id) && !isDoctorClinicallyEligible(doctor)) return false;
+  if (!doctor) return NO_ACCESS(CHAT_DENIAL_REASON.NO_RELATIONSHIP);
 
-  const exists = await Appointment.exists({
-    doctorId: doctor._id,
-    patientId: patientUser._id,
-    status: { $in: [...CHAT_ACTIVE_STATUSES, ...CHAT_FOLLOWUP_STATUSES] },
+  const appointments = await fetchPairAppointments(doctor._id, patientUser._id, [...CHAT_ACTIVE_STATUSES, ...CHAT_FOLLOWUP_STATUSES]);
+  return evaluateChatAccess({
+    summary: summarizeChatRelationship(appointments),
+    doctorEligible: isDoctorClinicallyEligible(doctor),
+    requesterIsDoctor: String(requester._id) === String(doctorUser._id),
   });
-  return Boolean(exists);
+}
+
+/**
+ * Batch form of resolveChatAccess for list endpoints: ONE Doctor query + ONE
+ * Appointment query for the whole page instead of one pair of queries per
+ * conversation (no N+1). Uses the exact same pure policy functions, so the
+ * list can never disagree with the per-request decision.
+ * @param {object} requester  User (needs _id, role, isActive)
+ * @param {object[]} others   Users (need _id, role, isActive)
+ * @returns {Promise<Map<string, ReturnType<typeof evaluateChatAccess>>>} keyed by String(other._id)
+ */
+export async function resolveChatAccessBatch(requester, others = []) {
+  const result = new Map();
+  if (!requester?._id || requester.isActive === false) {
+    for (const other of others) result.set(String(other._id), NO_ACCESS(CHAT_DENIAL_REASON.ACCOUNT_INACTIVE));
+    return result;
+  }
+  const requesterIsDoctor = requester.role === ROLES.DOCTOR;
+  const requesterIsPatient = requester.role === ROLES.PATIENT;
+
+  const pairs = [];
+  for (const other of others) {
+    const key = String(other._id);
+    if (key === String(requester._id) || other.isActive === false) {
+      result.set(key, NO_ACCESS(other.isActive === false ? CHAT_DENIAL_REASON.ACCOUNT_INACTIVE : CHAT_DENIAL_REASON.INVALID_PARTICIPANTS));
+    } else if (ADMIN_ROLES.includes(requester.role) || ADMIN_ROLES.includes(other.role)) {
+      result.set(key, { status: CHAT_ACCESS.ACTIVE, canRead: true, canSend: true, readOnlyReason: null, denialReason: null, adminSupport: true });
+    } else if ((requesterIsDoctor && other.role === ROLES.PATIENT) || (requesterIsPatient && other.role === ROLES.DOCTOR)) {
+      pairs.push(other);
+    } else {
+      result.set(key, NO_ACCESS(CHAT_DENIAL_REASON.INVALID_PARTICIPANTS));
+    }
+  }
+  if (!pairs.length) return result;
+
+  const statuses = [...CHAT_ACTIVE_STATUSES, ...CHAT_FOLLOWUP_STATUSES];
+  if (requesterIsDoctor) {
+    const doctor = await Doctor.findOne({ userId: requester._id }).select("_id verificationStatus isVerified isActive").lean();
+    const eligible = Boolean(doctor) && isDoctorClinicallyEligible(doctor);
+    const appointments = doctor
+      ? await Appointment.find({ doctorId: doctor._id, patientId: { $in: pairs.map((p) => p._id) }, status: { $in: statuses } })
+        .select("_id status date patientId").limit(RELATIONSHIP_FETCH_LIMIT * 4).lean()
+      : [];
+    const byPatient = new Map();
+    for (const appointment of appointments) {
+      const key = String(appointment.patientId);
+      if (!byPatient.has(key)) byPatient.set(key, []);
+      byPatient.get(key).push(appointment);
+    }
+    for (const other of pairs) {
+      result.set(String(other._id), evaluateChatAccess({
+        summary: summarizeChatRelationship(byPatient.get(String(other._id)) || []),
+        doctorEligible: eligible,
+        requesterIsDoctor: true,
+      }));
+    }
+    return result;
+  }
+
+  const doctors = await Doctor.find({ userId: { $in: pairs.map((p) => p._id) } })
+    .select("_id userId verificationStatus isVerified isActive").lean();
+  const doctorByUser = new Map(doctors.map((doctor) => [String(doctor.userId), doctor]));
+  const appointments = doctors.length
+    ? await Appointment.find({ patientId: requester._id, doctorId: { $in: doctors.map((d) => d._id) }, status: { $in: statuses } })
+      .select("_id status date doctorId").limit(RELATIONSHIP_FETCH_LIMIT * 4).lean()
+    : [];
+  const byDoctor = new Map();
+  for (const appointment of appointments) {
+    const key = String(appointment.doctorId);
+    if (!byDoctor.has(key)) byDoctor.set(key, []);
+    byDoctor.get(key).push(appointment);
+  }
+  for (const other of pairs) {
+    const doctor = doctorByUser.get(String(other._id));
+    result.set(String(other._id), doctor
+      ? evaluateChatAccess({
+        summary: summarizeChatRelationship(byDoctor.get(String(doctor._id)) || []),
+        doctorEligible: isDoctorClinicallyEligible(doctor),
+        requesterIsDoctor: false,
+      })
+      : NO_ACCESS(CHAT_DENIAL_REASON.NO_RELATIONSHIP));
+  }
+  return result;
+}
+
+/** Sending / typing / uploading: active window only. Thin wrapper over resolveChatAccess. */
+export async function usersCanChat(userA, userB) {
+  return (await resolveChatAccess(userA, userB)).canSend;
+}
+
+/** Reading an existing conversation, joining its room, receipts, attachment download. */
+export async function usersCanReadConversationHistory(requester, other) {
+  return (await resolveChatAccess(requester, other)).canRead;
 }
 
 /**

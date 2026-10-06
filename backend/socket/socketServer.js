@@ -68,3 +68,16 @@ export const initSocketServer = (httpServer) => {
 };
 
 export const getIO = () => io;
+
+/**
+ * Cut every live socket of a user whose session was just invalidated
+ * (password reset bumped securityVersion, or the account was deactivated).
+ * Chat handlers also re-validate on a short TTL, so this is the immediate
+ * path; the TTL re-check is the safety net (and covers other nodes).
+ */
+export const disconnectUserSockets = (userId, reason) => {
+  if (!io || !userId) return;
+  const room = roomManager.userRoom(userId);
+  io.in(room).emit("auth:invalidated", { reason });
+  io.in(room).disconnectSockets(true);
+};

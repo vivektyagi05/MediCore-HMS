@@ -396,7 +396,7 @@ function PatientAppointments() {
                   {/* Actions */}
                   <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
                     {canJoin && doctorUserId && (
-                      <Button onClick={() => navigate(`/chat/${doctorUserId}`)}>
+                      <Button onClick={() => navigate(`/patient/communication/${doctorUserId}`)}>
                         <Video size={15} /> Join Consultation
                       </Button>
                     )}

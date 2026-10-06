@@ -2,7 +2,7 @@ import Appointment from "../models/Appointment.js";
 import Doctor from "../models/Doctor.js";
 import User from "../models/User.js";
 import { ADMIN_ROLES, ROLES } from "../constants/roles.js";
-import { usersCanChat } from "../services/clinicalAccessService.js";
+import { usersCanReadConversationHistory } from "../services/clinicalAccessService.js";
 
 export const roomManager = {
   userRoom(userId) {
@@ -63,20 +63,22 @@ export const roomManager = {
     }
 
     if (room.startsWith("chat:")) {
-      // BUGFIX (DOC-03, real security gap): this previously only checked
-      // that the requesting user's own id was one of the two ids in the
-      // conversationKey — it never verified a real relationship exists
-      // between the two participants, so any authenticated user could
-      // join and read any other user's conversation room by supplying
-      // their id. Now also verifies a real doctor-patient (or admin)
-      // relationship via the shared usersCanChat check.
+      // Joining follows READ access (the same canRead REST history and the
+      // attachment download use), NOT send access: a legitimately read-only
+      // conversation can still be opened and kept in sync, while sending,
+      // typing and uploading stay blocked by the engine. The room key is
+      // parsed strictly (exactly two 24-hex ids, canonical order, caller is
+      // one of them) and the relationship is re-derived server-side.
       const key = room.slice("chat:".length);
-      const [idA, idB] = key.split(":");
+      const parts = key.split(":");
+      if (parts.length !== 2 || !parts.every((part) => /^[a-f\d]{24}$/i.test(part))) return false;
+      const [idA, idB] = parts;
+      if (key !== [idA, idB].sort().join(":")) return false;
       if (![idA, idB].includes(user._id.toString())) return false;
       const otherUserId = idA === user._id.toString() ? idB : idA;
       const otherUser = await User.findById(otherUserId).select("_id role isActive").lean();
       if (!otherUser) return false;
-      return usersCanChat(user, otherUser);
+      return usersCanReadConversationHistory(user, otherUser);
     }
 
     return false;

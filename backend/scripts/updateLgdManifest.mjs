@@ -15,4 +15,4 @@ for (const entry of manifest.files) {
   entry.dataRows = parseDelimited(fs.readFileSync(file, "utf8")).length;
 }
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log("Updated", manifestPath);
+

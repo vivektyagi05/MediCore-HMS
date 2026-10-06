@@ -32,6 +32,7 @@ const LegalDocumentPage = lazy(() => import("../components/legal/LegalDocumentPa
 const PrivacyPreferences = lazy(() => import("../pages/public/PrivacyPreferences"));
 const DataRights = lazy(() => import("../pages/public/DataRights"));
 const ChatWorkspace = lazy(() => import("../pages/chat/ChatWorkspace"));
+const CommunicationHub = lazy(() => import("../pages/chat/CommunicationHub"));
 const AdminAIInsights = lazy(() => import("../pages/ai/AdminAIInsights"));
 const PatientAIAssistant = lazy(() => import("../pages/ai/PatientAIAssistant"));
 const AdminServices = lazy(() => import("../pages/admin/AdminServices"));
@@ -282,6 +283,9 @@ function AppRoutes() {
       element={<DoctorDashboard />}
     />
 
+    <Route path="communication" element={<CommunicationHub />} />
+    <Route path="communication/:userId" element={<CommunicationHub />} />
+
     <Route
       path="inbox"
       element={<DoctorSmartInbox />}
@@ -385,6 +389,9 @@ function AppRoutes() {
           <Route index element={<Navigate to="/patient/dashboard" replace />} />
 
           <Route path="dashboard" element={<PatientDashboard />} />
+
+          <Route path="communication" element={<CommunicationHub />} />
+          <Route path="communication/:userId" element={<CommunicationHub />} />
 
           <Route path="wallet" element={<WalletDashboard />} />
 

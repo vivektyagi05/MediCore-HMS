@@ -1,14 +1,10 @@
-import ChatMessage from "../models/ChatMessage.js";
 import NotificationDelivery from "../models/NotificationDelivery.js";
-import User from "../models/User.js";
-import { notificationEmitter } from "../realtime/notificationEmitter.js";
 import { presenceManager } from "./presenceManager.js";
 import { revalidateSession, SESSION_REJECTION_MESSAGES } from "../services/sessionAuthService.js";
 import { roomManager } from "./roomManager.js";
 import { wrapAsyncSocketHandler } from "./asyncSocketHandler.js";
-import { usersCanChat } from "../services/clinicalAccessService.js";
-import { isFeatureEnabled } from "../services/featureToggleService.js";
-import { ADMIN_ROLES } from "../constants/roles.js";
+import { chatEngine } from "../services/chat/chatEngine.js";
+import { registerChatHandlers } from "./chatHandlers.js";
 
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_MAX = 40;
@@ -116,86 +112,8 @@ export const registerEventHandlers = (io, socket) => {
     ack?.({ success: Boolean(notification), notification });
   });
 
-  on("chat:typing:start", async (payload) => {
-    if (!assertAllowedEvent(socket, "chat:typing:start")) return;
-    const { recipientId, appointmentId } = payload || {};
-    if (!recipientId) return;
-    const conversationKey = roomManager.conversationKey(socket.user._id, recipientId);
-    socket.to(roomManager.conversationRoom(conversationKey)).emit("chat:typing:start", {
-      senderId: socket.user._id,
-      recipientId,
-      appointmentId,
-    });
-  });
-
-  on("chat:typing:stop", async (payload) => {
-    if (!assertAllowedEvent(socket, "chat:typing:stop")) return;
-    const { recipientId, appointmentId } = payload || {};
-    if (!recipientId) return;
-    const conversationKey = roomManager.conversationKey(socket.user._id, recipientId);
-    socket.to(roomManager.conversationRoom(conversationKey)).emit("chat:typing:stop", {
-      senderId: socket.user._id,
-      recipientId,
-      appointmentId,
-    });
-  });
-
-  on("chat:send", async (payload, ack) => {
-    if (!assertAllowedEvent(socket, "chat:send")) return;
-    // Super admin support chat is never gated by this toggle -- disabling
-    // patient/doctor chat must not also cut off support escalations.
-    if (!ADMIN_ROLES.includes(socket.user.role) && !(await isFeatureEnabled("chat", { userId: socket.user._id.toString() }))) {
-      ack?.({ success: false, message: "Chat is currently unavailable" });
-      return;
-    }
-    const { recipientId, body, appointmentId } = payload || {};
-    if (!recipientId || !body?.trim()) {
-      ack?.({ success: false, message: "Recipient and message are required" });
-      return;
-    }
-
-    const recipient = await User.findById(recipientId).select("_id isActive role").lean();
-    if (!recipient?.isActive) {
-      ack?.({ success: false, message: "Recipient is not available" });
-      return;
-    }
-
-    // BUGFIX (DOC-03, real security gap): sending a message previously had
-    // no relationship check at all beyond "recipient account is active" —
-    // any authenticated user could message any other user on the
-    // platform. Now requires a real doctor-patient relationship (or an
-    // admin participant), via the same shared check roomManager and
-    // getConversation use.
-    const allowed = await usersCanChat(socket.user, recipient);
-    if (!allowed) {
-      ack?.({ success: false, message: "You are not authorized to message this user" });
-      return;
-    }
-
-    const conversationKey = roomManager.conversationKey(socket.user._id, recipientId);
-    const room = roomManager.conversationRoom(conversationKey);
-    await socket.join(room);
-
-    const message = await ChatMessage.create({
-      conversationKey,
-      appointmentId,
-      senderId: socket.user._id,
-      recipientId,
-      body: body.trim(),
-      deliveredAt: new Date(),
-    });
-
-    io.to(room).to(roomManager.userRoom(recipientId)).emit("chat:message", message);
-    await notificationEmitter.emitToUser(recipientId, {
-      type: "chat",
-      title: `New message from ${socket.user.name}`,
-      message: body.trim().slice(0, 160),
-      entityType: "chat",
-      entityId: message._id,
-      eventKey: `chat:${message._id}`,
-      metadata: { conversationKey, appointmentId },
-    });
-
-    ack?.({ success: true, message });
-  });
+  // All doctor↔patient messaging (send, delivery/read receipts, typing,
+  // reconnect sync) lives in ONE place: the conversation engine behind
+  // socket/chatHandlers.js. There is deliberately no second chat path here.
+  registerChatHandlers(io, socket, { engine: chatEngine });
 };

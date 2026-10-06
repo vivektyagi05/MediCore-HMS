@@ -5,6 +5,7 @@ import Doctor from "../../models/Doctor.js";
 import { ROLES, ROLE_VALUES } from "../../constants/roles.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
+import { disconnectUserSockets } from "../../socket/socketServer.js";
 import { clampPagination, buildPaginationMeta } from "../../utils/paginationValidation.js";
 
 // BUGFIX: this route accepts both ADMIN and SUPER_ADMIN (see userAdminRoutes.js),
@@ -277,6 +278,7 @@ async (req, res) => {
     !user.isActive;
 
   await user.save();
+  if (!user.isActive) disconnectUserSockets(user._id, "USER_INACTIVE");
 
   await logAdminActivity(req, user.isActive ? "user.activate" : "user.deactivate", user._id);
 

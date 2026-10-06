@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import ChatMessage from "../models/ChatMessage.js";
 import NotificationDelivery from "../models/NotificationDelivery.js";
 import OnlineSession from "../models/OnlineSession.js";
 import Appointment from "../models/Appointment.js";
@@ -10,13 +9,8 @@ import { ADMIN_ROLES } from "../constants/roles.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
 import { presenceManager } from "../socket/presenceManager.js";
-import { roomManager } from "../socket/roomManager.js";
-import { getIO } from "../socket/socketServer.js";
-import { selectUnreadMessageIdsForReader } from "../utils/chatReadState.js";
 import { onlineFilter } from "../socket/presenceQuery.js";
 import { clampPagination, buildPaginationMeta } from "../utils/paginationValidation.js";
-import { usersCanReadConversationHistory } from "../services/clinicalAccessService.js";
-import User from "../models/User.js";
 import { resolveCategory, classifyPriority, resolveAction, priorityWeight, PRIORITY } from "../services/doctorInboxAggregates.js";
 
 const getPagination = (query) => {
@@ -230,75 +224,5 @@ export const getPresence = asyncHandler(async (req, res) => {
     success: true,
     data: { onlineUsers: presenceManager.snapshotFor(req.user), activeSessions },
     message: "Online presence fetched successfully",
-  });
-});
-
-export const getConversation = asyncHandler(async (req, res) => {
-  if (!mongoose.Types.ObjectId.isValid(req.params.userId)) throw new AppError("Invalid conversation user id", 400);
-
-  // BUGFIX (DOC-03, real security gap): this endpoint previously had no
-  // authorization beyond being logged in — any authenticated user could
-  // read the full message history of any two users by supplying their id
-  // (an IDOR). Now requires a real doctor-patient relationship (or an
-  // admin participant), same shared check as chat:send/roomManager.
-  const otherUser = await User.findById(req.params.userId).select("_id role isActive").lean();
-  if (!otherUser) throw new AppError("Conversation participant not found", 404);
-  const allowed = await usersCanReadConversationHistory(req.user, otherUser);
-  if (!allowed) throw new AppError("You are not authorized to view this conversation", 403);
-
-  const { page, limit, skip } = getPagination(req.query);
-  const conversationKey = roomManager.conversationKey(req.user._id, req.params.userId);
-
-  const [messages, total] = await Promise.all([
-    ChatMessage.find({ conversationKey })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate("senderId", "name email role")
-      .populate("recipientId", "name email role")
-      .lean(),
-    ChatMessage.countDocuments({ conversationKey }),
-  ]);
-
-  // BUGFIX (DOC-03B, real broken link found in the chat end-to-end trace):
-  // ChatMessage.readAt was declared on the schema and READ from in three
-  // places (doctorController's per-patient unread counts, this doctor's
-  // clinical-profile unread count, and predictionEngine's inbox unread
-  // signal) but was never WRITTEN anywhere in the codebase — opening a
-  // conversation never marked the other person's messages as read, so
-  // "unread" counts and Attention-Center "unread message" flags could only
-  // ever grow, never clear, even after the doctor/patient actually read
-  // them. Fixed at the single real read point: viewing this page (only on
-  // page 1 of the newest messages, so paging into old history doesn't
-  // falsely mark unseen-but-unfetched pages as read) marks this viewer's
-  // own unread messages read and tells the sender's client so their badge
-  // updates live, without a page refresh.
-  if (page === 1) {
-    const unreadIds = selectUnreadMessageIdsForReader(messages, req.user._id);
-
-    if (unreadIds.length) {
-      const readAt = new Date();
-      await ChatMessage.updateMany({ _id: { $in: unreadIds } }, { $set: { readAt } });
-      messages.forEach((m) => {
-        if (unreadIds.some((id) => String(id) === String(m._id))) m.readAt = readAt;
-      });
-
-      getIO()?.to(roomManager.userRoom(req.params.userId)).to(roomManager.conversationRoom(conversationKey)).emit("chat:read", {
-        conversationKey,
-        readerId: req.user._id,
-        messageIds: unreadIds,
-        readAt,
-      });
-    }
-  }
-
-  res.status(200).json({
-    success: true,
-    data: {
-      conversationKey,
-      messages: messages.reverse(),
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-    },
-    message: "Conversation fetched successfully",
   });
 });

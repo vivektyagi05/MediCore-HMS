@@ -353,3 +353,9 @@ already generic across all three levels and required no changes).
   not built here.
 - Every other still-open item from the 2026-09-23 checkpoint's Section C
   is untouched — scoped to the master-data/city flow only.
+
+## 2026-10-06 — Communication system (doctor ↔ patient) rebuild
+- Root cause: UI sends used `chat:message`, server handled `chat:send` — chat sends never arrived. Also fake `deliveredAt`, read-on-load, REST/socket policy mismatch, no idempotency, PHI in notifications.
+- One engine (`services/chat/*`), one policy (`resolveChatAccess`), Doctor + Patient Communication Hubs, attachments (PNG/JPEG/PDF, private storage, magic-byte validated), reconnect sync, receipts, multi-tab convergence.
+- 152/152 backend tests, ESLint 0, Vite build OK. Live MongoDB and browser E2E NOT VERIFIED. See COMMUNICATION-IMPLEMENTATION-REPORT.md.
+- Run `npm run migrate:chat-state` after deploy.

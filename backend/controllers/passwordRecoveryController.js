@@ -3,6 +3,7 @@ import PasswordReset from "../models/PasswordReset.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
 import { logger } from "../utils/logger.js";
+import { disconnectUserSockets } from "../socket/socketServer.js";
 import {
   generateSecureOtp,
   hashOtp,
@@ -250,6 +251,9 @@ export const resetPassword = asyncHandler(async (req, res) => {
   user.password = newPassword; // re-hashed by User's existing pre-save hook
   user.securityVersion = (user.securityVersion || 0) + 1; // invalidates every existing JWT
   await user.save();
+  // The JWTs are dead for REST immediately; kill live sockets (chat/notification
+  // rooms) too instead of waiting for their next re-validation tick.
+  disconnectUserSockets(user._id, "SESSION_INVALIDATED");
 
   // Belt-and-suspenders: invalidate any other still-active recovery
   // records for this user now that the password has actually changed.

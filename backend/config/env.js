@@ -86,6 +86,11 @@ export const env = Object.freeze({
     // chat closes until a new appointment is active.
     chatFollowUpWindowDays: positiveInt(process.env.CHAT_FOLLOWUP_WINDOW_DAYS, 30),
   },
+  // Chat attachments (images/PDF). Enforced server-side in
+  // services/chat/chatAttachmentService.js; the multer limit mirrors it.
+  chat: {
+    attachmentMaxBytes: positiveInt(process.env.CHAT_ATTACHMENT_MAX_BYTES, 5 * 1024 * 1024),
+  },
   // Persistent file storage (see storage/storageService.js).
   storage: {
     driver: resolveStorageDriver(process.env),

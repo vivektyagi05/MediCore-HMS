@@ -212,19 +212,33 @@ await run("usersCanChat: active appointment with an eligible doctor is allowed (
 });
 
 await run("history: a patient may still read their own past conversation after the follow-up window", async () => {
+  // Completed long ago => no longer ACTIVE (canSend false) but a real
+  // relationship existed => history stays readable (read_only, not denied).
+  const old = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
   Doctor.findOne = () => ({ select: () => ({ lean: async () => approvedDoctor }) });
   let q;
-  Appointment.exists = async (filter) => { q = filter; return { _id: "x" }; };
+  Appointment.find = (filter) => {
+    q = filter;
+    const chain = { select: () => chain, sort: () => chain, limit: () => chain, lean: async () => [{ status: "completed", date: old }] };
+    return chain;
+  };
   assert.equal(await usersCanReadConversationHistory(patientUser, doctorUser), true);
+  assert.equal(await usersCanChat(patientUser, doctorUser), false, "expired window => read-only, sending blocked");
   assert.equal(q.doctorId, D);
   assert.equal(q.patientId, "u-pat");
-  Appointment.exists = async () => null;
+  Appointment.find = () => {
+    const chain = { select: () => chain, sort: () => chain, limit: () => chain, lean: async () => [] };
+    return chain;
+  };
   assert.equal(await usersCanReadConversationHistory(patientUser, doctorUser), false, "no qualifying relationship => no history");
 });
 
 await run("history: an ineligible doctor cannot read patient conversations", async () => {
   Doctor.findOne = () => ({ select: () => ({ lean: async () => ({ ...approvedDoctor, isActive: false }) }) });
-  Appointment.exists = async () => ({ _id: "x" });
+  Appointment.find = () => {
+    const chain = { select: () => chain, sort: () => chain, limit: () => chain, lean: async () => [{ status: "approved", date: new Date() }] };
+    return chain;
+  };
   assert.equal(await usersCanReadConversationHistory(doctorUser, patientUser), false);
 });
 

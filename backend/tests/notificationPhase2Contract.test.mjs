@@ -29,7 +29,7 @@ assert.match(practice, /buildVerificationEventKey/);
 assert.match(practice, /buildVerificationEventKey\(\{ doctorId, cycleId: cycleId\?\.toString\(\), status \}\)/);
 assert.match(emitter, /unique \(recipientId,eventKey\) index is the final idempotency guard/);
 assert.match(emitter, /if \(!created\) return notification;/);
-assert.match(model, /notificationDeliverySchema\.index\(\{ eventKey: 1, recipientId: 1 \}, \{ unique: true, sparse: true \}\)/);
+assert.match(model, /notificationDeliverySchema\.index\(\s*\{ eventKey: 1, recipientId: 1 \},\s*\{ unique: true, name: "uniq_notification_event_recipient", partialFilterExpression: \{ eventKey: \{ \$type: "string" \} \} \},?\s*\)/);
 
 assert.match(context, /notificationIdsRef/);
 assert.match(context, /if \(isNew\)/);

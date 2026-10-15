@@ -7,6 +7,7 @@ import {
   failWithdrawal,
   retryWithdrawal,
   cancelWithdrawal,
+  reconcileDoctorWithdrawalGate,
 } from "../../controllers/admin/withdrawalAdminController.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { requireAdmin, requirePermission } from "../../middleware/adminMiddleware.js";
@@ -19,6 +20,7 @@ router.use(protect, requireAdmin);
 const gate = requirePermission("manage_payments");
 
 router.get("/", gate, listWithdrawalsAdmin);
+router.get("/reconcile/:doctorId", gate, reconcileDoctorWithdrawalGate);
 router.get("/:id", gate, getWithdrawalDetailAdmin);
 router.patch("/:id/processing", gate, markWithdrawalProcessing);
 router.patch("/:id/complete", gate, completeWithdrawal);

@@ -16,6 +16,10 @@ export const refundApi = {
   rejectRequest(id, payload = {}) {
     return apiClient.patch(`/refunds/requests/${id}/reject`, payload).then((res) => res.data);
   },
+  // Asks the payment provider for the truth about a pending/unconfirmed refund.
+  reconcileRequest(id) {
+    return apiClient.post(`/refunds/requests/${id}/reconcile`, {}).then((res) => res.data);
+  },
   retryRequest(id) {
     return apiClient.patch(`/refunds/requests/${id}/retry`, {}).then((res) => res.data);
   },

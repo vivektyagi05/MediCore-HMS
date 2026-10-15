@@ -6,9 +6,42 @@ import RefundRequest from "../models/RefundRequest.js";
 import Wallet from "../models/Wallet.js";
 import { logger } from "../utils/logger.js";
 
+export const RECONCILIATION_BATCH_SIZE = 500;
+
+/** Deterministic _id-ordered batch filter; exported for tests. */
+export const buildCursorFilter = (afterId, base = {}) => (afterId ? { ...base, _id: { $gt: afterId } } : { ...base });
+
+/**
+ * F-007: walks EVERY matching payment in bounded batches (no 500-row cap, no
+ * full load into memory). Resumable: pass the returned cursor back as afterId.
+ */
+export const forEachPaymentBatch = async (base, { afterId, batchSize = RECONCILIATION_BATCH_SIZE, maxBatches = Infinity }, onBatch) => {
+  let cursor = afterId || null;
+  let batches = 0;
+  for (;;) {
+    const batch = await Payment.find(buildCursorFilter(cursor, base)).sort({ _id: 1 }).limit(batchSize).lean();
+    if (batch.length === 0) return { cursor, done: true, batches };
+    await onBatch(batch);
+    cursor = batch[batch.length - 1]._id;
+    batches += 1;
+    if (batch.length < batchSize) return { cursor, done: true, batches };
+    if (batches >= maxBatches) return { cursor, done: false, batches };
+  }
+};
+
 export const reconciliationService = {
-  async generateReport() {
-    const payments = await Payment.find().limit(500).lean();
+  /** Full pass over all payments, or one resumable slice when maxBatches/afterId are given. */
+  async generateReport({ afterId, batchSize, maxBatches } = {}) {
+    const issues = [];
+    let checked = 0;
+    const progress = await forEachPaymentBatch({}, { afterId, batchSize, maxBatches }, async (payments) => {
+      checked += payments.length;
+      issues.push(...(await this.checkPayments(payments)));
+    });
+    return { checked, issues, generatedAt: new Date(), nextCursor: progress.done ? null : progress.cursor, done: progress.done, batches: progress.batches };
+  },
+
+  async checkPayments(payments) {
     const issues = [];
     for (const payment of payments) {
       if (!payment.razorpayOrderId) issues.push({ type: "missing_gateway_order", paymentId: payment._id });
@@ -44,7 +77,7 @@ export const reconciliationService = {
         issues.push({ type: "payment_requires_reconciliation", paymentId: payment._id });
       }
     }
-    return { checked: payments.length, issues, generatedAt: new Date() };
+    return issues;
   },
 
   // Finds payments that reached "captured" (money already taken) but never
@@ -52,8 +85,8 @@ export const reconciliationService = {
   // failed after capture — see completePaymentPostProcessing). Detected by
   // absence of an Invoice or DoctorPayout for a captured payment.
   async findIncompletePayments() {
-    const capturedPayments = await Payment.find({ status: "captured" }).limit(500).lean();
     const incomplete = [];
+    await forEachPaymentBatch({ status: "captured" }, {}, async (capturedPayments) => {
     for (const payment of capturedPayments) {
       const [invoice, payout, ledger] = await Promise.all([
         Invoice.findOne({ paymentId: payment._id }).lean(),
@@ -64,6 +97,7 @@ export const reconciliationService = {
         incomplete.push({ paymentId: payment._id, missingInvoice: !invoice, missingPayout: !payout, missingLedger: !ledger, postProcessingIncomplete: payment.postProcessingState !== "complete" });
       }
     }
+    });
     return incomplete;
   },
 

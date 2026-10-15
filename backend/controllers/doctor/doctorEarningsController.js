@@ -37,6 +37,10 @@ import { clampPagination, buildPaginationMeta } from "../../utils/paginationVali
 import { resolvePageFromIndex, computeIncomeForecast } from "../../services/finance/doctorFinanceHelpers.js";
 import { computeDoctorWithdrawableBalance } from "../../services/finance/withdrawalService.js";
 
+// Doctor earning NET of refunds: refunds reverse earnings via refundAdjustmentAmount
+// (original doctorAmount is immutable history). Fully-refunded payouts net to 0.
+const NET_DOCTOR_AMOUNT = { $subtract: ["$doctorAmount", { $ifNull: ["$refundAdjustmentAmount", 0] }] };
+
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -64,7 +68,7 @@ export async function buildDoctorRevenueIntelligence(doctorId) {
   const startOfYear = new Date(now.getFullYear(), 0, 1);
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-  const sumStage = (extraMatch, sumField = "$doctorAmount") => [
+  const sumStage = (extraMatch, sumField = NET_DOCTOR_AMOUNT) => [
     ...(extraMatch ? [{ $match: extraMatch }] : []),
     { $group: { _id: null, sum: { $sum: sumField } } },
   ];
@@ -74,7 +78,7 @@ export async function buildDoctorRevenueIntelligence(doctorId) {
       { $match: { doctorId: docId } },
       {
         $facet: {
-          total: [{ $group: { _id: null, sum: { $sum: "$doctorAmount" }, fees: { $sum: "$platformFee" } } }],
+          total: [{ $group: { _id: null, sum: { $sum: NET_DOCTOR_AMOUNT }, fees: { $sum: { $subtract: ["$platformFee", { $ifNull: ["$platformRefundAdjustmentAmount", 0] }] } } } }],
           settled: sumStage({ status: "paid" }),
           pending: sumStage({ status: "pending" }),
           today: sumStage({ createdAt: { $gte: startOfToday } }),
@@ -98,7 +102,7 @@ export async function buildDoctorRevenueIntelligence(doctorId) {
     ]),
     DoctorPayout.aggregate([
       { $match: { doctorId: docId, status: "paid", createdAt: { $gte: sixMonthsAgo } } },
-      { $group: { _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } }, amount: { $sum: "$doctorAmount" } } },
+      { $group: { _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } }, amount: { $sum: NET_DOCTOR_AMOUNT } } },
     ]),
     DoctorPayout.countDocuments({ doctorId: docId }),
     // Bounded to the latest 30 — a real timeline feed, not the full
@@ -423,9 +427,9 @@ export const getDoctorFinancialPosition = asyncHandler(async (req, res) => {
         {
           $group: {
             _id: null,
-            earned: { $sum: "$doctorAmount" },
-            settled: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$doctorAmount", 0] } },
-            pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, "$doctorAmount", 0] } },
+            earned: { $sum: NET_DOCTOR_AMOUNT },
+            settled: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, NET_DOCTOR_AMOUNT, 0] } },
+            pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, NET_DOCTOR_AMOUNT, 0] } },
           },
         },
       ]),

@@ -23,7 +23,7 @@ const walletTransactionSchema = new mongoose.Schema(
     },
     referenceType: {
       type: String,
-      enum: ["payment", "refund", "manual", "subscription"],
+      enum: ["payment", "refund", "manual", "subscription", "recharge"],
       default: "manual",
     },
     referenceId: String,

@@ -40,8 +40,16 @@ import {
   canonicalizeConsultationMode,
   isKnownDoctorConsultationMode,
 } from "../constants/consultationMode.js";
-import { enforceAppointmentBookingPolicy } from "../services/appointmentBookingPolicyService.js";
-import { getAppointmentLimits } from "../services/hospitalSettingsService.js";
+import { enforceAppointmentBookingPolicy, verifyDailyCapacityAfterWrite, assertPatientHasNoOverlap, assertTravelFeasible } from "../services/appointmentBookingPolicyService.js";
+import { getAppointmentLimits, getHospitalTimezone, getAppointmentRules } from "../services/hospitalSettingsService.js";
+import { atomicTransition } from "../services/appointmentTransitionService.js";
+import { guardAppointmentAction } from "../services/appointmentGuard.js";
+import { ACTION } from "../services/appointmentActionPolicy.js";
+import { notifyDelayToWaitingPatients } from "../services/appointmentLifecycleService.js";
+import { appointmentError } from "../utils/appointmentErrors.js";
+import { queueAppointmentEmails } from "../services/appointmentEmailService.js";
+import { VISIT_STATE } from "../constants/appointmentVisitState.js";
+import { hospitalToday, hospitalDateKey, hospitalMinutesOfDay, DEFAULT_HOSPITAL_TIMEZONE } from "../utils/hospitalTime.js";
 
 const getPagination = (query) => {
   const page = Math.max(Number(query.page) || 1, 1);
@@ -105,7 +113,7 @@ export const ensureDoctorAvailable = (doctor, date, timeSlot) => {
 // memory. Added here (dateFrom/dateTo still take priority when present, so
 // existing callers/tests passing only dateFrom/dateTo are unaffected byte
 // for byte) instead of hand-copying admin's inline version a second time.
-export const buildDateRangeFilter = (query = {}) => {
+export const buildDateRangeFilter = (query = {}, { now = new Date(), tz = DEFAULT_HOSPITAL_TIMEZONE } = {}) => {
   if (query.dateFrom || query.dateTo) {
     const date = {};
     if (query.dateFrom && !Number.isNaN(Date.parse(query.dateFrom))) {
@@ -122,8 +130,8 @@ export const buildDateRangeFilter = (query = {}) => {
   }
 
   if (query.quickDate === "today" || query.quickDate === "upcoming" || query.quickDate === "past") {
-    const startOfToday = new Date();
-    startOfToday.setUTCHours(0, 0, 0, 0);
+    // hospital-local "today" (calendar-day key), not the UTC day
+    const startOfToday = hospitalToday(now, tz);
     if (query.quickDate === "today") {
       const endOfToday = new Date(startOfToday);
       endOfToday.setUTCHours(23, 59, 59, 999);
@@ -190,8 +198,9 @@ export const getAvailableSlots = asyncHandler(async (req, res) => {
   }
 
   const date = normalizeDate(dateParam);
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const hospitalTz = await getHospitalTimezone();
+  const serverNow = new Date();
+  const today = hospitalToday(serverNow, hospitalTz);
 
   if (date < today) {
     return res.status(200).json({ success: true, data: { slots: [], reason: "past_date" }, message: "No slots available for a past date" });
@@ -239,12 +248,8 @@ export const getAvailableSlots = asyncHandler(async (req, res) => {
   })
     .select("timeSlot")
     .lean();
-  const now = new Date();
-  const todayKey = now.toISOString().slice(0, 10);
-  const isToday = date.toISOString().slice(0, 10) === todayKey;
-  const currentTimeMinutes = isToday
-    ? now.getUTCHours() * 60 + now.getUTCMinutes() + now.getUTCSeconds() / 60
-    : null;
+  const isToday = date.toISOString().slice(0, 10) === hospitalDateKey(serverNow, hospitalTz);
+  const currentTimeMinutes = isToday ? hospitalMinutesOfDay(serverNow, hospitalTz) : null;
 
   const dayCapacity = buildDayCapacity({
     dayConfig: dayAvailability,
@@ -282,7 +287,7 @@ const MAX_NEXT_AVAILABLE_HORIZON_DAYS = 60;
 // disagree with what the doctor's own schedule shows for that same day.
 // Bounded at MAX_NEXT_AVAILABLE_HORIZON_DAYS so this can never turn into an
 // unbounded scan for a doctor with no near-term availability at all.
-export const findNextAvailableSlotForDoctor = ({ doctor, approvedLeaves = [], windowAppointments = [], startFrom, horizonDays = MAX_NEXT_AVAILABLE_HORIZON_DAYS }) => {
+export const findNextAvailableSlotForDoctor = ({ doctor, approvedLeaves = [], windowAppointments = [], startFrom, horizonDays = MAX_NEXT_AVAILABLE_HORIZON_DAYS, now = new Date(), tz = DEFAULT_HOSPITAL_TIMEZONE }) => {
   const appointmentsByDate = new Map();
   for (const appt of windowAppointments) {
     const key = new Date(appt.date).toISOString().slice(0, 10);
@@ -294,9 +299,8 @@ export const findNextAvailableSlotForDoctor = ({ doctor, approvedLeaves = [], wi
   const isOnLeave = (date) =>
     approvedLeaves.find((leave) => new Date(leave.startDate) <= date && new Date(leave.endDate) >= date);
 
-  const now = new Date();
-  const todayKey = now.toISOString().slice(0, 10);
-  const currentTimeMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + now.getUTCSeconds() / 60;
+  const todayKey = hospitalDateKey(now, tz);
+  const currentTimeMinutes = hospitalMinutesOfDay(now, tz);
 
   for (let offset = 0; offset <= horizonDays; offset += 1) {
     const candidate = new Date(startFrom);
@@ -334,8 +338,8 @@ export const getNextAvailableSlot = asyncHandler(async (req, res) => {
   }
   const horizonDays = Math.min(Math.max(Number(req.query.horizonDays) || MAX_NEXT_AVAILABLE_HORIZON_DAYS, 1), MAX_NEXT_AVAILABLE_HORIZON_DAYS);
   const now = new Date();
-  const today = new Date(now);
-  today.setUTCHours(0, 0, 0, 0);
+  const hospitalTz = await getHospitalTimezone();
+  const today = hospitalToday(now, hospitalTz);
   const requestedStart = req.query.fromDate && !Number.isNaN(Date.parse(req.query.fromDate))
     ? normalizeDate(req.query.fromDate)
     : today;
@@ -346,7 +350,7 @@ export const getNextAvailableSlot = asyncHandler(async (req, res) => {
     LeaveRequest.find({ doctorId: doctor._id, status: "approved", startDate: { $lte: rangeEnd }, endDate: { $gte: startFrom } }).select("startDate endDate").lean(),
     Appointment.find({ doctorId: doctor._id, date: { $gte: startFrom, $lte: rangeEnd }, status: { $in: ACTIVE_STATUSES } }).select("date timeSlot status").lean(),
   ]);
-  const result = findNextAvailableSlotForDoctor({ doctor, approvedLeaves, windowAppointments, startFrom, horizonDays });
+  const result = findNextAvailableSlotForDoctor({ doctor, approvedLeaves, windowAppointments, startFrom, horizonDays, now, tz: hospitalTz });
   res.status(200).json({ success: true, data: result, message: result.date ? "Next available slot found" : `No availability found in the next ${horizonDays} days` });
 });
 
@@ -451,6 +455,27 @@ export const createAppointment = asyncHandler(async (req, res) => {
     }
   }
 
+  // Mode-specific server rules. A home visit with no destination is not a
+  // bookable appointment (nobody can attend it), and the address is stored
+  // ONLY for home visits (no client-supplied address on other modes).
+  let visitAddress;
+  if (canonicalConsultationMode === "home_visit") {
+    const addr = req.body.visitAddress || {};
+    const line1 = String(addr.line1 || "").trim();
+    const city = String(addr.city || "").trim();
+    if (!line1 || !city) {
+      throw appointmentError("INVALID_APPOINTMENT_MODE", { field: "visitAddress" }, "A home visit needs an address (street and city).");
+    }
+    visitAddress = { line1, city, postalCode: String(addr.postalCode || "").trim(), landmark: String(addr.landmark || "").trim() };
+  }
+  {
+    const rules = await getAppointmentRules();
+    await assertTravelFeasible({
+      doctorId: doctor._id, date: appointmentDate, timeSlot: req.body.timeSlot,
+      consultationMode: canonicalConsultationMode, visitAddress, tz: rules.timezone, bufferMinutes: rules.travelBufferMinutes,
+    });
+  }
+
   // Ownership check: a patient may only attach their OWN insurance policy.
   let insuranceId;
   if (req.body.insuranceId) {
@@ -492,6 +517,8 @@ export const createAppointment = asyncHandler(async (req, res) => {
   });
   if (duplicateBooking) throw new AppError("You already have an appointment with this doctor on this date", 409);
 
+  await assertPatientHasNoOverlap({ patientId: req.user._id, familyMemberId, date: appointmentDate, timeSlot: req.body.timeSlot });
+
   let appointment;
   try {
     appointment = await Appointment.create({
@@ -502,6 +529,7 @@ export const createAppointment = asyncHandler(async (req, res) => {
     timeSlot: req.body.timeSlot,
     notes: req.body.notes || "",
     consultationMode: canonicalConsultationMode,
+    ...(visitAddress ? { visitAddress } : {}),
     reason: req.body.reason || "",
     symptoms: Array.isArray(req.body.symptoms) ? req.body.symptoms : [],
     symptomDuration: req.body.symptomDuration || "",
@@ -537,6 +565,13 @@ export const createAppointment = asyncHandler(async (req, res) => {
       reason: "Appointment requested",
     });
     await appointment.save();
+    // CONCURRENCY-SAFE daily cap: verify AFTER the durable write; if the cap
+    // was exceeded by racing requests this booking undoes itself (409).
+    await verifyDailyCapacityAfterWrite({
+      doctorId: doctor._id,
+      date: appointmentDate,
+      rollback: () => Appointment.deleteOne({ _id: appointment._id, status: APPOINTMENT_STATUS.PENDING }),
+    });
   } catch (error) {
     // Real double-booking protection (DOC-07 §10): the findOne conflict
     // check above is a best-effort pre-check, not the actual guarantee —
@@ -640,7 +675,7 @@ export const getAppointments = asyncHandler(async (req, res) => {
   // dateFrom/dateTo validation already used by
   // admin/appointmentAdminController.buildListFilter, so this is the second
   // consumer of an established pattern, not a new one.
-  Object.assign(filter, buildDateRangeFilter(req.query));
+  Object.assign(filter, buildDateRangeFilter(req.query, { tz: await getHospitalTimezone() }));
 
   // BUGFIX (Phase DOC-04 audit): the doctor appointment page had no
   // server-side search at all — it fetched a flat capped page and filtered
@@ -737,6 +772,7 @@ export const getAppointmentSummary = asyncHandler(async (req, res) => {
   const doctor = await ensureDoctorProfileForUser(req.user);
   const base = { doctorId: doctor._id };
   const now = Date.now();
+  const summaryTz = await getHospitalTimezone();
 
   const [
     total,
@@ -764,8 +800,8 @@ export const getAppointmentSummary = asyncHandler(async (req, res) => {
     Appointment.countDocuments({ ...base, status: APPOINTMENT_STATUS.COMPLETED }),
     Appointment.countDocuments({ ...base, status: APPOINTMENT_STATUS.CANCELLED }),
     Appointment.countDocuments({ ...base, status: APPOINTMENT_STATUS.REVIEW_ELIGIBLE }),
-    Appointment.countDocuments({ ...base, ...buildDateRangeFilter({ quickDate: "today" }) }),
-    Appointment.countDocuments({ ...base, ...buildDateRangeFilter({ quickDate: "upcoming" }), status: { $ne: APPOINTMENT_STATUS.CANCELLED } }),
+    Appointment.countDocuments({ ...base, ...buildDateRangeFilter({ quickDate: "today" }, { tz: summaryTz }) }),
+    Appointment.countDocuments({ ...base, ...buildDateRangeFilter({ quickDate: "upcoming" }, { tz: summaryTz }), status: { $ne: APPOINTMENT_STATUS.CANCELLED } }),
     Appointment.countDocuments({ ...base, painLevel: { $gte: 8 }, status: { $nin: [APPOINTMENT_STATUS.CANCELLED, APPOINTMENT_STATUS.COMPLETED, APPOINTMENT_STATUS.REVIEW_ELIGIBLE] } }),
     Appointment.countDocuments({ $and: [base, buildAttentionMatch(now)] }),
   ]);
@@ -835,20 +871,50 @@ export const updateAppointmentStatus = asyncHandler(async (req, res) => {
   const allowedTransitions = STATUS_TRANSITIONS[appointment.status] || [];
 
   if (!allowedTransitions.includes(newStatus)) {
-    throw new AppError(
-      `Cannot transition appointment from "${appointment.status}" to "${newStatus}"`,
-      400,
-    );
+    throw appointmentError("INVALID_APPOINTMENT_TRANSITION", { from: appointment.status, to: newStatus },
+      `Cannot transition appointment from "${appointment.status}" to "${newStatus}"`);
   }
+
+  // Payment states are owned by the payment flow (verified gateway capture).
+  // Letting a doctor/admin PUT payment_pending/payment_completed here would
+  // unlock consultation without any payment ever being made.
+  if ([APPOINTMENT_STATUS.PAYMENT_PENDING, APPOINTMENT_STATUS.PAYMENT_COMPLETED].includes(newStatus)) {
+    throw appointmentError("ACTION_NOT_ALLOWED", { to: newStatus }, "Payment status can only be changed by the payment flow.");
+  }
+
+  // Backend-authoritative time/state/actor matrix (UI buttons are advisory only).
+  const ACTION_FOR_STATUS = {
+    [APPOINTMENT_STATUS.APPROVED]: ACTION.APPROVE,
+    [APPOINTMENT_STATUS.CONSULTATION_STARTED]: ACTION.START_CONSULTATION,
+    [APPOINTMENT_STATUS.CONSULTATION_COMPLETED]: ACTION.COMPLETE_CONSULTATION,
+    [APPOINTMENT_STATUS.COMPLETED]: ACTION.FINALIZE,
+  };
+  const policyAction = ACTION_FOR_STATUS[newStatus];
+  if (!policyAction) {
+    throw appointmentError("ACTION_NOT_ALLOWED", { to: newStatus });
+  }
+  const rules = await getAppointmentRules();
+  const now = new Date();
+  if (newStatus === APPOINTMENT_STATUS.CONSULTATION_STARTED && appointment.paymentStatus !== PAYMENT_STATUS.PAID) {
+    throw appointmentError("PAYMENT_REQUIRED");
+  }
+  await guardAppointmentAction({
+    appointment,
+    action: policyAction,
+    actorRole: req.user.role === ROLES.SUPER_ADMIN ? "super_admin" : "doctor",
+    now,
+    rules,
+  });
 
   // Guard: cannot mark completed unless payment is paid
   if (
     newStatus === APPOINTMENT_STATUS.CONSULTATION_COMPLETED &&
     appointment.paymentStatus !== PAYMENT_STATUS.PAID
   ) {
-    throw new AppError("Appointment payment must be completed before ending consultation", 400);
+    throw appointmentError("PAYMENT_REQUIRED", {}, "Appointment payment must be completed before ending consultation");
   }
 
+  const extraSet = {};
   // When approving: set payment status to pending
   if (newStatus === APPOINTMENT_STATUS.APPROVED) {
     // Re-validate against the doctor's CURRENT calendar. The slot itself was
@@ -877,8 +943,7 @@ export const updateAppointmentStatus = asyncHandler(async (req, res) => {
         409,
       );
     }
-
-    appointment.paymentStatus = PAYMENT_STATUS.PENDING;
+    extraSet.paymentStatus = PAYMENT_STATUS.PENDING;
   }
 
   // Clinical safety (Step 8): don't let a consultation be finalized as
@@ -902,20 +967,38 @@ export const updateAppointmentStatus = asyncHandler(async (req, res) => {
     }
   }
 
-  const previousStatus = appointment.status;
-  appointment.status = newStatus;
-  if (req.body.notes !== undefined) appointment.notes = req.body.notes;
-  appendAppointmentHistory({
-    appointment,
-    status: newStatus,
-    fromStatus: previousStatus,
-    actorId: req.user._id,
-    actorRole: req.user.role || "admin",
-    reason: req.body.reason || "",
-  });
-  await appointment.save();
+  // Persisted operational timestamps (the ONLY source for delay/waiting math).
+  if (newStatus === APPOINTMENT_STATUS.CONSULTATION_STARTED) {
+    extraSet["visit.state"] = VISIT_STATE.IN_CONSULTATION;
+    extraSet["visit.consultationStartedAt"] = now;
+  }
+  if (newStatus === APPOINTMENT_STATUS.CONSULTATION_COMPLETED) {
+    extraSet["visit.state"] = VISIT_STATE.COMPLETED;
+    extraSet["visit.consultationEndedAt"] = now;
+  }
+  if (req.body.notes !== undefined) extraSet.notes = req.body.notes;
 
-  const populatedAppointment = await appointment.populate([
+  const previousStatus = appointment.status;
+  // ATOMIC: only succeeds if the appointment is STILL in `previousStatus`.
+  // A concurrent scheduler expiry / cancel / payment wins cleanly instead of
+  // being overwritten by this request's stale in-memory document.
+  const transitioned = await atomicTransition({
+    appointmentId: appointment._id,
+    fromStatuses: [previousStatus],
+    extraFilter: newStatus === APPOINTMENT_STATUS.CONSULTATION_STARTED ? { paymentStatus: PAYMENT_STATUS.PAID } : {},
+    set: { status: newStatus, ...extraSet },
+    history: {
+      status: newStatus,
+      fromStatus: previousStatus,
+      actorId: req.user._id,
+      actorRole: req.user.role === ROLES.SUPER_ADMIN ? "super_admin" : req.user.role || "admin",
+      reason: req.body.reason || "",
+      event: newStatus === APPOINTMENT_STATUS.CONSULTATION_STARTED ? "consultation_started" : undefined,
+    },
+  });
+  const appointmentFresh = transitioned;
+
+  const populatedAppointment = await appointmentFresh.populate([
     { path: "patientId", select: "name email role" },
     {
       path: "doctorId",
@@ -937,6 +1020,11 @@ export const updateAppointmentStatus = asyncHandler(async (req, res) => {
   }
 
   try { await appointmentEmitter.statusUpdated(populatedAppointment); } catch (error) { logger.warn("appointmentEmitter.statusUpdated failed", { message: error?.message, appointmentId: populatedAppointment?._id }); }
+
+  // Doctor delay: derived from persisted timestamps only; notifies later patients.
+  if (newStatus === APPOINTMENT_STATUS.CONSULTATION_STARTED) {
+    try { await notifyDelayToWaitingPatients({ startedAppointment: populatedAppointment, rules }); } catch (error) { logger.warn("delay notification failed (state already persisted)", { message: error?.message, appointmentId: populatedAppointment?._id }); }
+  }
 
   // Phase A6.2.3 — Automation Studio real trigger.
   if (newStatus === APPOINTMENT_STATUS.COMPLETED) {
@@ -989,11 +1077,16 @@ export const cancelAppointment = asyncHandler(async (req, res) => {
     cancelledBy = "patient";
   }
 
+  // Backend-authoritative: a patient cannot cancel once the slot has started;
+  // nobody can cancel a started/finished/cancelled appointment.
+  await guardAppointmentAction({ appointment, action: ACTION.CANCEL, actorRole: cancelledBy });
+
   const { appointment: cancelledAppointment, refundRequestCreated } = await cancelAppointmentCore({
     appointment,
     reason: req.body.reason,
     cancelledBy,
     actorId: req.user._id,
+    tz: await getHospitalTimezone(),
   });
 
   res.status(200).json({
@@ -1044,6 +1137,12 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
     rescheduledBy = "admin";
   }
 
+  await guardAppointmentAction({
+    appointment,
+    action: ACTION.RESCHEDULE,
+    actorRole: rescheduledBy === "admin" ? "super_admin" : rescheduledBy,
+  });
+
   if (!CANCELLABLE_STATUSES.includes(appointment.status)) {
     throw new AppError(
       `Appointment cannot be rescheduled — current status is "${appointment.status}". ` +
@@ -1093,27 +1192,55 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
   const fromDate = appointment.date;
   const fromTimeSlot = appointment.timeSlot;
 
-  appointment.rescheduleHistory = appointment.rescheduleHistory || [];
-  appointment.rescheduleHistory.push({
-    fromDate,
-    fromTimeSlot,
-    toDate: newDate,
-    toTimeSlot: newTimeSlot,
-    rescheduledBy,
-    reason: req.body.reason || "",
+  await assertPatientHasNoOverlap({
+    patientId: appointment.patientId,
+    familyMemberId: appointment.familyMemberId,
+    date: newDate,
+    timeSlot: newTimeSlot,
+    excludeAppointmentId: appointment._id,
   });
-  appendAppointmentHistory({
-    appointment,
+
+  {
+    const rules = await getAppointmentRules();
+    await assertTravelFeasible({
+      doctorId: doctorDoc._id, date: newDate, timeSlot: newTimeSlot, consultationMode: appointment.consultationMode,
+      visitAddress: appointment.visitAddress, excludeAppointmentId: appointment._id, tz: rules.timezone, bufferMinutes: rules.travelBufferMinutes,
+    });
+  }
+
+  // ATOMIC reschedule: conditional on the appointment STILL being in the exact
+  // state/slot we validated (no stale `.save()`), history appended in the same
+  // write. The partial unique index remains the final double-booking guard.
+  const rescheduleEntry = { fromDate, fromTimeSlot, toDate: newDate, toTimeSlot: newTimeSlot, rescheduledBy, reason: req.body.reason || "", at: new Date() };
+  const moveFilter = {
+    _id: appointment._id,
     status: appointment.status,
-    fromStatus: appointment.status,
-    actorId: req.user._id,
-    actorRole: rescheduledBy,
-    reason: `Rescheduled from ${fromDate.toISOString()} ${fromTimeSlot} to ${newDate.toISOString()} ${newTimeSlot}${req.body.reason ? ` — ${req.body.reason}` : ""}`,
-  });
-  appointment.date = newDate;
-  appointment.timeSlot = newTimeSlot;
+    date: fromDate,
+    timeSlot: fromTimeSlot,
+    "visit.state": { $in: [VISIT_STATE.NOT_ARRIVED, VISIT_STATE.MISSED, null] },
+  };
+  let moved;
   try {
-    await appointment.save();
+    moved = await Appointment.findOneAndUpdate(
+      moveFilter,
+      {
+        $set: { date: newDate, timeSlot: newTimeSlot, "visit.state": VISIT_STATE.NOT_ARRIVED },
+        $unset: { "resolution.flaggedAt": "", "visit.delayNotifiedMinutes": "", impact: "" },
+        $push: {
+          rescheduleHistory: rescheduleEntry,
+          statusHistory: {
+            status: appointment.status,
+            fromStatus: appointment.status,
+            actorId: req.user._id,
+            actorRole: rescheduledBy === "admin" ? "super_admin" : rescheduledBy,
+            event: "rescheduled",
+            reason: `Rescheduled from ${fromDate.toISOString().slice(0, 10)} ${fromTimeSlot} to ${newDate.toISOString().slice(0, 10)} ${newTimeSlot}${req.body.reason ? ` — ${req.body.reason}` : ""}`,
+            at: new Date(),
+          },
+        },
+      },
+      { returnDocument: "after" },
+    );
   } catch (error) {
     // Same real race-condition guarantee as createAppointment — the
     // conflicting-appointment check above is best-effort, the unique
@@ -1125,8 +1252,19 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
     }
     throw error;
   }
+  if (!moved) throw appointmentError("APPOINTMENT_STATE_CHANGED");
 
-  const populatedAppointment = await appointment.populate([
+  // Concurrency-safe daily cap on the TARGET day: undo the move if exceeded.
+  await verifyDailyCapacityAfterWrite({
+    doctorId: doctorDoc._id,
+    date: newDate,
+    rollback: () => Appointment.updateOne(
+      { _id: appointment._id, date: newDate, timeSlot: newTimeSlot },
+      { $set: { date: fromDate, timeSlot: fromTimeSlot }, $pop: { rescheduleHistory: 1, statusHistory: 1 } },
+    ),
+  });
+
+  const populatedAppointment = await moved.populate([
     { path: "patientId", select: "name email role" },
     {
       path: "doctorId",
@@ -1135,6 +1273,13 @@ export const rescheduleAppointment = asyncHandler(async (req, res) => {
     },
   ]);
 
+  await queueAppointmentEmails({
+    appointmentId: populatedAppointment._id,
+    event: "rescheduled",
+    version: `${newDate.toISOString().slice(0, 10)}_${newTimeSlot}`,
+    extra: { from: `${new Date(fromDate).toISOString().slice(0, 10)}, ${fromTimeSlot}` },
+    skip: rescheduledBy === "patient" ? ["patient"] : rescheduledBy === "doctor" ? ["doctor"] : [],
+  });
   try {
     await appointmentEmitter.rescheduled(populatedAppointment, { fromDate, fromTimeSlot, rescheduledBy });
   } catch (error) {

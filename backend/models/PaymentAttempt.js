@@ -6,10 +6,12 @@ const paymentAttemptSchema = new mongoose.Schema({
   gateway: { type: String, required: true },
   gatewayOrderId: { type: String, required: true, index: true },
   gatewayPaymentId: { type: String, index: true, sparse: true },
-  status: { type: String, enum: ["created", "checkout_started", "authorized", "captured", "failed", "cancelled", "expired", "verification_pending"], default: "created", index: true },
+  status: { type: String, enum: ["created", "checkout_started", "authorized", "captured", "failed", "cancelled", "expired", "verification_pending", "superseded"], default: "created", index: true },
   amount: { type: Number, required: true, min: 0 },
   currency: { type: String, required: true, uppercase: true },
   failureReason: { type: String, maxlength: 500 },
+  // Phase 01: provider-reported failure code (never raw provider payloads).
+  failureCode: { type: String, maxlength: 100 },
   startedAt: Date,
   completedAt: Date,
   metadata: { type: mongoose.Schema.Types.Mixed, default: {} },

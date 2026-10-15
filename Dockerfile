@@ -1,6 +1,6 @@
 # --- Frontend production image -------------------------------------------
 # Build stage: compile the Vite SPA.
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund

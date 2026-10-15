@@ -99,7 +99,7 @@ function InvoiceDetailWorkspace({ invoiceId, onViewPatient, onViewAppointment, o
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" size="sm" isLoading={isDownloading} onClick={download} disabled={!invoice.pdfPath}>
+        <Button variant="secondary" size="sm" isLoading={isDownloading} onClick={download} disabled={!(invoice.hasPdf ?? invoice.pdfPath)}>
           <Download size={14} /> Download PDF
         </Button>
         {onViewPayment && invoice.paymentId && (

@@ -28,7 +28,7 @@ function RefundDetailWorkspace({ refundRequestId, onChanged, onViewPayment, onVi
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [dialogMode, setDialogMode] = useState(null); // "approve" | "reject" | "retry" | null
+  const [dialogMode, setDialogMode] = useState(null); // "approve" | "reject" | "retry" | "reconcile" | null
 
   const loadDetail = async () => {
     setLoading(true);
@@ -137,6 +137,11 @@ function RefundDetailWorkspace({ refundRequestId, onChanged, onViewPayment, onVi
         {refundRequest.status === "failed" && (
           <Button variant="secondary" size="sm" onClick={() => setDialogMode("retry")}>
             Retry Refund
+          </Button>
+        )}
+        {["gateway_processing", "reconciliation_required"].includes(refundRequest.refundState) && (
+          <Button variant="secondary" size="sm" onClick={() => setDialogMode("reconcile")}>
+            Check With Provider
           </Button>
         )}
         {onViewPayment && (

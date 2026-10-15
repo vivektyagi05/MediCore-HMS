@@ -2,6 +2,7 @@ import crypto from "crypto";
 import Razorpay from "razorpay";
 import { env } from "../config/env.js";
 import { AppError } from "../middleware/errorMiddleware.js";
+import { toPaise } from "../payments/money.js";
 
 let razorpayClient;
 
@@ -35,6 +36,13 @@ export const razorpayService = {
     });
   },
 
+  // Phase 01: deterministic-receipt lookup so an ambiguous order creation (timeout)
+  // is checked at the provider instead of being blindly repeated.
+  async findOrderByReceipt({ receipt }) {
+    const result = await getRazorpayClient().orders.all({ receipt, count: 5 });
+    return (result?.items || []).find((order) => order.receipt === receipt) || null;
+  },
+
   async fetchPayment({ paymentId }) {
     const client = getRazorpayClient();
     return client.payments.fetch(paymentId);
@@ -56,8 +64,17 @@ export const razorpayService = {
     const client = getRazorpayClient();
 
     return client.payments.refund(paymentId, {
-      amount: Math.round(amount * 100),
+      amount: toPaise(amount),
       notes,
     });
+  },
+
+  async listPaymentRefunds({ paymentId }) {
+    const result = await getRazorpayClient().payments.fetchMultipleRefund(paymentId, { count: 100 });
+    return result?.items || [];
+  },
+
+  async fetchRefund({ refundId }) {
+    return getRazorpayClient().refunds.fetch(refundId);
   },
 };

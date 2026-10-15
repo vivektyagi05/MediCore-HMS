@@ -28,9 +28,21 @@ export const paymentGateway = {
   mode() { return adapter().mode || PAYMENT_GATEWAY_MODES.RAZORPAY; },
   keyId() { return adapter().keyId || null; },
   createOrder(args) { return adapter().createOrder(args); },
+  findOrderByReceipt(args) {
+    if (!adapter().findOrderByReceipt) return Promise.resolve(null);
+    return adapter().findOrderByReceipt(args);
+  },
   fetchPayment(args) { return adapter().fetchPayment(args); },
   verifyPaymentSignature(args) { return adapter().verifyPaymentSignature(args); },
   refundPayment(args) { return adapter().refundPayment(args); },
+  listPaymentRefunds(args) {
+    if (!adapter().listPaymentRefunds) throw new Error("The configured gateway cannot list refunds");
+    return adapter().listPaymentRefunds(args);
+  },
+  fetchRefund(args) {
+    if (!adapter().fetchRefund) throw new Error("The configured gateway cannot look up refunds");
+    return adapter().fetchRefund(args);
+  },
   buildPaymentResponse(...args) {
     if (!adapter().buildPaymentResponse) throw new Error("The configured gateway does not support browser response generation");
     return adapter().buildPaymentResponse(...args);

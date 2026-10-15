@@ -39,6 +39,6 @@ assert.equal(unique.size, 5, "each lifecycle event must have a distinct recipien
 const practice = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../realtime/practiceEmitter.js", import.meta.url), "utf8"));
 assert.doesNotMatch(practice, /verification:\$\{doctorId\}:\$\{status\}/);
 const model = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../models/NotificationDelivery.js", import.meta.url), "utf8"));
-assert.match(model, /notificationDeliverySchema\.index\(\{ eventKey: 1, recipientId: 1 \}, \{ unique: true, sparse: true \}\)/);
+assert.match(model, /notificationDeliverySchema\.index\(\s*\{ eventKey: 1, recipientId: 1 \},\s*\{ unique: true, name: "uniq_notification_event_recipient", partialFilterExpression: \{ eventKey: \{ \$type: "string" \} \} \},?\s*\)/);
 
 console.log("PASS notificationLifecycleIdempotency.test.mjs");

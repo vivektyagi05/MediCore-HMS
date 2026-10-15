@@ -45,11 +45,12 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
       let res;
       if (mode === "approve") res = await refundApi.approveRequest(refundRequest._id, note ? { note } : {});
       else if (mode === "reject") res = await refundApi.rejectRequest(refundRequest._id, { note: note.trim() });
+      else if (mode === "reconcile") res = await refundApi.reconcileRequest(refundRequest._id);
       else res = await refundApi.retryRequest(refundRequest._id);
 
       toast.success(
         res?.message ||
-          (mode === "approve" ? "Refund processed successfully" : mode === "reject" ? "Refund request rejected" : "Refund retried"),
+          (mode === "approve" ? "Refund processed successfully" : mode === "reject" ? "Refund request rejected" : mode === "reconcile" ? "Refund checked with the payment provider" : "Refund retried"),
       );
       setNote("");
       onDone?.();
@@ -58,6 +59,8 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
         getApiErrorMessage(err) ||
           (mode === "approve"
             ? "Refund could not be processed. No refund was recorded."
+            : mode === "reconcile"
+              ? "The payment provider could not be queried. Try again shortly."
             : mode === "retry"
               ? "Refund retry failed. No refund was recorded."
               : "Refund request could not be rejected."),
@@ -68,7 +71,7 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
   };
 
   const title =
-    mode === "approve" ? "Approve refund" : mode === "reject" ? "Reject refund request" : "Retry refund";
+    mode === "approve" ? "Approve refund" : mode === "reject" ? "Reject refund request" : mode === "reconcile" ? "Check refund with provider" : "Retry refund";
 
   return (
     <Modal
@@ -111,6 +114,18 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
           </div>
         )}
 
+        {mode === "reconcile" && (
+          <div className="rounded-card border border-amber-200 bg-amber-50 p-3 text-sm">
+            <p className="flex items-start gap-2 font-bold text-amber-900">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              Confirm refund of {formatCurrency(refundRequest.amount, currency)} with the payment provider?
+            </p>
+            <p className="mt-2 text-xs text-amber-700">
+              The provider is asked for the real status. Nothing is retried, so there is no risk of refunding twice.
+            </p>
+          </div>
+        )}
+
         {mode === "reject" && (
           <p className="text-sm text-slate-600">
             Rejecting {formatCurrency(refundRequest.amount, currency)}. The patient will be notified with the reason
@@ -140,7 +155,7 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
             Back
           </Button>
           <Button variant={mode === "reject" ? "danger" : "success"} isLoading={loading} onClick={handleConfirm}>
-            {mode === "approve" ? "Approve Refund" : mode === "reject" ? "Reject Refund" : "Retry Refund"}
+            {mode === "approve" ? "Approve Refund" : mode === "reject" ? "Reject Refund" : mode === "reconcile" ? "Check With Provider" : "Retry Refund"}
           </Button>
         </div>
       </div>

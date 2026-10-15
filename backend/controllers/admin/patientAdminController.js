@@ -28,6 +28,7 @@ import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { userHasPermission } from "../../middleware/adminMiddleware.js";
 import { downloadFile } from "../../utils/fileDownload.js";
+import { sendStoredPdf } from "../../services/pdfDocumentStore.js";
 import {
   buildPatientAggregates,
   computeAttentionItems,
@@ -442,6 +443,6 @@ export const downloadPatientReportAdmin = asyncHandler(async (req, res) => {
 export const downloadPatientPrescriptionAdmin = asyncHandler(async (req, res) => {
   const prescription = await Prescription.findById(req.params.prescriptionId).lean();
   if (!prescription) throw new AppError("Prescription not found", 404);
-  if (!prescription.pdfPath) throw new AppError("No PDF is on file for this prescription", 404);
-  downloadFile(res, prescription.pdfPath, `prescription-${prescription._id}.pdf`);
+  if (!prescription.pdfStorageKey && !prescription.pdfPath) throw new AppError("No PDF is on file for this prescription", 404);
+  await sendStoredPdf(res, { storageKey: prescription.pdfStorageKey, legacyPath: prescription.pdfPath, legacyCategory: "prescriptions", fileName: `prescription-${prescription._id}.pdf`, notFoundMessage: "No PDF is on file for this prescription" });
 });

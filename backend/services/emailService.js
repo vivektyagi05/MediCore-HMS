@@ -220,6 +220,11 @@ const sendMail = async ({ to, subject, html, attachments = [] }) => {
 };
 
 export const emailService = {
+  // Generic transactional send used by the durable outbox (services/emailOutboxService.js).
+  // Throws Brevo* errors; the outbox records only the error CATEGORY, never provider internals.
+  sendTransactional({ to, subject, html }) {
+    return sendMail({ to, subject, html });
+  },
   // Phase A5.1 addition — lets Mission Control report the platform's real
   // email delivery status instead of a fabricated "online" indicator.
   isConfigured() {

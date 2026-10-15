@@ -6,6 +6,8 @@ export const WITHDRAWAL_STATES = Object.freeze({
   REQUESTED: "requested",
   RESERVED: "reserved",
   PROCESSING: "processing",
+  MANUAL_PENDING: "manual_pending",
+  MANUAL_COMPLETED: "manual_completed",
   COMPLETED: "completed",
   FAILED: "failed",
   RETRY_REQUIRED: "retry_required",
@@ -15,14 +17,19 @@ export const WITHDRAWAL_STATES = Object.freeze({
 
 export const WITHDRAWAL_TRANSITIONS = Object.freeze({
   requested: ["reserved", "failed", "cancelled"],
-  reserved: ["processing", "failed", "retry_required", "cancelled"],
-  processing: ["completed", "failed", "reconciliation_required"],
+  reserved: ["manual_pending", "processing", "failed", "retry_required", "cancelled"],
+  manual_pending: ["manual_completed", "failed", "reconciliation_required"],
+  manual_completed: ["reconciliation_required"],
+  processing: ["completed", "manual_completed", "failed", "reconciliation_required"],
   completed: ["reconciliation_required"],
   failed: ["retry_required", "reconciliation_required"],
-  retry_required: ["reserved", "processing", "reconciliation_required", "cancelled"],
-  reconciliation_required: ["completed", "failed", "retry_required"],
+  retry_required: ["reserved", "manual_pending", "processing", "reconciliation_required", "cancelled"],
+  reconciliation_required: ["manual_completed", "completed", "failed", "retry_required"],
   cancelled: [],
 });
+
+// States in which a withdrawal holds a claim on the doctor's balance.
+export const RESERVATION_HOLDING_STATES = Object.freeze(["reserved", "manual_pending", "processing", "retry_required", "reconciliation_required"]);
 
 export const assertWithdrawalTransition = (from, to) => {
   if (from === to) return true;

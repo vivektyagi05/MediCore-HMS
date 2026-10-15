@@ -55,4 +55,30 @@ export const appointmentApi = {
       .then((res) => res.data);
   }
 
+  ,
+  // ── Operational lifecycle (backend-authoritative) ──
+  getAllowedActions(id) {
+    return apiClient.get(`/appointments/${id}/actions`).then((res) => res.data);
+  },
+  checkIn(id) {
+    return apiClient.post(`/appointments/${id}/check-in`).then((res) => res.data);
+  },
+  callPatient(id) {
+    return apiClient.post(`/appointments/${id}/call`).then((res) => res.data);
+  },
+  markPatientNoShow(id, note) {
+    return apiClient.post(`/appointments/${id}/no-show`, { note }).then((res) => res.data);
+  },
+  reportDoctorNoShow(id) {
+    return apiClient.post(`/appointments/${id}/report-doctor-no-show`).then((res) => res.data);
+  },
+  resolveAppointment(id, { outcome, note }) {
+    return apiClient.post(`/appointments/${id}/resolve`, { outcome, note }).then((res) => res.data);
+  },
+  getTodayClinic() {
+    return apiClient.get("/appointments/doctor/today-clinic").then((res) => res.data);
+  },
+  getOperationsOverview() {
+    return apiClient.get("/appointments/admin/operations").then((res) => res.data);
+  },
 };

@@ -23,6 +23,7 @@ const validProd = () => ({
   STORAGE_DRIVER: "s3",
   STORAGE_S3_BUCKET: "medicore-prod",
   STORAGE_S3_REGION: "ap-south-1",
+  SERVICE_ROLE: "web",
 });
 
 assert.deepStrictEqual(validateProductionConfig(validProd()), [], "a fully specified production env must have zero violations");

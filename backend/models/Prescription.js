@@ -40,6 +40,7 @@ const prescriptionSchema = new mongoose.Schema(
     // on every existing document; no consumer that doesn't read it is
     // affected.
     followUpCancelledAt: { type: Date },
+    pdfStorageKey: String, // N-007: storageService key; pdfPath is legacy
     pdfPath: String,
     status: { type: String, enum: ["active", "void"], default: "active", index: true },
   },

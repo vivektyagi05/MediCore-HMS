@@ -27,6 +27,9 @@ export const registerProcessSafety = ({
   getServer,
   getIO,
   disconnectDB,
+  // N-002: awaited (bounded by forceExitMs) before sockets/DB close -- used to
+  // stop the scheduler and let in-flight jobs finish or be fenced as timed_out.
+  beforeShutdown,
   forceExitMs = DEFAULT_FORCE_EXIT_MS,
   exit = (code) => process.exit(code),
 } = {}) => {
@@ -54,18 +57,22 @@ export const registerProcessSafety = ({
         .finally(() => exit(1));
     };
 
-    try {
-      getIO?.()?.close();
-    } catch (error) {
-      logger.error("Error closing Socket.IO server during shutdown", { message: error?.message });
-    }
-
-    const server = getServer?.();
-    if (server) {
-      server.close(finish);
-    } else {
-      finish();
-    }
+    Promise.resolve()
+      .then(() => beforeShutdown?.())
+      .catch((error) => logger.error("beforeShutdown hook failed", { message: error?.message }))
+      .finally(() => {
+        try {
+          getIO?.()?.close();
+        } catch (error) {
+          logger.error("Error closing Socket.IO server during shutdown", { message: error?.message });
+        }
+        const server = getServer?.();
+        if (server) {
+          server.close(finish);
+        } else {
+          finish();
+        }
+      });
   };
 
   process.on("uncaughtException", (error) => {
@@ -98,18 +105,22 @@ export const registerProcessSafety = ({
         .finally(() => exit(0));
     };
 
-    try {
-      getIO?.()?.close();
-    } catch {
-      // best-effort
-    }
-
-    const server = getServer?.();
-    if (server) {
-      server.close(finish);
-    } else {
-      finish();
-    }
+    Promise.resolve()
+      .then(() => beforeShutdown?.())
+      .catch((error) => logger.error("beforeShutdown hook failed", { message: error?.message }))
+      .finally(() => {
+        try {
+          getIO?.()?.close();
+        } catch {
+          // best-effort
+        }
+        const server = getServer?.();
+        if (server) {
+          server.close(finish);
+        } else {
+          finish();
+        }
+      });
   };
 
   process.on("SIGTERM", () => gracefulSignalShutdown("SIGTERM"));

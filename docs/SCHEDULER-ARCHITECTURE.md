@@ -22,6 +22,7 @@ what each Cron Job / crontab entry should be configured to run.
 | Job | Command | Suggested schedule | What it does |
 |---|---|---|---|
 | Expire stale payment windows | `node cron/expirePaymentWindows.js` | every 5 minutes | Cancels appointments left in `payment_pending` past their payment window. |
+| Process durable email outbox | `node cron/processEmailOutbox.js` | every 1-2 minutes | Claims queued/retrying `EmailDelivery` rows atomically and sends via Brevo with backoff. Without this job queued emails are never sent. |
 | Payment/refund/payout reconciliation | `node cron/reconciliationCron.js` | every 15 minutes | Cross-checks payment state against Razorpay, repairs incomplete payments where safe. |
 | Retry failed payments | `node cron/retryFailedPayments.js` | every 15 minutes | Retries payments eligible for a retry attempt. |
 | Subscription renewals | `node cron/subscriptionRenewals.js` | daily, once (e.g. 02:00 UTC) | Renews doctor subscriptions whose `nextBillingAt` has passed. |

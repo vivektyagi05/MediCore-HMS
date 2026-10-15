@@ -1,5 +1,6 @@
 import { connectDB } from "../config/db.js";
 import Subscription from "../models/Subscription.js";
+import { subscriptionService } from "../payments/subscriptionService.js";
 import { logger } from "../utils/logger.js";
 import { practiceEmitter } from "../realtime/practiceEmitter.js";
 import { trackRun } from "../utils/cronRunTracker.js";
@@ -9,49 +10,44 @@ export const runSubscriptionRenewals = async () => {
   return trackRun("subscriptionRenewals", () => runSubscriptionRenewalsBody());
 };
 
+// F-023 / A1: this job NEVER extends a subscription and never counts a "missed
+// renewal" that was not actually attempted. For each due, auto-renewing,
+// currently-paid subscription it opens a provider order (atomic claim in
+// subscriptionService.openRenewalOrder) that the doctor must pay. Paid access
+// continues only until currentPeriodEnd; an unpaid renewal then expires.
 const runSubscriptionRenewalsBody = async () => {
   const dueSubscriptions = await Subscription.find({
-    status: { $in: ["active", "past_due"] },
+    status: "active",
     autoRenew: true,
     nextBillingAt: { $lte: new Date() },
-  }).limit(100);
+  }).select("_id").sort({ _id: 1 }).limit(100).lean();
 
-  // BUGFIX: previously a subscription that kept failing to renew stayed
-  // "past_due" forever with no resolution — an unresolved workflow state.
-  // After this many consecutive missed renewal windows, cancel it instead
-  // of leaving it stuck, using the same fields subscriptionService.cancel()
-  // already uses.
-  const MAX_FAILED_RENEWALS_BEFORE_CANCEL = 3;
-
-  let cancelledCount = 0;
-  for (const subscription of dueSubscriptions) {
-    subscription.failedRenewalCount += 1;
-
-    if (subscription.failedRenewalCount >= MAX_FAILED_RENEWALS_BEFORE_CANCEL) {
-      subscription.status = "cancelled";
-      subscription.autoRenew = false;
-      cancelledCount += 1;
-    } else {
-      subscription.status = "past_due";
-    }
-
-    await subscription.save();
-
-    // BUGFIX (Phase D4, Step 8): this transition previously never notified
-    // anyone -- a doctor's subscription could silently go past_due or get
-    // cancelled with zero realtime signal, discovering it only if they
-    // happened to check the billing page.
+  let ordersOpened = 0;
+  let orderErrors = 0;
+  for (const { _id } of dueSubscriptions) {
     try {
+      const opened = await subscriptionService.openRenewalOrder(_id);
+      if (!opened) continue; // another worker claimed it
+      ordersOpened += 1;
       await practiceEmitter.subscriptionUpdated({
-        doctorUserId: subscription.userId,
-        subscriptionId: subscription._id,
-        status: subscription.status,
-        planName: subscription.planName,
-      });
+        doctorUserId: opened.userId,
+        subscriptionId: opened._id,
+        status: opened.status,
+        planName: opened.planName,
+      }).catch((error) => logger.warn("practiceEmitter.subscriptionUpdated failed in renewal cron", { message: error?.message }));
     } catch (error) {
-      logger.warn("practiceEmitter.subscriptionUpdated failed in renewal cron", { message: error?.message });
+      orderErrors += 1;
+      logger.error("Renewal order creation failed; will retry next run", { subscriptionId: String(_id), message: error?.message });
     }
   }
+
+  // Unpaid renewals whose paid period is over lose entitlement. Conditional update,
+  // so a payment that lands concurrently (-> active) is never overwritten.
+  const expiredResult = await Subscription.updateMany(
+    { status: { $in: ["renewal_pending", "renewal_failed", "past_due"] }, currentPeriodEnd: { $lte: new Date() } },
+    { $set: { status: "expired", autoRenew: false }, $inc: { failedRenewalCount: 1 }, $push: { stateHistory: { from: "renewal_unpaid", to: "expired", source: "cron", reason: "Renewal not paid by end of paid period", at: new Date() } } },
+  );
+  const expiredCount = expiredResult.modifiedCount || 0;
 
   // Renewal reminders (Step 8): previously nothing warned a doctor their
   // subscription was about to renew/charge. This looks 3 days ahead of
@@ -81,11 +77,9 @@ const runSubscriptionRenewalsBody = async () => {
   }
 
   logger.info("Subscription renewal cron completed", {
-    due: dueSubscriptions.length,
-    cancelledAfterMaxRetries: cancelledCount,
-    remindersSent: upcomingRenewals.length,
+    due: dueSubscriptions.length, ordersOpened, orderErrors, expiredUnpaid: expiredCount, remindersSent: upcomingRenewals.length,
   });
-  return { due: dueSubscriptions.length, cancelledAfterMaxRetries: cancelledCount, remindersSent: upcomingRenewals.length };
+  return { due: dueSubscriptions.length, ordersOpened, orderErrors, expiredUnpaid: expiredCount, remindersSent: upcomingRenewals.length };
 };
 
 if (process.argv[1]?.endsWith("subscriptionRenewals.js")) {

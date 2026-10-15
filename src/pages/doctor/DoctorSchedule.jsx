@@ -13,6 +13,7 @@ import Tabs from "../../components/ui/Tabs";
 import EmptyState from "../../components/shared/EmptyState";
 import ScheduleGrid from "../../components/schedule/ScheduleGrid";
 import DoctorScheduleToday from "../../components/schedule/DoctorScheduleToday";
+import TodayClinicPanel from "../../components/schedule/TodayClinicPanel";
 import DoctorScheduleWeek from "../../components/schedule/DoctorScheduleWeek";
 import DoctorScheduleMonth from "../../components/schedule/DoctorScheduleMonth";
 import { useToast } from "../../context/ToastContext";
@@ -157,7 +158,7 @@ function DoctorSchedule() {
 
       <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "today" && <DoctorScheduleToday key={jumpToken} initialDate={jumpDate} />}
+      {activeTab === "today" && <div className="space-y-6"><TodayClinicPanel /><DoctorScheduleToday key={jumpToken} initialDate={jumpDate} /></div>}
 
       {activeTab === "week" && <DoctorScheduleWeek onOpenDay={openDay} />}
 

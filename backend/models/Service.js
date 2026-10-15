@@ -21,7 +21,7 @@ const seoSchema = new mongoose.Schema(
 const serviceSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 120, index: true },
-    slug: { type: String, trim: true, lowercase: true, maxlength: 160, unique: true, sparse: true, index: true },
+    slug: { type: String, trim: true, lowercase: true, maxlength: 160, index: true },
     shortDescription: { type: String, trim: true, maxlength: 320, default: "" },
     description: { type: String, required: true, trim: true, maxlength: 1000 },
     benefits: { type: [String], default: [] },
@@ -56,6 +56,14 @@ const serviceSchema = new mongoose.Schema(
 serviceSchema.index({ title: "text", shortDescription: "text", description: "text", category: "text", benefits: "text", relatedSpecialties: "text" });
 serviceSchema.index({ status: 1, visibility: 1, featured: -1, displayOrder: 1, createdAt: -1 });
 serviceSchema.index({ category: 1, status: 1, visibility: 1 });
+// N-024: was { unique: true, sparse: true }. sparse indexes still index explicit
+// nulls, so a null/duplicate-null row breaks the build or collides later. The
+// partial $type:"string" form indexes only real keys. Explicit name so it can
+// be created additively beside a legacy sparse index (see migration 011).
+serviceSchema.index(
+  { slug: 1 },
+  { unique: true, name: "uniq_service_slug", partialFilterExpression: { slug: { $type: "string" } } },
+);
 
 const Service = mongoose.model("Service", serviceSchema);
 export default Service;

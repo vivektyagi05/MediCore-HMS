@@ -19,7 +19,11 @@ import { notificationEmitter } from "../realtime/notificationEmitter.js";
 import { emitAutomationTrigger } from "../automation-studio/automationEventBus.js";
 import { TRIGGER_TYPES } from "../automation-studio/triggerRegistry.js";
 import { logger } from "../utils/logger.js";
-import { appendAppointmentHistory } from "./appointmentHistoryService.js";
+import { queueAppointmentEmails } from "./appointmentEmailService.js";
+import { atomicTransition } from "./appointmentTransitionService.js";
+import { appointmentError } from "../utils/appointmentErrors.js";
+import { REASON_CODE, VISIT_STATE } from "../constants/appointmentVisitState.js";
+import { resolveAppointmentInstant } from "../utils/hospitalTime.js";
 
 // Throws an AppError with a message that explains WHY, per the mission's
 // "error handling is a product feature" rule — never a bare "cannot cancel".
@@ -41,14 +45,57 @@ export const assertAppointmentCancellable = (appointment) => {
 // function only knows about the appointment-state rules and the real
 // downstream effects (refund request, notification, automation trigger),
 // which must be identical no matter who triggers them.
-export const cancelAppointmentCore = async ({ appointment, reason, cancelledBy, actorId }) => {
-  assertAppointmentCancellable(appointment);
+const SOURCE_BY_ACTOR = { patient: "patient", doctor: "doctor", admin: "super_admin", super_admin: "super_admin", system: "system" };
+const DEFAULT_REASON_CODE = {
+  patient: REASON_CODE.PATIENT_CANCELLED,
+  doctor: REASON_CODE.DOCTOR_CANCELLED,
+  admin: REASON_CODE.ADMIN_CANCELLED,
+  super_admin: REASON_CODE.ADMIN_CANCELLED,
+};
 
-  const previousStatus = appointment.status;
-  appointment.status = APPOINTMENT_STATUS.CANCELLED;
-  appointment.cancelReason = reason || `Cancelled by ${cancelledBy}`;
-  appendAppointmentHistory({ appointment, status: APPOINTMENT_STATUS.CANCELLED, fromStatus: previousStatus, actorId, actorRole: cancelledBy, reason: appointment.cancelReason });
-  await appointment.save();
+// `cancelledBy` ∈ patient | doctor | admin | super_admin | system.
+// `system` cancellations (payment-window expiry, unresolved-appointment
+// expiry, leave/schedule impact) are NEVER attributed to a person: actorId is
+// dropped, actorRole is "system", and a structured reasonCode is mandatory.
+export const cancelAppointmentCore = async ({ appointment: loaded, reason, cancelledBy, actorId, reasonCode, jobRef, tz, extraFilter, autoRefund = true, extraSet = {} }) => {
+  assertAppointmentCancellable(loaded);
+  const isSystem = cancelledBy === "system";
+  if (isSystem && !reasonCode) throw appointmentError("REASON_REQUIRED");
+
+  // ATOMIC: the write only happens if the appointment is STILL in a
+  // cancellable status right now (a concurrent payment/completion wins and
+  // this cancel is rejected instead of overwriting it with stale state).
+  const text = reason || (isSystem ? "Automatically cancelled by the system" : `Cancelled by ${cancelledBy}`);
+  const scheduledInstant = resolveAppointmentInstant(loaded.date, loaded.timeSlot, tz) || undefined;
+  const appointment = await atomicTransition({
+    appointmentId: loaded._id,
+    fromStatuses: CANCELLABLE_STATUSES,
+    extraFilter,
+    set: {
+      status: APPOINTMENT_STATUS.CANCELLED,
+      cancelReason: text,
+      "visit.state": reasonCode === REASON_CODE.MISSED_UNRESOLVED || reasonCode === REASON_CODE.APPOINTMENT_EXPIRED ? VISIT_STATE.EXPIRED : (loaded.visit?.state || VISIT_STATE.NOT_ARRIVED),
+      cancellation: {
+        source: SOURCE_BY_ACTOR[cancelledBy] || "system",
+        reasonCode: reasonCode || DEFAULT_REASON_CODE[cancelledBy] || REASON_CODE.ADMIN_CANCELLED,
+        previousStatus: loaded.status,
+        previousVisitState: loaded.visit?.state || VISIT_STATE.NOT_ARRIVED,
+        scheduledInstant,
+        cancelledAt: new Date(),
+        jobRef,
+      },
+      ...extraSet,
+    },
+    history: {
+      status: APPOINTMENT_STATUS.CANCELLED,
+      fromStatus: loaded.status,
+      actorId: isSystem ? undefined : actorId,
+      actorRole: isSystem ? "system" : cancelledBy,
+      reason: text,
+      reasonCode: reasonCode || DEFAULT_REASON_CODE[cancelledBy],
+      jobRef,
+    },
+  });
 
   // PHASE P10 (Follow-up/Continuity) — the real bug this phase exists to
   // fix: cancelling a follow-up appointment used to leave
@@ -117,7 +164,7 @@ export const cancelAppointmentCore = async ({ appointment, reason, cancelledBy, 
   // Auto-create refund request if payment was already made — identical to
   // the patient path's existing behavior, now shared rather than
   // duplicated for the admin path.
-  if (appointment.paymentStatus === PAYMENT_STATUS.PAID) {
+  if (autoRefund && appointment.paymentStatus === PAYMENT_STATUS.PAID) {
     try {
       const payment = await Payment.findOne({ appointmentId: appointment._id });
       if (payment) {
@@ -165,7 +212,9 @@ export const cancelAppointmentCore = async ({ appointment, reason, cancelledBy, 
           type: "appointment",
           title: appointment.appointmentType === "follow_up" ? "Follow-up appointment cancelled" : "Appointment cancelled",
           message:
-            appointment.appointmentType === "follow_up"
+            isSystem
+              ? `Your appointment on ${new Date(appointment.date).toDateString()} at ${appointment.timeSlot} was automatically cancelled. ${appointment.cancelReason}`
+              : appointment.appointmentType === "follow_up"
               ? `Your follow-up appointment on ${new Date(appointment.date).toDateString()} at ${appointment.timeSlot} was cancelled. Reason: ${appointment.cancelReason}. Your doctor will need to reschedule your follow-up.`
               : `Your appointment on ${new Date(appointment.date).toDateString()} at ${appointment.timeSlot} was cancelled by the clinic. Reason: ${appointment.cancelReason}`,
           entityType: "appointment",
@@ -194,7 +243,9 @@ export const cancelAppointmentCore = async ({ appointment, reason, cancelledBy, 
           type: "appointment",
           title: isFollowUp ? "Follow-up appointment cancelled" : "Appointment cancelled",
           message:
-            cancelledBy === "patient"
+            isSystem
+              ? `Appointment on ${new Date(appointment.date).toDateString()} at ${appointment.timeSlot} was automatically cancelled. ${appointment.cancelReason}`
+              : cancelledBy === "patient"
               ? `${isFollowUp ? "Follow-up appointment" : "Appointment"} on ${new Date(appointment.date).toDateString()} at ${appointment.timeSlot} was cancelled by the patient.${isFollowUp ? " The original follow-up recommendation is back in your Follow-up Queue." : ""}`
               : `Appointment on ${new Date(appointment.date).toDateString()} at ${appointment.timeSlot} was cancelled by the clinic. Reason: ${appointment.cancelReason}`,
           entityType: "appointment",
@@ -224,6 +275,18 @@ export const cancelAppointmentCore = async ({ appointment, reason, cancelledBy, 
       appointmentId: appointment._id,
     });
   }
+
+  // Durable email (outbox) — idempotent per event+recipient; the actor is not
+  // emailed about their own action. Never blocks or fails the cancellation.
+  const emailEvent = reasonCode === REASON_CODE.MISSED_UNRESOLVED || reasonCode === REASON_CODE.APPOINTMENT_EXPIRED ? "expired"
+    : reasonCode === REASON_CODE.DOCTOR_NO_SHOW ? "doctor_no_show"
+    : reasonCode === REASON_CODE.PATIENT_NO_SHOW ? "no_show" : "cancelled";
+  await queueAppointmentEmails({
+    appointmentId: appointment._id,
+    event: emailEvent,
+    extra: { reason: isSystem && emailEvent === "expired" ? undefined : appointment.cancelReason },
+    skip: cancelledBy === "patient" ? ["patient"] : cancelledBy === "doctor" ? ["doctor"] : [],
+  });
 
   await emitAutomationTrigger(TRIGGER_TYPES.APPOINTMENT_CANCELLED, {
     appointmentId: appointment._id,

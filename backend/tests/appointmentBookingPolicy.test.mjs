@@ -42,7 +42,8 @@ console.log("PASS: resolveSlotStartMinutes parses structured slots and safely re
 // ── resolveAppointmentInstant combines date + parsed slot start ─────────
 const day = new Date("2026-09-24T00:00:00.000Z");
 const instant = resolveAppointmentInstant(day, "09:00-09:30");
-assert.equal(instant.toISOString(), "2026-09-24T09:00:00.000Z");
+// Canonical hospital-time contract: slot digits are IST wall-clock (09:00 IST = 03:30Z).
+assert.equal(instant.toISOString(), "2026-09-24T03:30:00.000Z");
 assert.equal(resolveAppointmentInstant(day, "not-a-slot"), null);
 console.log("PASS: resolveAppointmentInstant resolves a real instant, or null for unparseable slots");
 
@@ -54,9 +55,12 @@ assert.throws(
   "Scenario A from the brief: 09:00 must be rejected when server time is already 12:00 the same day",
 );
 // Boundary case from the brief: 11:59 must also be rejected.
-assert.throws(() => assertAppointmentNotInPast(day, "11:59-12:29", serverNowNoon), /already passed/);
+// serverNowNoon = 12:00Z = 17:30 IST. 17:29 IST has passed; exactly 17:30 IST is "at or before now" (rejected); 17:31 is allowed.
+assert.throws(() => assertAppointmentNotInPast(day, "17:29-17:59", serverNowNoon), /already passed/);
+assert.throws(() => assertAppointmentNotInPast(day, "17:30-18:00", serverNowNoon), /already passed/);
+assert.doesNotThrow(() => assertAppointmentNotInPast(day, "17:31-18:01", serverNowNoon));
 // A genuinely future time today (12:30) must be allowed through by this check.
-assert.doesNotThrow(() => assertAppointmentNotInPast(day, "12:30-13:00", serverNowNoon));
+assert.doesNotThrow(() => assertAppointmentNotInPast(day, "18:00-18:30", serverNowNoon));
 // A future date is always fine regardless of time-of-day parsing.
 const tomorrow = new Date("2026-09-25T00:00:00.000Z");
 assert.doesNotThrow(() => assertAppointmentNotInPast(tomorrow, "00:00-00:30", serverNowNoon));

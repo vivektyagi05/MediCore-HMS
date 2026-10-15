@@ -12,6 +12,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # N-001/N-023: one-shot release phase (preflight -> LGD import -> index
+  # migration 011 -> verify). web and worker start only after it exits 0.
+  release:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment: &backend-env
+      MONGO_URI: mongodb://mongo:27017/hms_pro
+      STORAGE_LOCAL_ROOT: /app/backend/storage
+      STORAGE_LOCAL_PERSISTENT: "true"
+    command: ["node", "backend/scripts/release.mjs"]
+    volumes:
+      - backend-storage:/app/backend/storage
+    healthcheck:
+      disable: true
+
   backend:
     build:
       context: .
@@ -20,21 +42,42 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      release:
+        condition: service_completed_successfully
     env_file:
       - ./backend/.env
     environment:
-      MONGO_URI: mongodb://mongo:27017/hms_pro
+      <<: *backend-env
       PORT: 5000
+      SERVICE_ROLE: web          # never runs the scheduler
     ports:
       - "5000:5000"
     volumes:
       - backend-storage:/app/backend/storage
+    # Image HEALTHCHECK probes /api/health/ready (DB + required indexes).
+
+  # N-002: exactly ONE worker owns the financial scheduler. Extra replicas would
+  # still be safe (CronRunLog lease), but there is no reason to run more.
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      release:
+        condition: service_completed_successfully
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *backend-env
+      SERVICE_ROLE: worker
+    command: ["node", "backend/worker.js"]
+    volumes:
+      - backend-storage:/app/backend/storage
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
+      disable: true            # no HTTP port; liveness = process + CronRunLog heartbeats
 
   frontend:
     build:

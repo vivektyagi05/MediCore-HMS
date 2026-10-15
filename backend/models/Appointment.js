@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
 import {
+  VISIT_STATE,
+  VISIT_STATE_VALUES,
+  RESOLUTION_OUTCOME_VALUES,
+} from "../constants/appointmentVisitState.js";
+import {
   ACTIVE_STATUSES,
   APPOINTMENT_STATUS,
   APPOINTMENT_STATUS_VALUES,
@@ -66,6 +71,9 @@ const appointmentSchema = new mongoose.Schema(
       },
 
       paidAt: Date,
+      // Business timestamp: when the appointment entered payment_pending. The
+      // payment-window expiry job measures from THIS (not updatedAt).
+      paymentPendingAt: Date,
 
       // BUGFIX: cancelAppointment sets this, but it was never declared on the
       // schema — Mongoose strict mode silently drops undeclared fields on
@@ -205,11 +213,68 @@ const appointmentSchema = new mongoose.Schema(
           actorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
           actorRole: { type: String, enum: ["patient", "doctor", "admin", "super_admin", "system"] },
           reason: { type: String, trim: true, maxlength: 500, default: "" },
+          // Structured audit (additive): machine reason, operational event
+          // (e.g. "checked_in" — events that change visit state, not status),
+          // and the visit state after the event. SYSTEM actions carry
+          // actorRole "system" and no actorId — never attributed to a person.
+          reasonCode: { type: String, trim: true, maxlength: 60 },
+          event: { type: String, trim: true, maxlength: 60 },
+          visitState: { type: String, enum: [...VISIT_STATE_VALUES, ""] },
+          jobRef: { type: String, trim: true, maxlength: 100 },
           at: { type: Date, default: Date.now },
         }],
         default: [],
       },
       bookingRequestId: { type: String, trim: true, maxlength: 100 },
+
+      // Home-visit destination. Required (server-enforced) when mode is
+      // home_visit; stored ONLY for home visits. No coordinates/ETA exist.
+      visitAddress: {
+        line1: { type: String, trim: true, maxlength: 200 },
+        city: { type: String, trim: true, maxlength: 100 },
+        postalCode: { type: String, trim: true, maxlength: 20 },
+        landmark: { type: String, trim: true, maxlength: 200 },
+      },
+
+      // ── Operational visit state (separate from `status`) ──
+      visit: {
+        state: { type: String, enum: VISIT_STATE_VALUES, default: VISIT_STATE.NOT_ARRIVED },
+        checkedInAt: Date,
+        calledAt: Date,
+        consultationStartedAt: Date, // authoritative actual start (delay = this − scheduled start)
+        consultationEndedAt: Date,
+        noShowAt: Date,
+        delayNotifiedMinutes: { type: Number, min: 0 }, // dedupes delay notifications
+      },
+      // ── Missed-appointment reconciliation ──
+      resolution: {
+        flaggedAt: Date, // set by the lifecycle job when the appointment becomes unresolved
+        resolvedAt: Date,
+        resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        resolvedByRole: { type: String, enum: ["doctor", "super_admin", "system"] },
+        outcome: { type: String, enum: [...RESOLUTION_OUTCOME_VALUES, ""] },
+        note: { type: String, trim: true, maxlength: 500 },
+      },
+      // ── Schedule/leave impact (set when the doctor's calendar changes AFTER
+      // booking; cleared when rescheduled/cancelled or the conflict disappears).
+      // The appointment itself is never altered — it is surfaced and routed
+      // through the normal reschedule/cancel flows.
+      impact: {
+        type: { type: String, enum: ["leave", "schedule"] },
+        referenceId: { type: String, trim: true, maxlength: 100 },
+        reason: { type: String, trim: true, maxlength: 300 },
+        flaggedAt: Date,
+      },
+      // ── Structured cancellation (cancelReason stays as the human text) ──
+      cancellation: {
+        source: { type: String, enum: ["patient", "doctor", "super_admin", "system"] },
+        reasonCode: { type: String, trim: true, maxlength: 60 },
+        previousStatus: { type: String },
+        previousVisitState: { type: String },
+        scheduledInstant: Date,
+        cancelledAt: Date,
+        jobRef: { type: String, trim: true, maxlength: 100 },
+      },
   },
   {
     timestamps: true,
@@ -222,9 +287,13 @@ const appointmentSchema = new mongoose.Schema(
   },
 );
 
+// N-024: was { unique: true, sparse: true }. sparse indexes still index explicit
+// nulls, so a null/duplicate-null row breaks the build or collides later. The
+// partial $type:"string" form indexes only real keys. Explicit name so it can
+// be created additively beside a legacy sparse index (see migration 011).
 appointmentSchema.index(
   { bookingRequestId: 1 },
-  { unique: true, sparse: true },
+  { unique: true, name: "uniq_appointment_booking_request", partialFilterExpression: { bookingRequestId: { $type: "string" } } },
 );
 
 appointmentSchema.index(
@@ -244,6 +313,12 @@ appointmentSchema.index(
     },
   },
 );
+
+// Lifecycle job query support: unresolved-by-date scans are bounded by
+// (status, date) and never walk the whole collection.
+appointmentSchema.index({ status: 1, date: 1 });
+appointmentSchema.index({ doctorId: 1, date: 1, "visit.state": 1 });
+appointmentSchema.index({ status: 1, updatedAt: 1 });
 
 const Appointment = mongoose.model("Appointment", appointmentSchema);
 

@@ -27,6 +27,16 @@ export const STORAGE_DRIVERS = Object.freeze({
   S3: "s3",
 });
 
+// N-002: process topology. "web" serves HTTP only, "worker" runs the
+// scheduler only (backend/worker.js), "all" does both (single-instance /
+// development). Production must choose explicitly -- a silently disabled
+// scheduler is the exact failure this guards against.
+export const SERVICE_ROLES = Object.freeze({
+  WEB: "web",
+  WORKER: "worker",
+  ALL: "all",
+});
+
 const PLACEHOLDER_SECRETS = [
   "changeme",
   "change_me",
@@ -63,6 +73,35 @@ export function resolveStorageDriver(source = process.env) {
   return raw || STORAGE_DRIVERS.LOCAL;
 }
 
+/** Raw SERVICE_ROLE (lower-cased, "" when unset). Not defaulted so callers can tell. */
+export function readServiceRole(source = process.env) {
+  return String(source.SERVICE_ROLE || "").trim().toLowerCase();
+}
+
+/** Effective role: explicit value, else "all" (dev/test back-compat). */
+export function resolveServiceRole(source = process.env) {
+  return readServiceRole(source) || SERVICE_ROLES.ALL;
+}
+
+/**
+ * Should THIS process run the in-process scheduler?
+ *   web    -> never
+ *   worker -> always
+ *   all    -> yes, unless ENABLE_IN_PROCESS_SCHEDULER is explicitly "false"
+ * The legacy ENABLE_IN_PROCESS_SCHEDULER=true still enables it for role "all".
+ * Cross-replica safety never depends on this: the CronRunLog lease is the lock.
+ */
+export function shouldRunScheduler(source = process.env) {
+  const role = resolveServiceRole(source);
+  if (role === SERVICE_ROLES.WEB) return false;
+  if (role === SERVICE_ROLES.WORKER) return true;
+  const flag = String(source.ENABLE_IN_PROCESS_SCHEDULER ?? "").trim().toLowerCase();
+  if (["0", "false", "no"].includes(flag)) return false;
+  if (flag) return true;
+  // Unset: on in development/test for "all"; production demands explicitness.
+  return String(source.NODE_ENV || "").trim().toLowerCase() !== "production";
+}
+
 /**
  * @param {Record<string, string|undefined>} source  environment to validate
  * @returns {string[]} human-readable violations (empty means valid)
@@ -90,6 +129,16 @@ export function validateProductionConfig(source = process.env) {
     if (value && LOCAL_HOST_PATTERN.test(value)) {
       problems.push(`${key} points at localhost, which is not valid in production`);
     }
+  }
+
+  // ── Process topology / scheduler (N-002) ──────────────────────────────
+  const role = readServiceRole(source);
+  if (!role) {
+    problems.push('SERVICE_ROLE is required in production ("web", "worker" or "all"); run exactly one "worker" (or a single "all") so the financial scheduler is never silently disabled');
+  } else if (!Object.values(SERVICE_ROLES).includes(role)) {
+    problems.push(`SERVICE_ROLE="${role}" is not recognised (use "web", "worker" or "all")`);
+  } else if (role === SERVICE_ROLES.ALL && !String(source.ENABLE_IN_PROCESS_SCHEDULER ?? "").trim()) {
+    problems.push('SERVICE_ROLE=all in production requires ENABLE_IN_PROCESS_SCHEDULER=true|false to be set explicitly');
   }
 
   // ── Payments ──────────────────────────────────────────────────────────
@@ -176,6 +225,10 @@ export function validateCommonConfig(source = process.env) {
   const gatewayMode = resolvePaymentGatewayMode(source);
   if (!Object.values(PAYMENT_GATEWAY_MODES).includes(gatewayMode)) {
     problems.push(`PAYMENT_GATEWAY_MODE="${gatewayMode}" is not recognised (use "razorpay" or "test")`);
+  }
+  const role = readServiceRole(source);
+  if (role && !Object.values(SERVICE_ROLES).includes(role)) {
+    problems.push(`SERVICE_ROLE="${role}" is not recognised (use "web", "worker" or "all")`);
   }
   const aiKey = resolveAiProviderKey(source);
   if (!Object.values(AI_PROVIDER_KEYS).includes(aiKey)) {

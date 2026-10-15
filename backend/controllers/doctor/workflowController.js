@@ -1,9 +1,12 @@
 import fs from "fs";
-import path from "path";
 import mongoose from "mongoose";
+import { getHospitalTimezone } from "../../services/hospitalSettingsService.js";
+import { flagLeaveImpact, flagScheduleImpact } from "../../services/appointmentImpactService.js";
+import { hospitalToday, hospitalDateKey } from "../../utils/hospitalTime.js";
 import PDFDocument from "pdfkit";
 import { assertValidBufferUpload } from "../../utils/fileValidation.js";
 import { storageService, StorageNotFoundError } from "../../storage/storageService.js";
+import { renderPdfBuffer, sendStoredPdf, storePdf } from "../../services/pdfDocumentStore.js";
 import Appointment from "../../models/Appointment.js";
 import Certificate from "../../models/Certificate.js";
 import ConsultationHistory from "../../models/ConsultationHistory.js";
@@ -53,7 +56,7 @@ import {
 } from "../../services/doctorPatientRelationshipService.js";
 import { buildSinceLastVisitComparison, buildMedicationReconciliation } from "../../services/clinicalComparisonService.js";
 import { canonicalizeConsultationMode, isKnownDoctorConsultationMode } from "../../constants/consultationMode.js";
-import { enforceAppointmentBookingPolicy } from "../../services/appointmentBookingPolicyService.js";
+import { enforceAppointmentBookingPolicy, verifyDailyCapacityAfterWrite, assertPatientHasNoOverlap } from "../../services/appointmentBookingPolicyService.js";
 
 const getDoctorProfile = async (userId) => {
   return ensureDoctorProfileForUser(userId);
@@ -99,14 +102,7 @@ const parseRequiredDate = (value, fieldName) => {
 };
 
 const createPrescriptionPdf = async (prescription, appointment) => {
-  const dir = path.resolve(process.cwd(), "storage/prescriptions");
-  await fs.promises.mkdir(dir, { recursive: true });
-  const filePath = path.join(dir, `RX-${prescription._id}.pdf`);
-
-  await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 48 });
-    const stream = fs.createWriteStream(filePath);
-    doc.pipe(stream);
+  const buffer = await renderPdfBuffer((doc) => {
     doc.fontSize(20).font("Helvetica-Bold").text("HMS Pro Prescription");
     doc.moveDown();
     doc.fontSize(10).font("Helvetica").text(`Patient: ${appointment.patientId.name}`);
@@ -124,12 +120,9 @@ const createPrescriptionPdf = async (prescription, appointment) => {
     doc.moveDown();
     if (prescription.notes) doc.text(`Notes: ${prescription.notes}`);
     if (prescription.followUpDate) doc.text(`Follow-up: ${new Date(prescription.followUpDate).toLocaleDateString()}`);
-    doc.end();
-    stream.on("finish", resolve);
-    stream.on("error", reject);
   });
-
-  return filePath;
+  // N-007: durable storage key (see services/pdfDocumentStore.js), not a cwd-relative path.
+  return (await storePdf("prescriptions", buffer, `RX-${prescription._id}.pdf`)).key;
 };
 
 const upsertHistoryLink = async ({ doctorId, patientId, appointmentId, prescriptionId, noteId }) => {
@@ -249,7 +242,7 @@ export const createPrescription = asyncHandler(async (req, res) => {
     followUpDate,
   });
 
-  prescription.pdfPath =
+  prescription.pdfStorageKey =
     await createPrescriptionPdf(
       prescription,
       appointment
@@ -351,8 +344,8 @@ export const updatePrescription = asyncHandler(async (req, res) => {
 export const downloadPrescription = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   const prescription = await Prescription.findOne({ _id: req.params.id, doctorId: doctor._id }).lean();
-  if (!prescription?.pdfPath || !fs.existsSync(prescription.pdfPath)) throw new AppError("Prescription PDF not found", 404);
-  res.download(prescription.pdfPath, `prescription-${prescription._id}.pdf`);
+  if (!prescription) throw new AppError("Prescription PDF not found", 404);
+  await sendStoredPdf(res, { storageKey: prescription.pdfStorageKey, legacyPath: prescription.pdfPath, legacyCategory: "prescriptions", fileName: `prescription-${prescription._id}.pdf`, notFoundMessage: "Prescription PDF not found" });
 });
 
 export const listMedicalNotes = asyncHandler(async (req, res) => {
@@ -446,7 +439,7 @@ export const getScheduleDay = asyncHandler(async (req, res) => {
     throw new AppError("A valid date is required", 400);
   }
   const date = normalizeDate(dateParam);
-  const today = normalizeDate(new Date());
+  const today = hospitalToday(new Date(), await getHospitalTimezone());
 
   const dayOfWeek = date.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }).toLowerCase();
   const dayConfig = doctor.availability?.find((slot) => slot.dayOfWeek === dayOfWeek) || null;
@@ -512,7 +505,11 @@ export const updateSchedule = asyncHandler(async (req, res) => {
   if (req.body.blockedDates) doctor.blockedDates = req.body.blockedDates.map((item) => ({ ...item, date: normalizeDate(item.date) }));
   await doctor.save();
   try { clinicalEmitter.scheduleUpdated(doctor._id); } catch (error) { logger.warn("clinicalEmitter.scheduleUpdated failed", { message: error?.message }); }
-  res.status(200).json({ success: true, data: { doctor }, message: "Schedule updated successfully" });
+  // Schedule-change impact: appointments now outside the valid schedule are
+  // flagged + surfaced (never silently cancelled or left invisible).
+  let impact = { affected: [], recoveredCount: 0 };
+  try { impact = await flagScheduleImpact({ doctor }); } catch (error) { logger.warn("flagScheduleImpact failed (schedule itself is saved)", { message: error?.message }); }
+  res.status(200).json({ success: true, data: { doctor, impact }, message: impact.affected.length ? `Schedule updated. ${impact.affected.length} existing appointment(s) no longer fit and need rescheduling.` : "Schedule updated successfully" });
 });
 
 // ── Scheduling Intelligence: Session Templates ──
@@ -599,16 +596,21 @@ export const updateLeaveStatus = asyncHandler(async (req, res) => {
     const cursor = new Date(leave.startDate);
     while (cursor <= leave.endDate) {
       blockedDates.push({ date: new Date(cursor), reason: leave.reason });
-      cursor.setDate(cursor.getDate() + 1);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
     await Doctor.findByIdAndUpdate(leave.doctorId, { $addToSet: { blockedDates: { $each: blockedDates } } });
+  }
+  // Leave impact: surface + notify affected bookings (never auto-cancel).
+  let leaveImpact = { affected: [], flaggedCount: 0 };
+  if (leave.status === "approved") {
+    try { leaveImpact = await flagLeaveImpact({ doctorId: leave.doctorId, leave }); } catch (error) { logger.warn("flagLeaveImpact failed (leave itself is saved)", { message: error?.message, leaveId: leave._id }); }
   }
   try {
     await clinicalEmitter.leaveStatusChanged(leave);
   } catch (error) {
     logger.warn("clinicalEmitter.leaveStatusChanged failed", { message: error?.message });
   }
-  res.status(200).json({ success: true, data: { leave }, message: "Leave request updated successfully" });
+  res.status(200).json({ success: true, data: { leave, impact: leaveImpact }, message: "Leave request updated successfully" });
 });
 
 // The file's bytes go through storage/storageService.js (local disk under
@@ -735,13 +737,11 @@ export async function buildDoctorAnalyticsIntelligence(doctor) {
   const cancelled = appointments.filter((item) => item.status === APPOINTMENT_STATUS.CANCELLED).length;
   const uniquePatients = new Set(appointments.map((item) => item.patientId.toString()));
 
+  // `today` (server-local midnight) is only used for month-bucket / trend math below.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const patientsToday = appointments.filter((item) => {
-    const apptDate = new Date(item.date);
-    apptDate.setHours(0, 0, 0, 0);
-    return apptDate.getTime() === today.getTime();
-  }).length;
+  const todayKey = hospitalDateKey(new Date(), await getHospitalTimezone());
+  const patientsToday = appointments.filter((item) => new Date(item.date).toISOString().slice(0, 10) === todayKey).length;
 
   // Approval rate: of appointments a doctor has actually acted on (excludes
   // ones still sitting pending, since those haven't been decided yet).
@@ -1040,13 +1040,7 @@ export const removeFavouriteMedicine = asyncHandler(async (req, res) => {
 export const requirePatientRecordAccess = (doctor, patientId) => assertDoctorPatientRecordAccess(doctor, patientId);
 
 const createCertificatePdf = async (certificate, patientName, doctorName) => {
-  const dir = path.resolve(process.cwd(), "storage/certificates");
-  await fs.promises.mkdir(dir, { recursive: true });
-  const filePath = path.join(dir, `CERT-${certificate._id}.pdf`);
-  await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 48 });
-    const stream = fs.createWriteStream(filePath);
-    doc.pipe(stream);
+  const buffer = await renderPdfBuffer((doc) => {
     doc.fontSize(20).font("Helvetica-Bold").text(certificate.title);
     doc.moveDown();
     doc.fontSize(10).font("Helvetica").text(`Patient: ${patientName}`);
@@ -1063,11 +1057,8 @@ const createCertificatePdf = async (certificate, patientName, doctorName) => {
       doc.font("Helvetica-Bold").text("Notes");
       doc.font("Helvetica").text(certificate.content.notes);
     }
-    doc.end();
-    stream.on("finish", resolve);
-    stream.on("error", reject);
   });
-  return filePath;
+  return (await storePdf("certificates", buffer, `CERT-${certificate._id}.pdf`)).key;
 };
 
 export const listCertificates = asyncHandler(async (req, res) => {
@@ -1104,7 +1095,7 @@ export const createCertificate = asyncHandler(async (req, res) => {
     title: title.trim(),
     content: content || {},
   });
-  certificate.pdfPath = await createCertificatePdf(certificate, patientUser?.name || "Patient", doctorUser?.name || "Doctor");
+  certificate.pdfStorageKey = await createCertificatePdf(certificate, patientUser?.name || "Patient", doctorUser?.name || "Doctor");
   await certificate.save();
 
   try {
@@ -1119,8 +1110,8 @@ export const createCertificate = asyncHandler(async (req, res) => {
 export const downloadCertificate = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
   const certificate = await Certificate.findOne({ _id: req.params.id, doctorId: doctor._id }).lean();
-  if (!certificate?.pdfPath || !fs.existsSync(certificate.pdfPath)) throw new AppError("Certificate PDF not found", 404);
-  res.download(certificate.pdfPath, `certificate-${certificate._id}.pdf`);
+  if (!certificate) throw new AppError("Certificate PDF not found", 404);
+  await sendStoredPdf(res, { storageKey: certificate.pdfStorageKey, legacyPath: certificate.pdfPath, legacyCategory: "certificates", fileName: `certificate-${certificate._id}.pdf`, notFoundMessage: "Certificate PDF not found" });
 });
 
 export const revokeCertificate = asyncHandler(async (req, res) => {
@@ -1517,6 +1508,10 @@ export const scheduleFollowUpAppointment = asyncHandler(async (req, res) => {
     canonicalConsultationMode = canonicalizeConsultationMode(consultationMode);
   }
 
+  // Same engine, same rules as a patient booking: patient-overlap here, and
+  // the concurrency-safe daily-cap verification after the write (below).
+  await assertPatientHasNoOverlap({ patientId, date, timeSlot });
+
   let appointment;
   try {
     appointment = await Appointment.create({
@@ -1535,6 +1530,11 @@ export const scheduleFollowUpAppointment = asyncHandler(async (req, res) => {
       status: APPOINTMENT_STATUS.APPROVED, // doctor-initiated — no patient approval step needed
       bookedBy: "doctor",
       appointmentType: "follow_up",
+    });
+    await verifyDailyCapacityAfterWrite({
+      doctorId: doctor._id,
+      date,
+      rollback: () => Appointment.deleteOne({ _id: appointment._id, status: APPOINTMENT_STATUS.APPROVED }),
     });
   } catch (error) {
     // PHASE P10 — the prescription may already hold a claim on
@@ -1616,7 +1616,7 @@ export const getScheduleRange = asyncHandler(async (req, res) => {
   const dayCount = countInclusiveDays(startDate, endDate);
   if (dayCount > MAX_RANGE_DAYS) throw new AppError(`Range cannot exceed ${MAX_RANGE_DAYS} days`, 400);
 
-  const today = normalizeDate(new Date());
+  const today = hospitalToday(new Date(), await getHospitalTimezone());
 
   const [approvedLeaves, rangeAppointments] = await Promise.all([
     LeaveRequest.find({

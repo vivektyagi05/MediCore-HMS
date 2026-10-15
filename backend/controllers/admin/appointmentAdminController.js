@@ -14,6 +14,9 @@
 //  - cancellation reuses the shared appointmentCancellationService.js core
 //    (see that file's header) so the admin cancel path can never drift
 //    from the patient cancel path's rules.
+import { guardAppointmentAction } from "../../services/appointmentGuard.js";
+import { ACTION } from "../../services/appointmentActionPolicy.js";
+import { getHospitalTimezone } from "../../services/hospitalSettingsService.js";
 import { containsRegex } from "../../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Appointment from "../../models/Appointment.js";
@@ -446,11 +449,14 @@ export const cancelAppointmentAdmin = asyncHandler(async (req, res) => {
   const appointment = await Appointment.findById(req.params.id);
   if (!appointment) throw new AppError("Appointment not found", 404);
 
+  await guardAppointmentAction({ appointment, action: ACTION.CANCEL, actorRole: "super_admin" });
+
   const { appointment: cancelledAppointment, refundRequestCreated } = await cancelAppointmentCore({
     appointment,
     reason: req.body.reason.trim(),
     cancelledBy: "admin",
     actorId: req.user._id,
+    tz: await getHospitalTimezone(),
   });
 
   res.status(200).json({

@@ -6,6 +6,7 @@ import {
   getRefundRequestDetail,
   initiateRefund,
   listRefundRequests,
+  reconcileRefund,
   rejectRefundRequest,
   reportPaymentProblem,
   retryRefundRequest,
@@ -43,6 +44,8 @@ router.post("/report-problem/:paymentId", protect, authorizeRoles(ROLES.SUPER_AD
 router.patch("/requests/:id/approve", protect, requirePermission("manage_payments"), approveRefundRequest);
 router.patch("/requests/:id/reject", protect, requirePermission("manage_payments"), rejectRefundRequest);
 router.patch("/requests/:id/retry", protect, requirePermission("manage_payments"), retryRefundRequest);
+// Asks the payment provider for the truth about a pending/unconfirmed refund and settles it.
+router.post("/requests/:id/reconcile", protect, requirePermission("manage_payments"), reconcileRefund);
 router.post("/:paymentId", protect, requirePermission("manage_payments"), initiateRefund);
 
 export default router;

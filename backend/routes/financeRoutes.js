@@ -8,6 +8,10 @@ import {
   cancelWalletRecharge,
   createCoupon,
   createSubscription,
+  verifySubscriptionPayment,
+  getSubscriptionPaymentStatus,
+  completeTestSubscriptionPayment,
+  failTestSubscriptionPayment,
   createWalletRechargeOrder,
   getLedger,
   getPlans,
@@ -35,6 +39,10 @@ router.patch("/coupons/:id", protect, authorizeRoles(ROLES.SUPER_ADMIN), updateC
 router.get("/subscriptions/plans", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getPlans);
 router.get("/subscriptions", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getSubscriptions);
 router.post("/subscriptions", protect, authorizeRoles(ROLES.DOCTOR), requireFeatureEnabled("subscriptions", "Doctor subscriptions"), createSubscription);
+router.post("/subscriptions/verify", protect, authorizeRoles(ROLES.DOCTOR), verifySubscriptionPayment);
+router.post("/subscriptions/test/complete", protect, authorizeRoles(ROLES.DOCTOR), completeTestSubscriptionPayment);
+router.post("/subscriptions/test/fail", protect, authorizeRoles(ROLES.DOCTOR), failTestSubscriptionPayment);
+router.get("/subscriptions/orders/:gatewayOrderId/status", protect, authorizeRoles(ROLES.DOCTOR), getSubscriptionPaymentStatus);
 router.patch("/subscriptions/:id/cancel", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), cancelSubscription);
 
 router.get("/ledger", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.PATIENT, ROLES.DOCTOR), getLedger);

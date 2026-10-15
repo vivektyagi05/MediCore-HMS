@@ -1,0 +1,32 @@
+# EXAMPLE ONLY -- nothing here has been provisioned or deployed by this repo.
+# It illustrates the web / worker / release split from Phase 00. Names, plans,
+# regions and env values are placeholders; review before using. All secrets are
+# `sync: false` (set them in the Render dashboard). The backend imports ../shared,
+# so commands run from the repository root (hence `--prefix backend`).
+services:
+  - type: web
+    name: medicore-api
+    runtime: node
+    buildCommand: npm --prefix backend ci --omit=dev --no-audit --no-fund
+    startCommand: node backend/server.js
+    healthCheckPath: /api/health/ready
+    # preDeployCommand runs once per deploy, before the new web instance takes traffic.
+    preDeployCommand: node backend/scripts/release.mjs
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: SERVICE_ROLE, value: web }
+      - { key: MONGO_URI, sync: false }
+      - { key: JWT_SECRET, sync: false }
+      # ...remaining production variables: see backend/.env.example
+
+  - type: worker
+    name: medicore-worker
+    runtime: node
+    buildCommand: npm --prefix backend ci --omit=dev --no-audit --no-fund
+    startCommand: node backend/worker.js
+    numInstances: 1
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: SERVICE_ROLE, value: worker }
+      - { key: MONGO_URI, sync: false }
+      - { key: JWT_SECRET, sync: false }

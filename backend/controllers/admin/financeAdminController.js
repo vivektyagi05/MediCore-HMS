@@ -28,6 +28,7 @@ import {
 } from "../../services/finance/financeAggregates.js";
 import { generativeAssistant } from "../../ai/generativeAssistant.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
+import { AppError } from "../../middleware/errorMiddleware.js";
 
 export const getFinanceOverview = asyncHandler(async (_req, res) => {
   const overview = await buildFinanceOverview();
@@ -89,4 +90,18 @@ export const getFinanceExecutiveSummary = asyncHandler(async (_req, res) => {
   });
 
   res.status(200).json({ success: true, data: result, message: "Finance executive summary generated successfully" });
+});
+
+// F-012: read-only reconciliation entry points. They record discrepancies; they never change a balance.
+export const reconcileWalletBalances = asyncHandler(async (req, res) => {
+  const { reconcileAllWallets, reconcileWallet } = await import("../../services/finance/walletReconciliationService.js");
+  const mongooseLib = (await import("mongoose")).default;
+  if (req.params.userId) {
+    if (!mongooseLib.Types.ObjectId.isValid(req.params.userId)) throw new AppError("Invalid user id", 400);
+    const result = await reconcileWallet(req.params.userId);
+    return res.status(200).json({ success: true, data: { result }, message: result.ok ? "Wallet matches ledger" : "Wallet differs from ledger" });
+  }
+  const afterId = req.query.afterId && mongooseLib.Types.ObjectId.isValid(req.query.afterId) ? req.query.afterId : null;
+  const report = await reconcileAllWallets({ afterId, maxBatches: 10 });
+  res.status(200).json({ success: true, data: { report }, message: report.done ? "All wallets reconciled" : "Partial pass; continue with nextCursor" });
 });

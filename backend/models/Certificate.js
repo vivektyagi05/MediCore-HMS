@@ -28,6 +28,7 @@ const certificateSchema = new mongoose.Schema(
       referredTo: { type: String, trim: true, default: "", maxlength: 200 },
       notes: { type: String, trim: true, default: "", maxlength: 2000 },
     },
+    pdfStorageKey: String, // N-007: storageService key; pdfPath is legacy
     pdfPath: String,
     status: { type: String, enum: ["issued", "revoked"], default: "issued", index: true },
     revokedReason: { type: String, trim: true, default: "" },

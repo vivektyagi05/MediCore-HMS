@@ -1,8 +1,9 @@
 import mongoose from "mongoose";
 import DoctorPayout from "../../models/DoctorPayout.js";
 import Withdrawal, { WITHDRAWAL_STATUS } from "../../models/Withdrawal.js";
-import { addMoney, subtractMoney } from "../../payments/money.js";
-import { appendWithdrawalTransition } from "../../payments/withdrawalStateMachine.js";
+import WithdrawalReservationGate from "../../models/WithdrawalReservationGate.js";
+import TransactionLedger from "../../models/TransactionLedger.js";
+import { subtractMoney, toPaise, fromPaise } from "../../payments/money.js";
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -14,6 +15,7 @@ const ACTIVE_WITHDRAWAL_STATUSES = [
   WITHDRAWAL_STATUS.REQUESTED,
   WITHDRAWAL_STATUS.RESERVED,
   WITHDRAWAL_STATUS.PROCESSING,
+  WITHDRAWAL_STATUS.MANUAL_PENDING,
   WITHDRAWAL_STATUS.RETRY_REQUIRED,
   WITHDRAWAL_STATUS.RECONCILIATION_REQUIRED,
 ];
@@ -45,11 +47,9 @@ export async function computeDoctorWithdrawableBalance(doctorId) {
         $group: {
           _id: null,
           settled: { $sum: "$doctorAmount" },
-          outstandingLiability: {
-            $sum: {
-              $cond: [{ $eq: ["$liabilityStatus", "adjusted_pending"] }, "$refundAdjustmentAmount", 0],
-            },
-          },
+          // Every settled payout's refund reversal (whether it was recorded
+          // before or after settlement) reduces what is withdrawable.
+          outstandingLiability: { $sum: { $ifNull: ["$refundAdjustmentAmount", 0] } },
         },
       },
     ]),
@@ -59,7 +59,7 @@ export async function computeDoctorWithdrawableBalance(doctorId) {
         $group: {
           _id: null,
           completed: {
-            $sum: { $cond: [{ $eq: ["$status", WITHDRAWAL_STATUS.COMPLETED] }, "$processedAmount", 0] },
+            $sum: { $cond: [{ $in: ["$status", [WITHDRAWAL_STATUS.COMPLETED, WITHDRAWAL_STATUS.MANUAL_COMPLETED]] }, "$processedAmount", 0] },
           },
           active: {
             $sum: { $cond: [{ $in: ["$status", ACTIVE_WITHDRAWAL_STATUSES] }, "$requestedAmount", 0] },
@@ -106,67 +106,104 @@ export function getWithdrawalLimits() {
   };
 }
 
-// ATOMIC RESERVATION (Section 25 — concurrency). Two simultaneous
-// withdrawal requests must never both succeed against the same balance.
-// This recomputes the withdrawable balance and, in the same logical step,
-// creates the Withdrawal document — but the real protection is the
-// re-check immediately before creation combined with the unique
-// idempotencyKey and the fact that `computeDoctorWithdrawableBalance`
-// itself only ever counts ACTIVE_WITHDRAWAL_STATUSES rows that already
-// exist in the database. A genuine race between two concurrent requests
-// is closed by re-verifying the balance a second time after an initial
-// optimistic create, and rolling back (cancelling) the loser if the
-// combined active total would exceed what was actually available — the
-// same "create then verify, roll back on conflict" pattern used nowhere
-// else in this codebase for money movement without a DB transaction,
-// applied here because (like followUpScheduling's claimFollowUpSlot) no
-// replica-set/session is available in this deployment (see money.js /
-// PHASE P10 hardening pass notes on the same constraint).
+const COMMITTED_STATUSES = [...ACTIVE_WITHDRAWAL_STATUSES, WITHDRAWAL_STATUS.COMPLETED, WITHDRAWAL_STATUS.MANUAL_COMPLETED];
+
+const postWithdrawalLedger = async ({ withdrawal, type, direction, amount, key }) => {
+  try {
+    await TransactionLedger.create({
+      doctorId: withdrawal.doctorId, type, direction, amount, referenceId: String(withdrawal._id),
+      idempotencyKey: `withdrawal:${key}:${withdrawal._id}`, metadata: { settlementMode: withdrawal.settlementMode || "manual" },
+    });
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+  }
+};
+export { postWithdrawalLedger };
+
+/** Net settled earnings (paise): settled payouts minus outstanding refund liability. */
+const netEarningsPaise = async (doctorId) => {
+  const b = await computeDoctorWithdrawableBalance(doctorId);
+  return toPaise(b.settledEarnings) - toPaise(b.refundLiability);
+};
+
+/** What the gate SHOULD hold: every withdrawal that claims balance, in paise. */
+export const expectedCommittedPaise = async (doctorId) => {
+  const rows = await Withdrawal.find({ doctorId, status: { $in: COMMITTED_STATUSES } }).select("requestedAmount processedAmount status").lean();
+  return rows.reduce((sum, w) => {
+    const done = w.status === WITHDRAWAL_STATUS.COMPLETED || w.status === WITHDRAWAL_STATUS.MANUAL_COMPLETED;
+    return sum + toPaise(done ? (w.processedAmount ?? w.requestedAmount) : w.requestedAmount);
+  }, 0);
+};
+
+const ensureGate = async (doctorId) => {
+  try {
+    await WithdrawalReservationGate.updateOne({ doctorId }, { $setOnInsert: { committedPaise: await expectedCommittedPaise(doctorId) } }, { upsert: true });
+  } catch (error) {
+    if (error?.code !== 11000) throw error; // concurrent creator won
+  }
+};
+
+/** Atomic claim of `amountPaise` against the doctor's net earnings. Returns true if claimed. */
+export const claimBalance = async (doctorId, amountPaise) => {
+  await ensureGate(doctorId);
+  const net = await netEarningsPaise(doctorId);
+  const claimed = await WithdrawalReservationGate.findOneAndUpdate(
+    { doctorId, committedPaise: { $lte: net - amountPaise } },
+    { $inc: { committedPaise: amountPaise } },
+    { returnDocument: "after" },
+  );
+  return Boolean(claimed);
+};
+
+export const releaseBalance = async (doctorId, amountPaise) => {
+  await WithdrawalReservationGate.updateOne({ doctorId, committedPaise: { $gte: amountPaise } }, { $inc: { committedPaise: -amountPaise } });
+};
+
+/** Reports drift between the gate counter and the Withdrawal rows. Never auto-repairs. */
+export const reconcileWithdrawalGate = async (doctorId) => {
+  const gate = await WithdrawalReservationGate.findOne({ doctorId }).lean();
+  const expected = await expectedCommittedPaise(doctorId);
+  const actual = gate?.committedPaise ?? 0;
+  return { doctorId: String(doctorId), expectedPaise: expected, actualPaise: actual, driftPaise: actual - expected, ok: actual === expected };
+};
+
+/**
+ * F-014: reservation is ONE conditional $inc on the per-doctor gate, then the
+ * Withdrawal row is written already `reserved` with reservationHeld=true. If the
+ * row cannot be written the claim is released. A crash between the two leaves a
+ * detectable gate drift (reconcileWithdrawalGate), never a silent double-spend.
+ */
 export async function reserveWithdrawal({ doctorId, requestedAmount, destinationLabel, requestedBy, idempotencyKey }) {
-  const balanceBefore = await computeDoctorWithdrawableBalance(doctorId);
-  if (requestedAmount > balanceBefore.withdrawableBalance + 0.009) {
-    const error = new Error(
-      `Requested amount exceeds your withdrawable balance of ${balanceBefore.withdrawableBalance}.`,
-    );
+  const amountPaise = toPaise(requestedAmount);
+  if (!(amountPaise > 0)) {
+    const error = new Error("A valid withdrawal amount is required");
     error.statusCode = 400;
     throw error;
   }
-
-  const withdrawal = new Withdrawal({
-    doctorId,
-    requestedAmount,
-    availableBalanceAtRequest: balanceBefore.withdrawableBalance,
-    destinationLabel,
-    requestedBy,
-    idempotencyKey,
-    status: WITHDRAWAL_STATUS.REQUESTED,
-    stateHistory: [{ from: null, to: WITHDRAWAL_STATUS.REQUESTED, actorId: requestedBy, source: "doctor", reason: "Withdrawal requested", at: new Date() }],
-  });
-  await withdrawal.save();
-
-  // Re-verify with this request itself now counted (it's REQUESTED, one
-  // of ACTIVE_WITHDRAWAL_STATUSES) — if the combined active total exceeds
-  // settled earnings, this request lost the race against a concurrent one
-  // and must not proceed.
-  const balanceAfter = await computeDoctorWithdrawableBalance(doctorId);
-  const overCommitted = addMoney(balanceAfter.pendingWithdrawal, balanceAfter.alreadyWithdrawn) >
-    addMoney(balanceAfter.settledEarnings - balanceAfter.refundLiability, 0.009);
-
-  if (overCommitted) {
-    appendWithdrawalTransition(withdrawal, WITHDRAWAL_STATUS.CANCELLED, {
-      source: "system", reason: "Concurrent withdrawal exceeded available balance",
-    });
-    withdrawal.failureReason = "Withdrawable balance changed before this request could be reserved. Please try again.";
-    await withdrawal.save();
-    const error = new Error("Another withdrawal request already reserved this balance. Please refresh and try again.");
-    error.statusCode = 409;
+  const balanceBefore = await computeDoctorWithdrawableBalance(doctorId);
+  if (!(await claimBalance(doctorId, amountPaise))) {
+    const error = new Error(`Requested amount exceeds your withdrawable balance of ${balanceBefore.withdrawableBalance}.`);
+    error.statusCode = 400;
     throw error;
   }
-
-  appendWithdrawalTransition(withdrawal, WITHDRAWAL_STATUS.RESERVED, {
-    actorId: requestedBy, source: "system", reason: "Balance verified and reserved",
-  });
-  await withdrawal.save();
-
+  let withdrawal;
+  try {
+    withdrawal = await Withdrawal.create({
+      doctorId,
+      requestedAmount: fromPaise(amountPaise),
+      availableBalanceAtRequest: balanceBefore.withdrawableBalance,
+      destinationLabel,
+      requestedBy,
+      idempotencyKey,
+      status: WITHDRAWAL_STATUS.RESERVED,
+      reservationHeld: true,
+      settlementMode: "manual",
+      stateHistory: [{ from: null, to: WITHDRAWAL_STATUS.RESERVED, actorId: requestedBy, source: "doctor", reason: "Balance atomically reserved", at: new Date() }],
+    });
+  } catch (error) {
+    await releaseBalance(doctorId, amountPaise);
+    throw error;
+  }
+  await postWithdrawalLedger({ withdrawal, type: "withdrawal_reservation", direction: "debit", amount: withdrawal.requestedAmount, key: "reserve" });
   return withdrawal;
 }

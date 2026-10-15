@@ -38,6 +38,20 @@ const hospitalSettingSchema = new mongoose.Schema(
       dailyPerDoctor: { type: Number, default: 30, min: 1, max: 500 },
       bookingWindowDays: { type: Number, default: 30, min: 1, max: 365 },
     },
+    // Appointment lifecycle business rules (single configuration surface —
+    // read ONLY through services/hospitalSettingsService.getAppointmentRules).
+    appointmentRules: {
+      resolutionWindowDays: { type: Number, default: 3, min: 1, max: 30 },
+      checkInEarlyWindowMinutes: { type: Number, default: 30, min: 0, max: 720 },
+      noShowGraceMinutes: { type: Number, default: 15, min: 1, max: 240 },
+      reminderIntervalsMinutes: { type: [Number], default: [1440, 120, 30] },
+      delayNotifyThresholdMinutes: { type: Number, default: 15, min: 1, max: 240 },
+      defaultSlotMinutes: { type: Number, default: 30, min: 5, max: 240 },
+      earlyStartWindowMinutes: { type: Number, default: 15, min: 0, max: 240 },
+      // Minimum gap between a home visit and any adjacent appointment at a
+      // different location. A configurable safety buffer — NOT routing/ETA.
+      travelBufferMinutes: { type: Number, default: 45, min: 0, max: 240 },
+    },
     paymentSettings: {
       currency: { type: String, default: "INR" },
       taxRate: { type: Number, default: 18, min: 0, max: 100 },

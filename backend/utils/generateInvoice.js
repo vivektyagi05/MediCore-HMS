@@ -1,7 +1,4 @@
-import fs from "fs";
-import path from "path";
-import PDFDocument from "pdfkit";
-import { env } from "../config/env.js";
+import { renderPdfBuffer, storePdf } from "../services/pdfDocumentStore.js";
 
 const formatMoney = (amount, currency) =>
   new Intl.NumberFormat("en-IN", {
@@ -10,16 +7,7 @@ const formatMoney = (amount, currency) =>
   }).format(amount);
 
 export const generateInvoicePdf = async (invoice) => {
-  const invoiceDir = path.resolve(process.cwd(), env.invoiceStorageDir);
-  await fs.promises.mkdir(invoiceDir, { recursive: true });
-
-  const filePath = path.join(invoiceDir, `${invoice.invoiceNumber}.pdf`);
-
-  await new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 48, size: "A4" });
-    const stream = fs.createWriteStream(filePath);
-
-    doc.pipe(stream);
+  const buffer = await renderPdfBuffer((doc) => {
     doc.fontSize(22).font("Helvetica-Bold").text(invoice.hospital.name);
     doc.fontSize(10).font("Helvetica").text(invoice.hospital.address);
     doc.text(`GSTIN: ${invoice.hospital.gstin}`);
@@ -73,10 +61,9 @@ export const generateInvoicePdf = async (invoice) => {
       align: "center",
     });
 
-    doc.end();
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-  });
+  }, { margin: 48, size: "A4" });
 
-  return filePath;
+  // N-007: durable, atomic write through storageService; resolves only once
+  // persisted. Returns the opaque key to store on Invoice.pdfStorageKey.
+  return storePdf("invoices", buffer, `${invoice.invoiceNumber}.pdf`);
 };

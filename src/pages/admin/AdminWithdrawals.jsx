@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useFinancialSync } from "../../hooks/useFinancialSync";
 
 import { withdrawalAdminApi } from "../../api/withdrawalApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -18,6 +19,8 @@ const STATUS_TONE = {
   requested: "info",
   reserved: "info",
   processing: "warning",
+  manual_pending: "warning",
+  manual_completed: "success",
   completed: "success",
   failed: "danger",
   retry_required: "warning",
@@ -29,7 +32,9 @@ const STATUS_LABEL = {
   requested: "Requested",
   reserved: "Reserved",
   processing: "Processing",
-  completed: "Completed",
+  manual_pending: "Manual settlement pending",
+  manual_completed: "Manually settled (not a verified bank transfer)",
+  completed: "Completed (legacy record)",
   failed: "Failed",
   retry_required: "Retry required",
   reconciliation_required: "Reconciliation required",
@@ -43,16 +48,20 @@ const STATUS_LABEL = {
 // allows — every button still calls a specific transition endpoint that
 // re-validates server-side).
 const ACTIONS_BY_STATUS = {
-  reserved: [{ label: "Mark processing", to: "processing", api: "markProcessing" }],
+  reserved: [{ label: "Approve for manual settlement", to: "manual_pending", api: "markProcessing" }],
+  manual_pending: [
+    { label: "Record manual settlement", to: "manual_completed", api: "complete", needsSettlement: true },
+    { label: "Mark failed", to: "failed", api: "fail", needsReason: true },
+  ],
   processing: [
-    { label: "Mark completed", to: "completed", api: "complete" },
-    { label: "Mark failed", to: "failed", api: "fail" },
+    { label: "Record manual settlement", to: "manual_completed", api: "complete", needsSettlement: true },
+    { label: "Mark failed", to: "failed", api: "fail", needsReason: true },
   ],
   failed: [{ label: "Flag for retry", to: "retry_required", api: "retry" }],
-  retry_required: [{ label: "Reserve again", to: "processing", api: "markProcessing" }],
+  retry_required: [{ label: "Approve for manual settlement", to: "manual_pending", api: "markProcessing" }],
   reconciliation_required: [
-    { label: "Mark completed", to: "completed", api: "complete" },
-    { label: "Mark failed", to: "failed", api: "fail" },
+    { label: "Record manual settlement", to: "manual_completed", api: "complete", needsSettlement: true },
+    { label: "Mark failed", to: "failed", api: "fail", needsReason: true },
   ],
   requested: [{ label: "Cancel", to: "cancelled", api: "cancel" }],
 };
@@ -82,13 +91,29 @@ function AdminWithdrawals() {
     }
   }, [status]);
 
+  useFinancialSync(load);
   useEffect(() => { load(); }, [load]);
 
   const runAction = async (withdrawal, action) => {
     setActingId(withdrawal._id);
     try {
-      await withdrawalAdminApi[action.api](withdrawal._id, {});
-      toast.success(`Withdrawal moved to ${STATUS_LABEL[action.to] || action.to}.`);
+      const payload = {};
+      if (action.needsSettlement) {
+        // Manual settlement is a statement by an authorized admin that money was
+        // moved OUTSIDE this system; it must carry a real external reference.
+        const reference = window.prompt("Manual settlement reference (e.g. bank / UTR reference). This records that you settled it outside MediCore.");
+        if (!reference?.trim()) { setActingId(null); return; }
+        const why = window.prompt("Reason / note for the audit trail");
+        if (!why?.trim()) { setActingId(null); return; }
+        payload.settlementReference = reference.trim();
+        payload.reason = why.trim();
+      } else if (action.needsReason) {
+        const why = window.prompt("Reason for marking this withdrawal failed");
+        if (!why?.trim()) { setActingId(null); return; }
+        payload.reason = why.trim();
+      }
+      await withdrawalAdminApi[action.api](withdrawal._id, payload);
+      toast.success(`Withdrawal recorded as: ${STATUS_LABEL[action.to] || action.to}.`);
       load();
     } catch (error) {
       toast.error(getApiErrorMessage(error));
@@ -130,6 +155,9 @@ function AdminWithdrawals() {
                   <p className="text-xs text-slate-500">
                     {w.destinationLabel} · Requested {new Date(w.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
                   </p>
+                  {w.status === "manual_completed" && (
+                    <p className="mt-1 text-xs text-slate-500">Manual settlement ref: {w.settlementReference} — recorded by an admin; not a provider-confirmed transfer.</p>
+                  )}
                   {w.failureReason && <p className="mt-1 text-xs font-semibold text-rose-600">{w.failureReason}</p>}
                 </div>
                 <div className="flex items-center gap-2">

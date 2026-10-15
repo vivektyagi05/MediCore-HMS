@@ -10,6 +10,16 @@ import {
   cancelAppointment,
   rescheduleAppointment,
 } from "../controllers/appointmentController.js";
+import {
+  checkInAppointment,
+  callAppointmentPatient,
+  markAppointmentPatientNoShow,
+  reportAppointmentDoctorNoShow,
+  resolveAppointment,
+  getAppointmentActions,
+  getTodayClinic,
+  getAppointmentOperationsOverview,
+} from "../controllers/appointmentOperationsController.js";
 import { ROLES } from "../constants/roles.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
@@ -18,6 +28,10 @@ const router = Router();
 
 // Fixed subpaths registered before any "/:id"-style route to avoid path
 // collisions (same convention as admin/appointmentAdminRoutes.js).
+// Operational aggregates (fixed subpaths — MUST precede "/:id").
+router.get("/doctor/today-clinic", protect, authorizeRoles(ROLES.DOCTOR), getTodayClinic);
+router.get("/admin/operations", protect, authorizeRoles(ROLES.SUPER_ADMIN), getAppointmentOperationsOverview);
+
 router.get(
   "/available-slots",
   protect,
@@ -80,4 +94,12 @@ router.patch(
   authorizeRoles(ROLES.PATIENT, ROLES.DOCTOR, ROLES.SUPER_ADMIN),
   rescheduleAppointment,
 );
+// Operational lifecycle actions. Ownership/relationship, status, time window and
+// visit state are ALL re-validated server-side (services/appointmentActionPolicy).
+router.get("/:id/actions", protect, authorizeRoles(ROLES.PATIENT, ROLES.DOCTOR, ROLES.SUPER_ADMIN), getAppointmentActions);
+router.post("/:id/check-in", protect, authorizeRoles(ROLES.PATIENT), checkInAppointment);
+router.post("/:id/call", protect, authorizeRoles(ROLES.DOCTOR), callAppointmentPatient);
+router.post("/:id/no-show", protect, authorizeRoles(ROLES.DOCTOR, ROLES.SUPER_ADMIN), markAppointmentPatientNoShow);
+router.post("/:id/report-doctor-no-show", protect, authorizeRoles(ROLES.PATIENT), reportAppointmentDoctorNoShow);
+router.post("/:id/resolve", protect, authorizeRoles(ROLES.DOCTOR, ROLES.SUPER_ADMIN), resolveAppointment);
 export default router;

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+const read = (file) => fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
 const seed = read("backend/seed.js");
 const cms = read("backend/models/CMSPage.js");
 const serializer = read("backend/services/articlePublicSerializer.js");

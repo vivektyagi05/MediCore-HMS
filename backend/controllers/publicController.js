@@ -4,6 +4,8 @@
  * Security: never expose email, mobile, internal IDs beyond doctor profile ID,
  * financial data, documents, or private notes.
  */
+import { hospitalToday } from "../utils/hospitalTime.js";
+import { getHospitalTimezone } from "../services/hospitalSettingsService.js";
 import { containsRegex, exactRegex } from "../utils/regexSafe.js";
 import mongoose from "mongoose";
 import Appointment from "../models/Appointment.js";
@@ -513,8 +515,7 @@ export const getPublicDoctorAvailability = asyncHandler(async (req, res) => {
     ...publicDoctorFilter(await getPublicDoctorUserIds()),
   }).select("_id availability blockedDates").lean();
 
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const today = hospitalToday(new Date(), await getHospitalTimezone()); // hospital-local calendar day, not the UTC day
   const horizonDays = 60;
   const rangeEnd = new Date(today);
   rangeEnd.setUTCDate(rangeEnd.getUTCDate() + horizonDays);

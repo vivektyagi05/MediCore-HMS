@@ -23,41 +23,11 @@
 // place that enforcement now lives, so it can never drift out of sync
 // across the three write paths again.
 //
-// TIMEZONE STRATEGY (documented per remediation Phase 4): this codebase
-// already treats every appointment date/time value as UTC end-to-end and
-// deliberately does so on purpose -- see appointmentController.js
-// `getDayOfWeek`/`normalizeDate` (pinned to `timeZone: "UTC"` /
-// `setUTCHours`), the identical duplicate in doctor/workflowController.js
-// and ai/aiScheduler.js, and getAvailableSlots's own
-// `now.getUTCHours() * 60 + now.getUTCMinutes()` "current time" calc. A
-// doctor's `availability[].startTime`/`timeSlot` strings ("09:00-09:30")
-// are therefore stored and compared as literal UTC clock digits, not
-// re-projected through `HospitalSetting.timezone` ("Asia/Kolkata") at
-// read or write time anywhere in the existing codebase. That field is
-// exposed for public display only (controllers/publicController.js) and
-// is not wired into any date/time arithmetic.
-//
-// Introducing a real IST conversion here — while every other date/time
-// computation in the app (Doctor Today view, next-available search,
-// reminders, slot generation) kept comparing against literal UTC-labeled
-// clock digits — would make THIS file disagree with every other place in
-// the app that decides "is this slot in the past," which is a strictly
-// worse and higher-risk state than the single-field bug being fixed. Per
-// this brief's own Phase 4 instruction ("If the product is currently
-// India-specific, preserve the existing business timezone rather than
-// introducing unnecessary complexity... If timezone configuration already
-// exists, use the canonical source"), the correct fix here is to make the
-// write paths consistent with the ALREADY-ESTABLISHED UTC convention the
-// entire rest of the appointment engine uses — not to invent a second,
-// disagreeing convention. This is called out explicitly as a known,
-// deliberate limitation in the remediation doc, not a silently-accepted
-// bug: a real per-doctor/per-hospital timezone-aware scheduling engine
-// would require re-deriving every date/time computation in the codebase
-// (slot generation, capacity aggregation, reminders, AI scheduler) from a
-// single canonical instant-resolution function, which is a much larger,
-// cross-cutting change than this brief's own "do not casually refactor
-// existing working architecture" / "strict scope control" rules permit
-// for an appointment-engine-focused pass.
+// TIMEZONE STRATEGY (canonical, replaces the earlier UTC-digits convention):
+// Appointment.date is a hospital-local CALENDAR-DAY key (UTC-midnight Date);
+// timeSlot is HOSPITAL wall-clock time. Every instant is derived by
+// utils/hospitalTime.js using HospitalSetting.timezone (default
+// Asia/Kolkata). Nothing in this file compares slot digits to UTC digits.
 //
 // SINGLE canonical policy surface reused by every write path:
 //   - appointmentController.createAppointment
@@ -68,7 +38,15 @@
 import Appointment from "../models/Appointment.js";
 import { AppError } from "../middleware/errorMiddleware.js";
 import { ACTIVE_STATUSES } from "../constants/appointmentStatus.js";
-import { getAppointmentLimits } from "./hospitalSettingsService.js";
+import { getAppointmentLimits, getHospitalTimezone } from "./hospitalSettingsService.js";
+import {
+  DEFAULT_HOSPITAL_TIMEZONE,
+  hospitalToday,
+  resolveSlotStartMinutes as _resolveSlotStartMinutes,
+  resolveAppointmentInstant as _resolveAppointmentInstant,
+  resolveAppointmentEndInstant,
+  DEFAULT_SLOT_MINUTES,
+} from "../utils/hospitalTime.js";
 
 /**
  * Authoritative "now." Never trust a client-supplied current time. Kept as
@@ -92,31 +70,16 @@ export const getServerNow = () => new Date();
  * Callers fall back to date-only comparison when this returns null —
  * i.e. exactly today's prior (already-shipped) behavior, never worse.
  */
-export const resolveSlotStartMinutes = (timeSlot) => {
-  if (typeof timeSlot !== "string" || !timeSlot.trim()) return null;
-  const [startPart] = timeSlot.split("-");
-  const match = /^(\d{1,2}):(\d{2})$/.exec(startPart.trim());
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-};
+export const resolveSlotStartMinutes = _resolveSlotStartMinutes;
 
 /**
- * Combines an already-UTC-midnight-normalized `date` with a parsed
- * timeSlot start time into one real instant. Returns null when the
- * timeSlot doesn't parse (see resolveSlotStartMinutes) — the caller must
- * fall back to date-only comparison in that case.
+ * Canonical date + timeSlot → real instant in the HOSPITAL timezone.
+ * Delegates to utils/hospitalTime.js (the only implementation).
+ * Returns null when the timeSlot doesn't parse (callers fall back to
+ * date-only comparison).
  */
-export const resolveAppointmentInstant = (date, timeSlot) => {
-  const startMinutes = resolveSlotStartMinutes(timeSlot);
-  if (startMinutes === null) return null;
-  const instant = new Date(date);
-  instant.setUTCHours(0, startMinutes, 0, 0);
-  return instant;
-};
+export const resolveAppointmentInstant = (date, timeSlot, tz = DEFAULT_HOSPITAL_TIMEZONE) =>
+  _resolveAppointmentInstant(date, timeSlot, tz);
 
 /**
  * PHASE 3 — mandatory server-time / past-instant protection.
@@ -134,15 +97,14 @@ export const resolveAppointmentInstant = (date, timeSlot) => {
  * @param {Date} [now] - defaults to getServerNow()
  * @throws {AppError} 400 if the requested instant has already passed
  */
-export const assertAppointmentNotInPast = (date, timeSlot, now = getServerNow()) => {
-  const today = new Date(now);
-  today.setUTCHours(0, 0, 0, 0);
+export const assertAppointmentNotInPast = (date, timeSlot, now = getServerNow(), tz = DEFAULT_HOSPITAL_TIMEZONE) => {
+  const today = hospitalToday(now, tz);
 
   if (date < today) {
     throw new AppError("Appointment time has already passed.", 400, { code: "PAST_DATE" });
   }
 
-  const instant = resolveAppointmentInstant(date, timeSlot);
+  const instant = resolveAppointmentInstant(date, timeSlot, tz);
   if (instant !== null && instant <= now) {
     throw new AppError("Appointment time has already passed.", 400, { code: "PAST_TIME" });
   }
@@ -161,10 +123,9 @@ export const assertAppointmentNotInPast = (date, timeSlot, now = getServerNow())
  * @param {Date} [now]
  * @throws {AppError} 400 if the date is further out than the configured window
  */
-export const assertWithinBookingWindow = async (date, now = getServerNow()) => {
+export const assertWithinBookingWindow = async (date, now = getServerNow(), tz = DEFAULT_HOSPITAL_TIMEZONE) => {
   const { bookingWindowDays } = await getAppointmentLimits();
-  const today = new Date(now);
-  today.setUTCHours(0, 0, 0, 0);
+  const today = hospitalToday(now, tz);
   const maxDate = new Date(today);
   maxDate.setUTCDate(maxDate.getUTCDate() + bookingWindowDays);
 
@@ -245,8 +206,113 @@ export const enforceAppointmentBookingPolicy = async ({
   doctorId,
   excludeAppointmentId,
   now = getServerNow(),
+  tz,
 }) => {
-  assertAppointmentNotInPast(date, timeSlot, now);
-  await assertWithinBookingWindow(date, now);
+  const zone = tz || (await getHospitalTimezone());
+  assertAppointmentNotInPast(date, timeSlot, now, zone);
+  await assertWithinBookingWindow(date, now, zone);
   await assertDoctorDailyCapacityAvailable(doctorId, date, excludeAppointmentId);
+};
+
+/**
+ * CONCURRENCY-SAFE daily cap (insert-then-verify).
+ *
+ * assertDoctorDailyCapacityAvailable above is count-then-create: two
+ * requests can both read count = cap-1 and both insert. That pre-check is
+ * kept as a cheap early rejection, but THIS function is the guarantee.
+ *
+ * Call it immediately AFTER the appointment document has been durably
+ * written/moved into (doctorId, date). It re-counts ALL active appointments
+ * for that doctor+date. If the total exceeds the cap, the caller's own write
+ * is rolled back (via `rollback`) and a controlled 409 is raised.
+ *
+ * Safety argument: of any set of concurrent writers, the LAST one whose
+ * write commits observes every earlier committed write in its verification
+ * count, sees count > cap, and undoes itself. Writers that overshoot
+ * simultaneously may BOTH roll back (liveness trade-off: the patient is
+ * told to retry) but the cap can never be exceeded by surviving writes.
+ *
+ * @returns {Promise<void>} resolves when within cap; throws 409 DAILY_CAPACITY_REACHED otherwise
+ */
+export const verifyDailyCapacityAfterWrite = async ({ doctorId, date, rollback }) => {
+  const { dailyPerDoctor } = await getAppointmentLimits();
+  const total = await Appointment.countDocuments({ doctorId, date, status: { $in: ACTIVE_STATUSES } });
+  if (total <= dailyPerDoctor) return;
+  if (typeof rollback === "function") await rollback();
+  throw new AppError(
+    "This doctor has reached the maximum number of appointments for this date. Please choose another date.",
+    409,
+    { code: "DAILY_CAPACITY_REACHED", dailyPerDoctor },
+  );
+};
+
+/**
+ * Patient-side conflict: the SAME person (account + family member) cannot hold
+ * two overlapping active appointments on one day, with ANY doctor. The older
+ * check only caught the same doctor + identical slot string. Bounded: one
+ * indexed query for one patient on one day.
+ */
+export const assertPatientHasNoOverlap = async ({ patientId, familyMemberId, date, timeSlot, excludeAppointmentId, tz }) => {
+  const zone = tz || (await getHospitalTimezone());
+  const start = _resolveAppointmentInstant(date, timeSlot, zone);
+  if (!start) return; // legacy free-typed slot: no instant to compare
+  const end = resolveAppointmentEndInstant(date, timeSlot, zone, DEFAULT_SLOT_MINUTES);
+  const filter = { patientId, date, status: { $in: ACTIVE_STATUSES } };
+  if (excludeAppointmentId) filter._id = { $ne: excludeAppointmentId };
+  const sameDay = await Appointment.find(filter).select("timeSlot date familyMemberId").limit(50).lean();
+  for (const other of sameDay) {
+    if (String(other.familyMemberId || "") !== String(familyMemberId || "")) continue; // different person
+    const oStart = _resolveAppointmentInstant(other.date, other.timeSlot, zone);
+    if (!oStart) continue;
+    const oEnd = resolveAppointmentEndInstant(other.date, other.timeSlot, zone, DEFAULT_SLOT_MINUTES);
+    if (start < oEnd && end > oStart) {
+      throw new AppError("You already have an appointment that overlaps this time.", 409, { code: "PATIENT_SLOT_CONFLICT" });
+    }
+  }
+};
+
+const sameAddress = (a, b) => {
+  const norm = (x) => `${x?.line1 || ""}|${x?.city || ""}|${x?.postalCode || ""}`.toLowerCase().trim();
+  return norm(a) !== "||" && norm(a) === norm(b);
+};
+
+/**
+ * PURE. Is `candidate` feasible next to `others` given a travel buffer?
+ * Travel is required between two appointments when at least one is a home
+ * visit and they are at different places (different mode, or different home
+ * address). Same-place back-to-back needs no buffer. This is a configurable
+ * safety buffer, NOT routing: no map/ETA service exists, so none is claimed.
+ */
+export const findTravelConflict = ({ candidate, others, bufferMinutes, tz }) => {
+  if (!bufferMinutes) return null;
+  const cStart = _resolveAppointmentInstant(candidate.date, candidate.timeSlot, tz);
+  if (!cStart) return null;
+  const cEnd = resolveAppointmentEndInstant(candidate.date, candidate.timeSlot, tz, DEFAULT_SLOT_MINUTES);
+  for (const o of others) {
+    const oStart = _resolveAppointmentInstant(o.date, o.timeSlot, tz);
+    if (!oStart) continue;
+    const oEnd = resolveAppointmentEndInstant(o.date, o.timeSlot, tz, DEFAULT_SLOT_MINUTES);
+    const eitherHome = candidate.consultationMode === "home_visit" || o.consultationMode === "home_visit";
+    if (!eitherHome) continue;
+    const samePlace = candidate.consultationMode === o.consultationMode && (candidate.consultationMode !== "home_visit" || sameAddress(candidate.visitAddress, o.visitAddress));
+    if (samePlace) continue;
+    const gapMin = Math.max((cStart - oEnd) / 60000, (oStart - cEnd) / 60000);
+    if (gapMin < bufferMinutes) return { appointmentId: o._id, gapMinutes: Math.round(gapMin), requiredMinutes: bufferMinutes };
+  }
+  return null;
+};
+
+export const assertTravelFeasible = async ({ doctorId, date, timeSlot, consultationMode, visitAddress, excludeAppointmentId, tz, bufferMinutes }) => {
+  if (!bufferMinutes) return;
+  const filter = { doctorId, date, status: { $in: ACTIVE_STATUSES } };
+  if (excludeAppointmentId) filter._id = { $ne: excludeAppointmentId };
+  const others = await Appointment.find(filter).select("date timeSlot consultationMode visitAddress").limit(100).lean();
+  const conflict = findTravelConflict({ candidate: { date, timeSlot, consultationMode, visitAddress }, others, bufferMinutes, tz });
+  if (conflict) {
+    throw new AppError(
+      `This time leaves too little travel time (${bufferMinutes} min needed) next to another appointment at a different location. Please choose a different time.`,
+      409,
+      { code: "TRAVEL_BUFFER_CONFLICT", requiredMinutes: bufferMinutes },
+    );
+  }
 };

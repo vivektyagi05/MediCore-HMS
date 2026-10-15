@@ -83,7 +83,15 @@ const notificationDeliverySchema = new mongoose.Schema(
 );
 
 notificationDeliverySchema.index({ recipientId: 1, readAt: 1, createdAt: -1 });
-notificationDeliverySchema.index({ eventKey: 1, recipientId: 1 }, { unique: true, sparse: true });
+// N-024: was { unique: true, sparse: true }. recipientId is required, so a
+// compound sparse index still indexes EVERY document (sparse only skips docs
+// missing ALL key fields) and a second notification without an eventKey for
+// the same recipient collided on (null, recipientId) -> E11000 thrown to the
+// caller. Idempotency only applies to string eventKeys, so partial-on-string.
+notificationDeliverySchema.index(
+  { eventKey: 1, recipientId: 1 },
+  { unique: true, name: "uniq_notification_event_recipient", partialFilterExpression: { eventKey: { $type: "string" } } },
+);
 
 const NotificationDelivery = mongoose.model("NotificationDelivery", notificationDeliverySchema);
 

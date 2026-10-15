@@ -11,7 +11,9 @@ const manifestPath = path.join(dir, "MANIFEST.json");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 for (const entry of manifest.files) {
   const file = path.join(dir, entry.file);
-  entry.sha256 = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  entry.sha256 = crypto.createHash("sha256")
+    .update(fs.readFileSync(file, "utf8").replace(/\r\n?/g, "\n"), "utf8")
+    .digest("hex");
   entry.dataRows = parseDelimited(fs.readFileSync(file, "utf8")).length;
 }
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

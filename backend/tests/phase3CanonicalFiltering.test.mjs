@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
-const admin = fs.readFileSync(path.join(root, "controllers/admin/doctorAdminController.js"), "utf8");
-const publicController = fs.readFileSync(path.join(root, "controllers/publicController.js"), "utf8");
-const service = fs.readFileSync(path.join(root, "services/masterDataService.js"), "utf8");
-const doctor = fs.readFileSync(path.join(root, "models/Doctor.js"), "utf8");
+const readSource = (file) => fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
+const admin = readSource("controllers/admin/doctorAdminController.js");
+const publicController = readSource("controllers/publicController.js");
+const service = readSource("services/masterDataService.js");
+const doctor = readSource("models/Doctor.js");
 
 for (const field of ["specializationMasterId", "stateMasterId", "districtMasterId", "cityMasterId"]) {
   assert.match(doctor, new RegExp(field));

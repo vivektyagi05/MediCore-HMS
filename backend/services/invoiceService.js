@@ -72,8 +72,8 @@ export const createSubscriptionInvoiceRecord = async ({ subscription, doctorUser
     currency: subscription.currency,
   });
 
-  const pdfPath = await generateEnterpriseInvoicePDF(invoice.toJSON());
-  invoice.pdfPath = pdfPath;
+  const { key: pdfStorageKey } = await generateEnterpriseInvoicePDF(invoice.toJSON());
+  invoice.pdfStorageKey = pdfStorageKey;
   invoice.downloadUrl = `/api/invoices/${invoice._id}/download`;
   await invoice.save();
 
@@ -93,7 +93,9 @@ export const invoiceService = {
     const doctorProfile = appointment.doctorId;
     const doctorUser = doctorProfile.userId;
 
-    const invoice = await Invoice.create({
+    let invoice;
+    try {
+    invoice = await Invoice.create({
       invoiceNumber: invoiceNumber(),
       paymentId: payment._id,
       appointmentId: appointment._id,
@@ -122,9 +124,17 @@ export const invoiceService = {
       totalAmount: payment.totalAmount,
       currency: payment.currency,
     });
+    } catch (error) {
+      // F-008: a concurrent creator won the unique (paymentId) index; return its invoice.
+      if (error?.code === 11000) {
+        const winner = await Invoice.findOne({ paymentId: payment._id });
+        if (winner) return winner;
+      }
+      throw error;
+    }
 
-    const pdfPath = await generateEnterpriseInvoicePDF(invoice.toJSON());
-    invoice.pdfPath = pdfPath;
+    const { key: pdfStorageKey } = await generateEnterpriseInvoicePDF(invoice.toJSON());
+    invoice.pdfStorageKey = pdfStorageKey;
     invoice.downloadUrl = `/api/invoices/${invoice._id}/download`;
     await invoice.save();
 

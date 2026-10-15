@@ -12,6 +12,7 @@ import EmptyState from "../../components/shared/EmptyState";
 import AppointmentStatusTracker from "../../components/patient/AppointmentStatusTracker";
 import RescheduleAppointmentDialog from "../../components/shared/RescheduleAppointmentDialog";
 import CancelAppointmentDialog from "../../components/shared/CancelAppointmentDialog";
+import AppointmentOperationsPanel from "../../components/appointments/AppointmentOperationsPanel";
 
 const canCancel = (status) => ["pending", "approved", "payment_pending"].includes(status);
 
@@ -24,6 +25,7 @@ export default function AppointmentDetail() {
   const [error, setError] = useState("");
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [serverActions, setServerActions] = useState(null); // backend verdicts; fall back to status until loaded
 
   const load = async () => {
     setLoading(true); setError("");
@@ -42,17 +44,21 @@ export default function AppointmentDetail() {
   const doctor = appointment.doctorId;
   const patient = appointment.patientId;
   const status = appointment.status;
+  const cancelAllowed = serverActions ? serverActions.actions?.cancel?.allowed : canCancel(status);
+  const rescheduleAllowed = serverActions ? serverActions.actions?.reschedule?.allowed : canCancel(status);
 
   return <div className="mx-auto max-w-5xl space-y-6">
     <Link to="/patient/appointments" className="inline-flex items-center gap-2 text-sm font-black text-blue-600"><ArrowLeft size={16}/>{t("appointmentDetail.back")}</Link>
     <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
       <div><p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">{t("appointmentDetail.eyebrow")}</p><h1 className="mt-2 text-3xl font-black text-slate-950">Dr. {doctor?.userId?.name || t("appointmentDetail.doctorRemoved")}</h1><p className="mt-1 text-sm text-slate-500">{doctor?.specialization || ""}</p></div>
       <div className="flex flex-wrap gap-2">
-        {canCancel(status) && <Button variant="secondary" className="border-red-300 text-red-600" onClick={() => setCancelTarget(appointment)}><XCircle size={15}/>{t("appointmentDetail.cancel")}</Button>}
-        {canCancel(status) && <Button variant="secondary" onClick={() => setRescheduleTarget(appointment)}><CalendarClock size={15}/>{t("appointmentDetail.reschedule")}</Button>}
+        {cancelAllowed && <Button variant="secondary" className="border-red-300 text-red-600" onClick={() => setCancelTarget(appointment)}><XCircle size={15}/>{t("appointmentDetail.cancel")}</Button>}
+        {rescheduleAllowed && <Button variant="secondary" onClick={() => setRescheduleTarget(appointment)}><CalendarClock size={15}/>{t("appointmentDetail.reschedule")}</Button>}
         {status === "payment_pending" && <Button onClick={() => navigate(`/patient/payments/${appointment._id}`)}><CreditCard size={15}/>{t("appointmentDetail.pay")}</Button>}
       </div>
     </div>
+
+    <AppointmentOperationsPanel appointmentId={appointment._id} onChanged={load} onActionsLoaded={setServerActions} />
 
     <AppointmentStatusTracker appointment={appointment} onPayNow={() => navigate(`/patient/payments/${appointment._id}`)} />
 

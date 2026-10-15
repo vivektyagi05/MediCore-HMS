@@ -1,4 +1,3 @@
-import fs from "fs";
 import mongoose from "mongoose";
 import Invoice from "../models/Invoice.js";
 import Payment, { REFUND_STATUS } from "../models/Payment.js";
@@ -6,6 +5,11 @@ import Doctor from "../models/Doctor.js";
 import { ROLES } from "../constants/roles.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { AppError } from "../middleware/errorMiddleware.js";
+import { hasStoredPdf, sendStoredPdf } from "../services/pdfDocumentStore.js";
+
+// N-007: never expose server filesystem paths or storage keys to clients;
+// the UI only needs to know whether a PDF exists.
+const publicInvoice = ({ pdfPath, pdfStorageKey, ...rest }) => ({ ...rest, hasPdf: hasStoredPdf({ pdfPath, pdfStorageKey }) });
 
 // PHASE DOC-09 — Doctor Earnings / Financial Control Center.
 //
@@ -103,7 +107,7 @@ export const getInvoices = asyncHandler(async (req, res) => {
   const enrichedInvoices = invoices.map((invoice) => {
     const payment = paymentById.get(invoice.paymentId?.toString());
     return {
-      ...invoice,
+      ...publicInvoice(invoice),
       documentType: documentTypeFor(payment),
       refundedAmount: payment?.refundedAmount || 0,
     };
@@ -162,7 +166,7 @@ export const getInvoiceById = asyncHandler(async (req, res) => {
 
   res.status(200).json({
     success: true,
-    data: { invoice: { ...invoice, documentType: documentTypeFor(payment), refundedAmount: payment?.refundedAmount || 0 } },
+    data: { invoice: { ...publicInvoice(invoice), documentType: documentTypeFor(payment), refundedAmount: payment?.refundedAmount || 0 } },
     message: "Invoice fetched successfully",
   });
 });
@@ -173,9 +177,13 @@ export const downloadInvoice = asyncHandler(async (req, res) => {
   }
 
   const invoice = await Invoice.findOne({ _id: req.params.id, ...(await ownershipFilter(req)) }).lean();
-  if (!invoice?.pdfPath || !fs.existsSync(invoice.pdfPath)) {
-    throw new AppError("Invoice PDF not found", 404);
-  }
+  if (!invoice) throw new AppError("Invoice PDF not found", 404);
 
-  res.download(invoice.pdfPath, `${invoice.invoiceNumber}.pdf`);
+  await sendStoredPdf(res, {
+    storageKey: invoice.pdfStorageKey,
+    legacyPath: invoice.pdfPath,
+    legacyCategory: "invoices",
+    fileName: `${invoice.invoiceNumber}.pdf`,
+    notFoundMessage: "Invoice PDF not found",
+  });
 });

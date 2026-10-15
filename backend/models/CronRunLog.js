@@ -33,6 +33,14 @@ const cronRunLogSchema = new mongoose.Schema(
     // investigation of a stuck job), never used to decide locking itself.
     host: String,
     pid: Number,
+    // N-002 lease/fencing. ownerToken is a random per-run secret: every
+    // heartbeat/complete/release write is conditioned on {_id, ownerToken,
+    // status:"running"}, so a worker whose lease was reclaimed can never
+    // overwrite the newer owner's row or a timed_out row. leaseExpiresAt is
+    // pushed forward by the heartbeat; a holder past it is considered dead.
+    ownerToken: String,
+    leaseExpiresAt: Date,
+    heartbeatAt: Date,
   },
   { timestamps: true },
 );
@@ -46,9 +54,15 @@ cronRunLogSchema.index({ jobName: 1, startedAt: -1 });
 // error to detect "already running" atomically; it is not a check-then-act
 // race because the uniqueness is enforced by the database, not application
 // code.
+// N-024: this index MUST carry its own name. The field-level `index: true` on
+// jobName already declares a plain {jobName:1} index with the default name
+// "jobName_1"; an unnamed unique partial index on the same key would ask for
+// the SAME default name with different options and be rejected by the server,
+// leaving NO lock index at all (and silently, since index errors are only
+// emitted as events). Verified at runtime by cronRunTracker.verifyLockIndex().
 cronRunLogSchema.index(
   { jobName: 1 },
-  { unique: true, partialFilterExpression: { status: "running" } },
+  { unique: true, name: "uniq_cronrun_running_per_job", partialFilterExpression: { status: "running" } },
 );
 // Phase A6.2.4 — Enterprise Monitoring Platform. Cron Health ranking reads
 // across ALL jobs by recency, not one job at a time.

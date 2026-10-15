@@ -5,7 +5,15 @@ export const paymentApi = {
     return apiClient.post("/payments/orders", payload).then((res) => res.data);
   },
   verifyPayment(payload) {
-    return apiClient.post("/payments/verify", payload).then((res) => res.data);
+    // Gateways hand back snake_case (razorpay_*); the verify contract is
+    // camelCase. Map explicitly so no gateway object is forwarded raw and
+    // client-supplied amount/currency never travel to the server.
+    const body = {
+      razorpayOrderId: payload.razorpayOrderId ?? payload.razorpay_order_id,
+      paymentId: payload.paymentId ?? payload.razorpay_payment_id,
+      signature: payload.signature ?? payload.razorpay_signature,
+    };
+    return apiClient.post("/payments/verify", body).then((res) => res.data);
   },
   completeTestPayment(razorpayOrderId) {
     return apiClient.post("/payments/test/complete", { razorpayOrderId }).then((res) => res.data);

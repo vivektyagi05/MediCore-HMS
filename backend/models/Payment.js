@@ -170,6 +170,12 @@ const paymentSchema = new mongoose.Schema(
       min: 0,
     },
     nextRetryAt: Date,
+    // F-006: short lease taken atomically by claimRetry(); a crashed worker's
+    // lease expires on its own instead of wedging the payment.
+    retryClaimedAt: Date,
+    // Phase 01: fencing token of the retry lease holder. A worker whose lease
+    // expired cannot commit its order pointer because the token no longer matches.
+    retryClaimToken: String,
     lockedAt: Date,
     // Phase A6.2.4 — Enterprise Monitoring Platform. Payments that have
     // exhausted paymentRetryService.js's MAX_RETRIES (3) with no further
@@ -192,6 +198,31 @@ const paymentSchema = new mongoose.Schema(
     refundLockedAt: Date,
     paidAt: Date,
     failedAt: Date,
+    // Phase 01: true while this payment is the ONE active/conflicting payment
+    // for its appointment. Backed by a partial unique index (see below), so two
+    // concurrent creations cannot both succeed. Unset when the payment can no
+    // longer be paid or retried (cancelled/expired/refunded/retries exhausted).
+    activeAppointmentSlot: { type: Boolean },
+    // Phase 01: which attempt/order the provider capture belongs to. The latest
+    // order on this document is NOT necessarily the one that was paid.
+    capturedAttemptNumber: Number,
+    capturedGatewayOrderId: String,
+    // Phase 01: immutable-ish evidence of every provider capture or anomaly seen
+    // for this payment (duplicate captures, old-order captures, mismatches).
+    captureEvidence: {
+      type: [{
+        gatewayOrderId: String,
+        gatewayPaymentId: String,
+        attemptNumber: Number,
+        amountPaise: Number,
+        currency: String,
+        source: String,
+        disposition: String,
+        at: { type: Date, default: Date.now },
+      }],
+      default: [],
+      select: false,
+    },
     stateHistory: [{
       from: String,
       to: String,
@@ -235,6 +266,18 @@ const paymentSchema = new mongoose.Schema(
 
 paymentSchema.index({ userId: 1, createdAt: -1 });
 paymentSchema.index({ appointmentId: 1, status: 1 });
+// Phase 01: at most ONE active payment per appointment. Equality-only partial
+// filter (portable across MongoDB versions). The key is deliberately the pair
+// (appointmentId, activeAppointmentSlot): a bare { appointmentId: 1 } key would
+// collide with the field-level appointmentId_1 index (same key pattern,
+// different options is rejected by MongoDB). Because only documents with
+// activeAppointmentSlot === true are indexed, uniqueness of the pair means one
+// active payment per appointment. Migration 012 reports legacy duplicates
+// first; migration 011 (re-run on every release) then builds it.
+paymentSchema.index(
+  { appointmentId: 1, activeAppointmentSlot: 1 },
+  { unique: true, partialFilterExpression: { activeAppointmentSlot: true }, name: "uniq_payment_active_appointment" },
+);
 
 const Payment = mongoose.model("Payment", paymentSchema);
 

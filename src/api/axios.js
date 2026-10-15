@@ -1,3 +1,4 @@
+import { getAppointmentErrorMessage } from "../utils/appointmentErrors";
 import axios from "axios";
 
 export const API_BASE_URL =
@@ -131,6 +132,11 @@ export const clearApiGetCache = () => {
 // message.
 export const getApiErrorMessage = (error) => {
   const data = error.response?.data;
+  // Structured business errors (details.code): map to friendly text and never
+  // join the rest of `details` (action/timeState/etc. are machine metadata).
+  const coded = getAppointmentErrorMessage(error);
+  if (coded) return coded;
+  if (data?.details?.code && data?.message) return data.message;
   if (data?.details && typeof data.details === "object" && !Array.isArray(data.details)) {
     const detailMessages = Object.entries(data.details)
       .filter(([key, value]) => key !== "code" && typeof value === "string")

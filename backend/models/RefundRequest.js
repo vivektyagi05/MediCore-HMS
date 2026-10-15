@@ -37,6 +37,8 @@ const refundRequestSchema = new mongoose.Schema(
     }],
     attemptCount: { type: Number, default: 0, min: 0 },
     lastAttemptAt: Date,
+    // Truthful provider outcome of the last gateway call: processed | pending | failed | unknown.
+    gatewayRefundStatus: { type: String, enum: ["processed", "pending", "failed", "unknown"], index: true, sparse: true },
     gatewayRefundId: { type: String, index: true, sparse: true },
     razorpayRefundId: String,
     // AUDIT FINDING (Phase UI-6): the schema already declared "failed" as a

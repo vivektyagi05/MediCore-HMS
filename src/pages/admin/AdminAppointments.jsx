@@ -20,6 +20,7 @@ import AdminModal from "../../components/admin/AdminModal";
 import AdminTable from "../../components/admin/AdminTable";
 import AppointmentCancelDialog from "../../components/admin/AppointmentCancelDialog";
 import AppointmentDetailWorkspace from "../../components/admin/AppointmentDetailWorkspace";
+import AppointmentOperationsOverview from "../../components/admin/AppointmentOperationsOverview";
 import FilterBar from "../../components/admin/FilterBar";
 import ErrorState from "../../components/shared/ErrorState";
 import Button from "../../components/ui/Button";
@@ -245,6 +246,7 @@ function AdminAppointments() {
         title="Appointment Operations Workspace"
         description="A single operational queue for every appointment — patient, doctor, payment, and clinical state, in one place."
       />
+      <AppointmentOperationsOverview />
 
       {summary && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -1,3 +1,6 @@
+import { financeEmitter } from "../realtime/financeEmitter.js";
+import { financialEmails } from "../services/financialEmails.js";
+import { planOutOfBandRefund } from "../payments/outOfBandRefund.js";
 import { areRefundsEnabled } from "../services/hospitalSettingsService.js";
 import mongoose from "mongoose";
 import Appointment from "../models/Appointment.js";
@@ -11,14 +14,15 @@ import { AppError } from "../middleware/errorMiddleware.js";
 import { ROLES } from "../constants/roles.js";
 import { PAYMENT_STATUS as APPOINTMENT_PAYMENT_STATUS } from "../constants/appointmentStatus.js";
 import { paymentGateway } from "../payments/paymentGateway.js";
-import { emailService } from "../services/emailService.js";
 import { transactionLogger } from "../utils/transactionLogger.js";
 import { paymentEmitter } from "../realtime/paymentEmitter.js";
 import { notificationEmitter } from "../realtime/notificationEmitter.js";
 import { writeAdminLog } from "../utils/adminAudit.js";
 import { emitAutomationTrigger } from "../automation-studio/automationEventBus.js";
 import { TRIGGER_TYPES } from "../automation-studio/triggerRegistry.js";
-import { addMoney } from "../payments/money.js";
+import { addMoney, toPaise } from "../payments/money.js";
+import { GATEWAY_REFUND_OUTCOME, classifyGatewayRefund, isDefinitiveGatewayRejection } from "../payments/refundGatewayOutcome.js";
+import { applyRefundToDoctorEarning } from "../payments/refundEarningAdjustment.js";
 import { appendPaymentTransition } from "../payments/paymentStateMachine.js";
 import { appendRefundTransition, assertRefundTransition, REFUND_STATES } from "../payments/refundStateMachine.js";
 import {
@@ -76,47 +80,6 @@ const assertNoConflictingRefundRequest = async (paymentId) => {
   if (duplicate) throw new AppError("A refund request is already pending or approved for this payment", 409);
 };
 
-// P23 (Section 14) — records the payout-side consequence of a refund
-// without ever mutating the payout's original grossAmount/doctorAmount/
-// platformFee (financial history preservation, Section 55). Pending
-// payouts are cancelled outright since the money was never sent; already
-// paid/settled payouts get an explicit, visible liability marker instead
-// of a silent balance mutation — this codebase has no payout-recovery
-// engine, so "adjusted_pending" is an honestly-disclosed manual-follow-up
-// state, not a fabricated automatic recovery.
-const adjustDoctorPayoutForRefund = async ({ paymentId, refundAmount, totalAmount, gatewayRefundId, actorId }) => {
-  const payout = await DoctorPayout.findOne({ paymentId });
-  if (!payout) return null;
-
-  const proportionalDoctorAdjustment = totalAmount > 0
-    ? Number(((payout.doctorAmount * refundAmount) / totalAmount).toFixed(2))
-    : 0;
-
-  if (payout.status === "pending") {
-    payout.status = "cancelled";
-    payout.cancelReason = `Refund processed against underlying payment (${gatewayRefundId || "wallet-only"})`;
-    payout.refundReference = gatewayRefundId || null;
-    payout.refundAdjustmentAmount = proportionalDoctorAdjustment;
-    payout.liabilityStatus = "adjusted_settled"; // never sent, nothing to recover
-    payout.adjustedAt = new Date();
-    payout.settledBy = actorId;
-    await payout.save();
-    return payout;
-  }
-
-  if (payout.status === "paid") {
-    payout.refundReference = gatewayRefundId || payout.refundReference || null;
-    payout.refundAdjustmentAmount = addMoney(payout.refundAdjustmentAmount || 0, proportionalDoctorAdjustment);
-    payout.liabilityStatus = "adjusted_pending";
-    payout.adjustedAt = new Date();
-    await payout.save();
-    return payout;
-  }
-
-  // Already cancelled — nothing further to adjust.
-  return payout;
-};
-
 // Core gateway-processing step. Only ever called once a RefundRequest is
 // already in "approved" state (whether via approveRefundRequest,
 // initiateRefund's direct-approve, or retryRefundRequest). Acquires the
@@ -129,14 +92,188 @@ const adjustDoctorPayoutForRefund = async ({ paymentId, refundAmount, totalAmoun
 // double-payout bug (Sections 9/27). This version computes the canonical
 // wallet/gateway funding split first and only moves the money that
 // actually belongs to each bucket.
+const refundKeyFor = ({ refund, refundRequest, paymentId }) =>
+  refund?.id ? `gw:${refund.id}` : `rr:${refundRequest?._id || paymentId}:${refundRequest?.attemptCount || 1}`;
+
+// Truthful failure bookkeeping. Lock must be held. `definitive` = the provider
+// rejected the refund (safe to retry); otherwise the outcome is AMBIGUOUS and
+// the request goes to reconciliation (blind retry could double-refund).
+// The payment is never left looking refunded.
+const recordRefundNotCompleted = async ({ payment, refundRequest, failureReason, definitive, actorId, req, gatewayStatus }) => {
+  payment.refundStatus = definitive
+    ? (Number(payment.refundedAmount || 0) > 0 ? REFUND_STATUS.PARTIAL : REFUND_STATUS.NONE)
+    : REFUND_STATUS.PENDING;
+  await payment.save();
+  transactionLogger.refund(definitive ? "Refund rejected by gateway — no money moved" : "Refund outcome unknown — reconciliation required", {
+    paymentId: payment._id.toString(), error: failureReason,
+  });
+  if (!refundRequest) return;
+  refundRequest.gatewayRefundStatus = gatewayStatus || (definitive ? GATEWAY_REFUND_OUTCOME.FAILED : GATEWAY_REFUND_OUTCOME.UNKNOWN);
+  refundRequest.failureReason = failureReason;
+  if (definitive) {
+    refundRequest.status = "failed";
+    appendRefundTransition(refundRequest, REFUND_STATES.FAILED, { actorId, source: "server", reason: failureReason });
+    appendRefundTransition(refundRequest, REFUND_STATES.RETRY_REQUIRED, { actorId, source: "server", reason: "Eligible for retry after provider rejection" });
+  } else {
+    // status stays "approved": the partial-unique index keeps blocking a second refund request.
+    appendRefundTransition(refundRequest, REFUND_STATES.RECONCILIATION_REQUIRED, { actorId, source: "server", reason: failureReason });
+  }
+  refundRequest.timeline.push({
+    status: definitive ? "failed" : "reconciliation_required",
+    note: definitive ? `Refund not completed. ${failureReason}` : `Refund outcome could not be confirmed. ${failureReason}`,
+    actorId,
+  });
+  await refundRequest.save();
+  const eventKey = `refund:${refundRequest._id}:${definitive ? "failed" : "unconfirmed"}:${refundRequest.timeline.length}`;
+  await notificationEmitter.emitToUser(payment.userId._id || payment.userId, {
+    type: "refund",
+    title: definitive ? "Refund could not be processed" : "Refund is being verified",
+    message: definitive
+      ? `We were unable to process your refund of ${payment.currency} ${refundRequest.amount}. It will be reviewed and retried.`
+      : `Your refund of ${payment.currency} ${refundRequest.amount} is being verified with the payment provider.`,
+    entityType: "payment", entityId: payment._id, eventKey, severity: "critical",
+    metadata: { refundRequestId: refundRequest._id },
+  });
+  await notificationEmitter.emitToAdmins({
+    type: "refund", title: definitive ? "Refund failed" : "Refund needs reconciliation",
+    message: `Refund request ${refundRequest._id} for payment ${payment._id} ${definitive ? "was rejected by the gateway" : "has an unconfirmed gateway outcome"}.`,
+    entityType: "payment", entityId: payment._id, eventKey: `${eventKey}:admin`, severity: "critical",
+    metadata: { refundRequestId: refundRequest._id },
+  });
+  if (req) {
+    await writeAdminLog({
+      req, action: definitive ? "refund.process_failed" : "refund.reconciliation_required", resourceType: "RefundRequest",
+      resourceId: refundRequest._id.toString(), severity: "critical",
+      metadata: { paymentId: payment._id.toString(), amount: refundRequest.amount, failureReason },
+    });
+  }
+};
+
+// Everything that happens ONLY once the money has genuinely moved (provider
+// status = processed, or a wallet-only refund). Lock must be held. Idempotent:
+// a gateway refund id already counted is never counted twice, the earning
+// adjustment is keyed per refund, ledger postings have unique keys.
+const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAmount, walletRefundAmount, gatewayRefundAmount, reason, actorId, req }) => {
+  const refundKey = refundKeyFor({ refund, refundRequest, paymentId: payment._id });
+  const alreadyCounted = Boolean(refund?.id) && (payment.processedGatewayRefundIds || []).includes(refund.id);
+  const refundedBefore = payment.refundedAmount || 0;
+
+  if (!alreadyCounted) {
+    payment.walletRefundedAmount = addMoney(payment.walletRefundedAmount || 0, walletRefundAmount);
+    payment.gatewayRefundedAmount = addMoney(payment.gatewayRefundedAmount || 0, gatewayRefundAmount);
+    payment.refundedAmount = addMoney(payment.walletRefundedAmount, payment.gatewayRefundedAmount);
+    if (refund?.id) payment.processedGatewayRefundIds = Array.from(new Set([...(payment.processedGatewayRefundIds || []), refund.id]));
+  }
+  const isFullRefund = toPaise(payment.refundedAmount) >= toPaise(payment.totalAmount);
+  payment.refundStatus = isFullRefund ? REFUND_STATUS.FULL : REFUND_STATUS.PARTIAL;
+  if (!alreadyCounted) {
+    appendPaymentTransition(payment, isFullRefund ? PAYMENT_STATUS.REFUNDED : PAYMENT_STATUS.PARTIALLY_REFUNDED, {
+      actorId, source: "refund", reason: `Refund of ${payment.currency} ${refundAmount} processed`,
+    });
+  }
+  await payment.save();
+
+  // The appointment is only "refunded" when the payment is fully refunded; a
+  // partial refund leaves it paid (the Payment document carries the detail).
+  if (isFullRefund) {
+    await Appointment.findByIdAndUpdate(payment.appointmentId, { paymentStatus: APPOINTMENT_PAYMENT_STATUS.REFUNDED });
+  }
+
+  const walletReferenceId = refund?.id ? `${refund.id}:wallet` : `refund-request:${refundRequest?._id || payment._id}:${refundRequest?.attemptCount || 1}`;
+  let wallet = null;
+  if (walletRefundAmount > 0) {
+    wallet = await Wallet.findOneAndUpdate(
+      {
+        userId: payment.userId._id,
+        transactions: { $not: { $elemMatch: { referenceType: "refund", referenceId: walletReferenceId } } },
+      },
+      {
+        $inc: { balance: walletRefundAmount },
+        $push: {
+          transactions: {
+            type: "refund", amount: walletRefundAmount, currency: payment.currency, status: "completed",
+            referenceType: "refund", referenceId: walletReferenceId,
+            description: reason || "Appointment payment refund (wallet-funded portion)",
+          },
+        },
+      },
+      { returnDocument: "after", upsert: true },
+    ).catch((error) => {
+      if (error?.code === 11000) return null; // upsert raced with an existing wallet: already credited
+      throw error;
+    });
+  }
+
+  const postLedger = async (entry) => {
+    try { await TransactionLedger.create(entry); } catch (error) { if (error?.code !== 11000) throw error; }
+  };
+  if (gatewayRefundAmount > 0 && refund?.id) {
+    await postLedger({
+      userId: payment.userId._id, paymentId: payment._id, type: "refund", direction: "credit",
+      amount: gatewayRefundAmount, currency: payment.currency, referenceId: refund.id,
+      idempotencyKey: `refund:gateway:${refund.id}`,
+      metadata: { reason, refundRequestId: refundRequest?._id, fundingSource: "gateway" },
+    });
+  }
+  if (walletRefundAmount > 0 && wallet) {
+    await postLedger({
+      userId: payment.userId._id, paymentId: payment._id, walletId: wallet._id, type: "wallet_credit", direction: "credit",
+      amount: walletRefundAmount, currency: payment.currency, referenceId: walletReferenceId,
+      idempotencyKey: `refund:wallet:${walletReferenceId}`,
+      metadata: { reason, refundRequestId: refundRequest?._id, fundingSource: "wallet" },
+    });
+  }
+
+  // Doctor earning + platform revenue reversal (once per refund).
+  const earning = await applyRefundToDoctorEarning({
+    paymentId: payment._id, refundAmount, paymentTotal: payment.totalAmount, refundedBefore,
+    refundKey, gatewayRefundId: refund?.id || null, actorId,
+  });
+  if (earning.applied && earning.doctorUserId) {
+    await notificationEmitter.emitToUser(earning.doctorUserId, {
+      type: "refund",
+      title: "Earning adjusted by a refund",
+      message: `A refund reduced your earning for this consultation by ${payment.currency} ${earning.doctorAdjustment}.${earning.becameLiability ? " It has been deducted from your available balance." : ""}`,
+      entityType: "payment", entityId: payment._id, eventKey: `earning:adjusted:${refundKey}`,
+      metadata: { doctorAdjustment: earning.doctorAdjustment },
+    }).catch(() => {});
+  }
+
+  if (refundRequest) {
+    refundRequest.status = "processed";
+    if (refundRequest.refundState !== REFUND_STATES.PROCESSED) {
+      appendRefundTransition(refundRequest, REFUND_STATES.PROCESSED, { actorId, source: "server", reason: "Refund confirmed by provider/wallet posting" });
+    }
+    refundRequest.processedBy = actorId || refundRequest.processedBy;
+    refundRequest.razorpayRefundId = refund?.id;
+    refundRequest.gatewayRefundId = refund?.id;
+    refundRequest.gatewayRefundStatus = refund?.id ? GATEWAY_REFUND_OUTCOME.PROCESSED : refundRequest.gatewayRefundStatus;
+    refundRequest.failureReason = undefined;
+    refundRequest.timeline.push({
+      status: "processed",
+      note: `Refund processed — gateway ${payment.currency} ${gatewayRefundAmount}, wallet ${payment.currency} ${walletRefundAmount}`,
+      actorId,
+    });
+    await refundRequest.save();
+  }
+
+  financeEmitter.invalidate({ userIds: [payment.userId?._id || payment.userId], domain: "refund", entityId: payment._id });
+  await financialEmails.refundProcessed({ payment, refundId: refund?.id, amount: refundAmount, user: payment.userId });
+  if (req) {
+    await writeAdminLog({
+      req, action: "refund.processed", resourceType: "RefundRequest", resourceId: refundRequest?._id?.toString(),
+      metadata: { paymentId: payment._id.toString(), amount: refundAmount, walletRefundAmount, gatewayRefundAmount, gatewayRefundId: refund?.id || null },
+    });
+  }
+  transactionLogger.refund("Refund processed", { paymentId: payment._id.toString(), refundId: refund?.id || null, refundAmount, walletRefundAmount, gatewayRefundAmount });
+  await paymentEmitter.refundProcessed({ payment, refundRequest });
+  return { wallet };
+};
+
 const processRefund = async ({ paymentId, refundAmount, reason, actorId, refundRequest, req }) => {
   await acquireRefundLock(paymentId);
 
   try {
-    // Re-fetch fresh state now that the lock is held — the caller's
-    // `payment` snapshot may already be stale if another refund completed
-    // on this payment between when it was read and when the lock was
-    // acquired.
     const payment = await Payment.findById(paymentId).populate("userId", "name email");
     if (!payment) throw new AppError("Payment not found", 404);
 
@@ -145,15 +282,13 @@ const processRefund = async ({ paymentId, refundAmount, reason, actorId, refundR
     }
 
     const refundableAmount = computeRefundableAmount(payment);
-    if (refundAmount <= 0 || refundAmount > refundableAmount) {
+    if (toPaise(refundAmount) <= 0 || toPaise(refundAmount) > toPaise(refundableAmount)) {
       throw new AppError(
         `Refund amount exceeds refundable balance. Remaining refundable: ${payment.currency} ${refundableAmount}`,
         400,
       );
     }
 
-    // Canonical funding allocation (Sections 9/10/27/28) — computed once,
-    // authoritative for every downstream money movement in this call.
     const { walletRefundAmount, gatewayRefundAmount } = computeFundingAllocation({ payment, refundAmount });
 
     if (refundRequest) {
@@ -167,231 +302,173 @@ const processRefund = async ({ paymentId, refundAmount, reason, actorId, refundR
       await refundRequest.save();
     }
 
-    const previousPaymentStatus = payment.status;
-    const previousRefundStatus = payment.refundStatus;
     payment.refundStatus = REFUND_STATUS.PENDING;
     await payment.save();
 
-    // Only call the gateway for the portion that was actually captured by
-    // the gateway. A wallet-only refund (gatewayRefundAmount === 0, e.g. a
-    // payment fully funded by wallet balance) never touches the gateway at
-    // all — there is nothing there to reverse.
     let refund = null;
     if (gatewayRefundAmount > 0) {
       try {
         refund = await paymentGateway.refundPayment({
           paymentId: payment.paymentId,
           amount: gatewayRefundAmount,
-          notes: {
-            reason,
-            paymentRecordId: payment._id.toString(),
-            refundRequestId: refundRequest?._id?.toString?.(),
-          },
+          notes: { reason, paymentRecordId: payment._id.toString(), refundRequestId: refundRequest?._id?.toString?.() },
         });
       } catch (error) {
-        payment.refundStatus = previousRefundStatus;
-        payment.status = previousPaymentStatus;
-        await payment.save();
+        const definitive = isDefinitiveGatewayRejection(error);
+        const failureReason = error?.message || "Payment gateway did not confirm the refund";
+        await recordRefundNotCompleted({ payment, refundRequest, failureReason, definitive, actorId, req });
+        throw new AppError(
+          definitive
+            ? "Refund could not be processed by the payment gateway. No refund was recorded."
+            : "The refund outcome could not be confirmed with the payment gateway. It has been flagged for reconciliation; do not retry blindly.",
+          502,
+          { code: definitive ? "REFUND_FAILED" : "REFUND_RECONCILIATION_REQUIRED" },
+        );
+      }
 
-        const failureReason = error?.message || "Payment gateway rejected the refund request";
-        transactionLogger.refund("Refund gateway call failed — no state changed", {
-          paymentId: payment._id.toString(),
-          error: failureReason,
+      const outcome = classifyGatewayRefund(refund);
+      if (outcome === GATEWAY_REFUND_OUTCOME.FAILED || outcome === GATEWAY_REFUND_OUTCOME.UNKNOWN) {
+        const definitive = outcome === GATEWAY_REFUND_OUTCOME.FAILED;
+        await recordRefundNotCompleted({
+          payment, refundRequest, definitive, actorId, req, gatewayStatus: outcome,
+          failureReason: definitive ? "Gateway reported the refund as failed" : "Gateway returned an unrecognised refund status",
         });
-
-        if (refundRequest) {
-          refundRequest.status = "failed";
-          appendRefundTransition(refundRequest, REFUND_STATES.RETRY_REQUIRED, {
-            actorId, source: "server", reason: failureReason,
-          });
-          refundRequest.failureReason = failureReason;
-          refundRequest.timeline.push({
-            status: "failed",
-            note: `Refund not confirmed. ${failureReason}`,
-            actorId,
-          });
-          await refundRequest.save();
-
-          await notificationEmitter.emitToUser(payment.userId._id || payment.userId, {
-            type: "refund",
-            title: "Refund could not be processed",
-            message: `We were unable to process your refund of ${payment.currency} ${refundAmount}. It will be reviewed and retried.`,
-            entityType: "payment",
-            entityId: payment._id,
-            eventKey: `refund:${refundRequest._id}:failed:${refundRequest.timeline.length}`,
-            severity: "critical",
-            metadata: { refundRequestId: refundRequest._id, failureReason },
-          });
-        }
-
-        if (req) {
-          await writeAdminLog({
-            req,
-            action: "refund.process_failed",
-            resourceType: "RefundRequest",
-            resourceId: refundRequest?._id?.toString(),
-            severity: "critical",
-            metadata: { paymentId: payment._id.toString(), amount: refundAmount, failureReason },
-          });
-        }
-
-        throw new AppError("Refund could not be processed by the payment gateway. No refund was recorded.", 502);
+        if (refund?.id && refundRequest) { refundRequest.gatewayRefundId = refund.id; await refundRequest.save(); }
+        throw new AppError(
+          definitive ? "Refund could not be processed by the payment gateway. No refund was recorded."
+            : "The refund outcome could not be confirmed with the payment gateway. It has been flagged for reconciliation.",
+          502,
+          { code: definitive ? "REFUND_FAILED" : "REFUND_RECONCILIATION_REQUIRED" },
+        );
+      }
+      if (outcome === GATEWAY_REFUND_OUTCOME.PENDING) {
+        // Truthful: the provider accepted the request but has not completed it.
+        // No counters, wallet credit, ledger or earning reversal yet — those
+        // happen when the provider confirms (webhook / reconciliation).
+        if (!refundRequest) throw new AppError("A pending gateway refund requires a refund request record", 500);
+        refundRequest.gatewayRefundId = refund.id;
+        refundRequest.razorpayRefundId = refund.id;
+        refundRequest.gatewayRefundStatus = GATEWAY_REFUND_OUTCOME.PENDING;
+        refundRequest.timeline.push({ status: "gateway_processing", note: "Refund accepted by the payment provider; awaiting completion", actorId });
+        await refundRequest.save();
+        transactionLogger.refund("Refund pending at gateway", { paymentId: payment._id.toString(), refundId: refund.id });
+        return { payment, refund, wallet: null, refundRequest, walletRefundAmount, gatewayRefundAmount, pending: true };
       }
     }
 
-    await Appointment.findByIdAndUpdate(payment.appointmentId, {
-      paymentStatus: APPOINTMENT_PAYMENT_STATUS.REFUNDED,
+    const { wallet } = await finalizeRefundMovement({
+      payment, refundRequest, refund, refundAmount, walletRefundAmount, gatewayRefundAmount, reason, actorId, req,
     });
-
-    payment.walletRefundedAmount = addMoney(payment.walletRefundedAmount || 0, walletRefundAmount);
-    payment.gatewayRefundedAmount = addMoney(payment.gatewayRefundedAmount || 0, gatewayRefundAmount);
-    payment.refundedAmount = addMoney(payment.walletRefundedAmount, payment.gatewayRefundedAmount);
-    if (refund?.id) {
-      payment.processedGatewayRefundIds = Array.from(new Set([...(payment.processedGatewayRefundIds || []), refund.id]));
-    }
-    const isFullRefund = payment.refundedAmount >= payment.totalAmount;
-    payment.refundStatus = isFullRefund ? REFUND_STATUS.FULL : REFUND_STATUS.PARTIAL;
-    // Canonical state-machine transition (Section 15) — never a bare field
-    // assignment. captured/partially_refunded -> partially_refunded/refunded
-    // are both legal transitions in PAYMENT_TRANSITIONS.
-    appendPaymentTransition(payment, isFullRefund ? PAYMENT_STATUS.REFUNDED : PAYMENT_STATUS.PARTIALLY_REFUNDED, {
-      actorId, source: "refund", reason: `Refund of ${payment.currency} ${refundAmount} processed`,
-    });
-    await payment.save();
-
-    // Wallet is only credited for the wallet-funded share. Idempotency key
-    // on the ledger entry (below) + the referenceId-based dedupe guard here
-    // both key off a synthetic, refund-request-scoped reference so a
-    // wallet-only refund (no gateway refund id at all) still can't be
-    // double-credited on retry.
-    const walletReferenceId = refund?.id ? `${refund.id}:wallet` : `refund-request:${refundRequest?._id || paymentId}:${refundRequest?.attemptCount || 1}`;
-    let wallet = null;
-    if (walletRefundAmount > 0) {
-      wallet = await Wallet.findOneAndUpdate(
-        {
-          userId: payment.userId._id,
-          transactions: { $not: { $elemMatch: { referenceType: "refund", referenceId: walletReferenceId } } },
-        },
-        {
-          $inc: { balance: walletRefundAmount },
-          $push: {
-            transactions: {
-              type: "refund",
-              amount: walletRefundAmount,
-              currency: payment.currency,
-              status: "completed",
-              referenceType: "refund",
-              referenceId: walletReferenceId,
-              description: reason || "Appointment payment refund (wallet-funded portion)",
-            },
-          },
-        },
-        { returnDocument: "after", upsert: true },
-      );
-    }
-
-    try {
-      await emailService.sendRefundConfirmation({
-        patient: payment.userId,
-        amount: refundAmount,
-        currency: payment.currency,
-      });
-    } catch (error) {
-      transactionLogger.payment("Refund confirmation email failed", {
-        paymentId: payment._id.toString(),
-        error: error.message,
-      });
-    }
-
-    // One ledger posting per real money movement (Section 28) — a
-    // gateway-funded refund and a wallet-funded refund are two distinct
-    // movements and get two distinct, independently-idempotent postings,
-    // never one entry pretending to cover both.
-    if (gatewayRefundAmount > 0 && refund?.id) {
-      await TransactionLedger.create({
-        userId: payment.userId._id,
-        paymentId: payment._id,
-        type: "refund",
-        direction: "credit",
-        amount: gatewayRefundAmount,
-        currency: payment.currency,
-        referenceId: refund.id,
-        idempotencyKey: `refund:gateway:${refund.id}`,
-        metadata: { reason, refundRequestId: refundRequest?._id, fundingSource: "gateway" },
-      });
-    }
-    if (walletRefundAmount > 0 && wallet) {
-      await TransactionLedger.create({
-        userId: payment.userId._id,
-        paymentId: payment._id,
-        walletId: wallet._id,
-        type: "wallet_credit",
-        direction: "credit",
-        amount: walletRefundAmount,
-        currency: payment.currency,
-        referenceId: walletReferenceId,
-        idempotencyKey: `refund:wallet:${walletReferenceId}`,
-        metadata: { reason, refundRequestId: refundRequest?._id, fundingSource: "wallet" },
-      });
-    }
-
-    // Doctor payout / liability adjustment (Section 14) — never a silent
-    // status flip, and never touches grossAmount/doctorAmount/platformFee.
-    await adjustDoctorPayoutForRefund({
-      paymentId: payment._id,
-      refundAmount,
-      totalAmount: payment.totalAmount,
-      gatewayRefundId: refund?.id,
-      actorId,
-    });
-
-    if (refundRequest) {
-      refundRequest.status = "processed";
-      appendRefundTransition(refundRequest, REFUND_STATES.PROCESSED, {
-        actorId, source: "server", reason: "Refund confirmed by gateway/wallet posting",
-      });
-      refundRequest.processedBy = actorId;
-      refundRequest.razorpayRefundId = refund?.id;
-      refundRequest.gatewayRefundId = refund?.id;
-      refundRequest.failureReason = undefined;
-      refundRequest.timeline.push({
-        status: "processed",
-        note: `Refund processed — gateway ${payment.currency} ${gatewayRefundAmount}, wallet ${payment.currency} ${walletRefundAmount}`,
-        actorId,
-      });
-      await refundRequest.save();
-    }
-
-    if (req) {
-      await writeAdminLog({
-        req,
-        action: "refund.processed",
-        resourceType: "RefundRequest",
-        resourceId: refundRequest?._id?.toString(),
-        metadata: {
-          paymentId: payment._id.toString(),
-          amount: refundAmount,
-          walletRefundAmount,
-          gatewayRefundAmount,
-          gatewayRefundId: refund?.id || null,
-        },
-      });
-    }
-
-    transactionLogger.refund("Refund processed", {
-      paymentId: payment._id.toString(),
-      refundId: refund?.id || null,
-      refundAmount,
-      walletRefundAmount,
-      gatewayRefundAmount,
-    });
-
-    await paymentEmitter.refundProcessed({ payment, refundRequest });
-
-    return { payment, refund, wallet, refundRequest, walletRefundAmount, gatewayRefundAmount };
+    return { payment, refund, wallet, refundRequest, walletRefundAmount, gatewayRefundAmount, pending: false };
   } finally {
     await releaseRefundLock(paymentId);
   }
+};
+
+// Converges a refund that was PENDING/ambiguous at the provider onto the same
+// finalize step the immediate path uses. Called by the refund.processed
+// webhook, by reconcileRefundRequest, and safe to call repeatedly.
+export const settlePendingGatewayRefund = async ({ refundRequestId, refund, source = "webhook", actorId = null }) => {
+  const outcome = classifyGatewayRefund(refund);
+  const initial = await RefundRequest.findById(refundRequestId).lean();
+  if (!initial) return { settled: false, reason: "not_found" };
+  await acquireRefundLock(initial.paymentId);
+  try {
+    const rr = await RefundRequest.findById(refundRequestId);
+    if (rr.refundState === REFUND_STATES.PROCESSED) return { settled: true, replay: true };
+    if (![REFUND_STATES.GATEWAY_PROCESSING, REFUND_STATES.RECONCILIATION_REQUIRED].includes(rr.refundState)) {
+      return { settled: false, reason: `state_${rr.refundState}` };
+    }
+    const payment = await Payment.findById(rr.paymentId).populate("userId", "name email");
+    if (!payment) return { settled: false, reason: "payment_not_found" };
+
+    if (outcome === GATEWAY_REFUND_OUTCOME.PROCESSED) {
+      const walletRefundAmount = rr.walletRefundAmount || 0;
+      const gatewayRefundAmount = rr.gatewayRefundAmount || 0;
+      await finalizeRefundMovement({
+        payment, refundRequest: rr, refund, refundAmount: rr.amount, walletRefundAmount, gatewayRefundAmount,
+        reason: rr.reason, actorId, req: null,
+      });
+      return { settled: true };
+    }
+    if (outcome === GATEWAY_REFUND_OUTCOME.FAILED) {
+      rr.gatewayRefundId = refund?.id || rr.gatewayRefundId;
+      await recordRefundNotCompleted({ payment, refundRequest: rr, definitive: true, actorId, req: null, gatewayStatus: outcome, failureReason: `Provider reported the refund as failed (${source})` });
+      return { settled: true, failed: true };
+    }
+    if (outcome === GATEWAY_REFUND_OUTCOME.PENDING) return { settled: false, pending: true };
+    await recordRefundNotCompleted({ payment, refundRequest: rr, definitive: false, actorId, req: null, gatewayStatus: outcome, failureReason: `Unrecognised provider refund status (${source})` });
+    return { settled: false, unknown: true };
+  } finally {
+    await releaseRefundLock(initial.paymentId);
+  }
+};
+
+// F-003: the ONLY entry for a provider-confirmed refund this app did not create.
+// It runs under the same payment refund lock and the same finalizeRefundMovement
+// as admin/webhook-owned refunds, so counters, wallet, ledger, doctor-earning and
+// platform-fee reversal all happen once. Anything it cannot safely account for is
+// flagged reconciliation_required instead of mutating counters.
+export const settleOutOfBandGatewayRefund = async ({ gatewayPaymentId, refund, source = "webhook" }) => {
+  const initial = await Payment.findOne({ paymentId: gatewayPaymentId }).select("_id").lean();
+  if (!initial) return { settled: false, reason: "payment_not_found" };
+  await acquireRefundLock(initial._id);
+  try {
+    const payment = await Payment.findById(initial._id).populate("userId", "name email");
+    const plan = planOutOfBandRefund({ payment, gatewayRefundId: refund?.id, providerAmountPaise: refund?.amount });
+    if (plan.action === "skip_duplicate") return { settled: true, replay: true };
+    if (plan.action !== "finalize") {
+      if (payment) {
+        payment.paymentState = "reconciliation_required";
+        payment.reconciliationState = "required";
+        await payment.save();
+      }
+      transactionLogger.refund("Out-of-band refund needs reconciliation", { paymentId: initial._id.toString(), refundId: refund?.id || null, reason: plan.reason || plan.action });
+      return { settled: false, reason: plan.reason || plan.action };
+    }
+    await finalizeRefundMovement({
+      payment, refundRequest: null, refund, refundAmount: plan.amount, walletRefundAmount: 0, gatewayRefundAmount: plan.amount,
+      reason: `Provider-initiated refund (${source})`, actorId: null, req: null,
+    });
+    return { settled: true };
+  } finally {
+    await releaseRefundLock(initial._id);
+  }
+};
+
+// Resolves a refund whose provider outcome is unknown or still pending by
+// asking the provider (by refund id, else by listing the payment's refunds and
+// matching our refundRequestId note). Only concludes "no refund exists" when
+// the provider lookup itself succeeded and returned nothing.
+export const reconcileRefundRequest = async (refundRequestId, { actorId = null } = {}) => {
+  const rr = await RefundRequest.findById(refundRequestId);
+  if (!rr) throw new AppError("Refund request not found", 404);
+  if (![REFUND_STATES.GATEWAY_PROCESSING, REFUND_STATES.RECONCILIATION_REQUIRED].includes(rr.refundState)) {
+    throw new AppError("Only refunds awaiting gateway confirmation can be reconciled", 409);
+  }
+  const payment = await Payment.findById(rr.paymentId).lean();
+  let refund = null;
+  if (rr.gatewayRefundId) {
+    refund = await paymentGateway.fetchRefund({ refundId: rr.gatewayRefundId });
+  } else if ((rr.gatewayRefundAmount || 0) > 0) {
+    const list = await paymentGateway.listPaymentRefunds({ paymentId: payment.paymentId });
+    refund = (list || []).find((item) => item?.notes?.refundRequestId === rr._id.toString()) || null;
+    if (!refund) {
+      // Lookup succeeded and the provider has no such refund: definitively not created.
+      await acquireRefundLock(rr.paymentId);
+      try {
+        const fresh = await RefundRequest.findById(rr._id);
+        const pay = await Payment.findById(rr.paymentId).populate("userId", "name email");
+        await recordRefundNotCompleted({ payment: pay, refundRequest: fresh, definitive: true, actorId, req: null, failureReason: "Provider confirmed no refund was created" });
+      } finally {
+        await releaseRefundLock(rr.paymentId);
+      }
+      return { settled: true, failed: true };
+    }
+  }
+  // wallet-only refunds have nothing at the provider to reconcile
+  if (!refund) throw new AppError("Nothing to reconcile at the provider for this refund", 409);
+  return settlePendingGatewayRefund({ refundRequestId: rr._id, refund, source: "reconciliation", actorId });
 };
 
 // Shared by createRefundRequest (cancellation-style) and reportPaymentProblem
@@ -603,7 +680,7 @@ export const approveRefundRequest = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data,
-    message: "Refund processed successfully",
+    message: data.pending ? "Refund submitted to the payment provider; awaiting completion" : "Refund processed successfully",
   });
 });
 
@@ -729,7 +806,7 @@ export const retryRefundRequest = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data,
-    message: "Refund processed successfully",
+    message: data.pending ? "Refund submitted to the payment provider; awaiting completion" : "Refund processed successfully",
   });
 });
 
@@ -740,6 +817,13 @@ export const retryRefundRequest = asyncHandler(async (req, res) => {
 // status alone or duplicating refundPolicyEngine's rules in React. Never
 // mutates anything — pure evaluation of the same evaluateRefundEligibility
 // createRefundRequest already uses.
+export const reconcileRefund = asyncHandler(async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new AppError("Invalid refund request id", 400);
+  const result = await reconcileRefundRequest(req.params.id, { actorId: req.user._id });
+  const refundRequest = await RefundRequest.findById(req.params.id).lean();
+  res.status(200).json({ success: true, data: { result, refundRequest }, message: result.settled ? "Refund reconciled" : "Refund is still awaiting the payment provider" });
+});
+
 export const getRefundEligibility = asyncHandler(async (req, res) => {
   validatePaymentId(req.params.paymentId);
 
@@ -909,6 +993,6 @@ export const initiateRefund = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data,
-    message: "Refund processed successfully",
+    message: data.pending ? "Refund submitted to the payment provider; awaiting completion" : "Refund processed successfully",
   });
 });

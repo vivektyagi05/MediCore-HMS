@@ -127,6 +127,18 @@ export const buildDayCapacity = ({
   const totalSlots = theoreticalSlots.length;
   const utilizationPercent = totalSlots > 0 ? Math.round((bookedCount / totalSlots) * 100) : null;
 
+  // Clinical-minutes capacity (additive): workload is the real minutes on the
+  // clock, not the number of appointments — 30 follow-ups of 15 min is not the
+  // same load as 30 consultations of 45 min.
+  const slotMinutes = (t) => {
+    const b = slotBounds(t.slot);
+    return b.endMinutes !== null ? Math.max(0, b.endMinutes - b.startMinutes) : 0;
+  };
+  const bookableTimeline = timeline.filter((t) => !["break", "blocked", "leave", "unavailable"].includes(t.status));
+  const workMinutes = bookableTimeline.reduce((sum, t) => sum + slotMinutes(t), 0);
+  const bookedMinutes = timeline.filter((t) => t.status === "booked").reduce((sum, t) => sum + slotMinutes(t), 0);
+  const availableMinutes = timeline.filter((t) => t.status === "available").reduce((sum, t) => sum + slotMinutes(t), 0);
+
   const completedCount = appointments.filter((a) =>
     [APPOINTMENT_STATUS.COMPLETED, APPOINTMENT_STATUS.REVIEW_ELIGIBLE].includes(a.status),
   ).length;
@@ -148,6 +160,10 @@ export const buildDayCapacity = ({
       completed: completedCount,
       cancelled: cancelledCount,
       utilizationPercent,
+      workMinutes,
+      bookedMinutes,
+      availableMinutes,
+      utilizationMinutesPercent: workMinutes > 0 ? Math.round((bookedMinutes / workMinutes) * 100) : null,
     },
     conflicts: {
       doubleBookedSlots,

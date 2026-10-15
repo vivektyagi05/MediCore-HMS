@@ -5,6 +5,7 @@ import app from "./app.js";
 import { initSocketServer, getIO } from "./socket/socketServer.js";
 import { presenceManager } from "./socket/presenceManager.js";
 import { logger } from "./utils/logger.js";
+import { startFinancialScheduler, stopFinancialScheduler } from "./cron/financialScheduler.js";
 import { registerProcessSafety } from "./utils/processResilience.js";
 
 let server;
@@ -16,6 +17,9 @@ registerProcessSafety({
   getServer: () => server,
   getIO,
   disconnectDB,
+  // N-002: stop ticking and let in-flight jobs finish (or be fenced as
+  // timed_out) before sockets and the DB connection close.
+  beforeShutdown: () => stopFinancialScheduler(),
 });
 
 const startServer = async () => {
@@ -36,6 +40,13 @@ const startServer = async () => {
     logger.info("HMS backend server started", {
       port: env.port,
       environment: env.nodeEnv,
+    });
+    // N-002: role web never starts it; worker/all do. A missing lock index
+    // makes this throw -> logged, process keeps serving HTTP but the
+    // operator sees a hard error rather than a silently unlocked scheduler.
+    startFinancialScheduler().catch((error) => {
+      logger.error("Financial scheduler failed to start", { message: error?.message });
+      if (env.isProduction && env.serviceRole !== "web") process.exitCode = 1;
     });
   });
 };

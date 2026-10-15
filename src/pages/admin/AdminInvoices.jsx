@@ -156,7 +156,7 @@ function AdminInvoices() {
           <Button variant="secondary" size="sm" onClick={() => setDetailId(row._id)}>
             <Eye size={14} /> View
           </Button>
-          <Button variant="tertiary" size="sm" onClick={() => download(row)} disabled={!row.pdfPath}>
+          <Button variant="tertiary" size="sm" onClick={() => download(row)} disabled={!(row.hasPdf ?? row.pdfPath)}>
             <Download size={14} />
           </Button>
         </div>

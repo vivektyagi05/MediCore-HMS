@@ -6,6 +6,7 @@ import {
   getRevenueBreakdown,
   getCollections,
   getReconciliation,
+  reconcileWalletBalances,
   getFinanceAttentionQueue,
   getFinanceActivityTimeline,
   getFinanceExecutiveSummary,
@@ -27,6 +28,8 @@ router.get("/revenue-trend", gate, getRevenueTrend);
 router.get("/revenue-breakdown", gate, getRevenueBreakdown);
 router.get("/collections", gate, getCollections);
 router.get("/reconciliation", gate, getReconciliation);
+router.post("/reconciliation/wallets", gate, reconcileWalletBalances);
+router.post("/reconciliation/wallets/:userId", gate, reconcileWalletBalances);
 router.get("/attention-queue", gate, getFinanceAttentionQueue);
 router.get("/activity-timeline", gate, getFinanceActivityTimeline);
 router.get("/ai/executive-summary", gate, getFinanceExecutiveSummary);

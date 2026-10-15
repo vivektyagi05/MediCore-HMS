@@ -4,6 +4,7 @@ import { followUpReminder } from "./followUpReminder.js";
 import { insuranceExpiryReminder } from "./insuranceExpiryReminder.js";
 import { prescriptionRenewalReminder } from "./prescriptionRenewalReminder.js";
 import { missedFollowUpReminder } from "./missedFollowUpReminder.js";
+import { runUnresolvedAppointmentSweep } from "../services/appointmentLifecycleService.js";
 import { aiInsights } from "../ai/aiInsights.js";
 import { runSweep as runAssignmentSweep } from "../workflow/assignment/assignmentScheduler.js";
 import { logger } from "../utils/logger.js";
@@ -21,6 +22,7 @@ import { trackRun } from "../utils/cronRunTracker.js";
 // use, so the Platform Health Center can show real per-job status.
 const JOBS = [
   { key: "appointmentReminders", jobName: "automation:appointmentReminder", run: () => appointmentReminder.run() },
+  { key: "appointmentLifecycleSweep", jobName: "automation:appointmentLifecycleSweep", run: () => runUnresolvedAppointmentSweep() },
   { key: "paymentReminders", jobName: "automation:paymentReminder", run: () => paymentReminder.run() },
   { key: "followUpReminders", jobName: "automation:followUpReminder", run: () => followUpReminder.run() },
   { key: "insuranceExpiryReminders", jobName: "automation:insuranceExpiryReminder", run: () => insuranceExpiryReminder.run() },
@@ -47,6 +49,8 @@ export const automationCronJobs = {
           // array-shaped return every other job uses for no real reason.
           const count = Array.isArray(result)
             ? result.length
+            : typeof result?.processedCount === "number"
+            ? result.processedCount
             : (result?.autoAssignedCount || 0) + (result?.autoEscalatedCount || 0);
           return { key: job.key, ok: true, count };
         } catch (error) {

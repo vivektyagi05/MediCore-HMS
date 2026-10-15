@@ -16,6 +16,7 @@ import User from "../../models/User.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { downloadFile } from "../../utils/fileDownload.js";
+import { sendStoredPdf } from "../../services/pdfDocumentStore.js";
 import { pickFamilyMemberFields } from "../../utils/familyMemberFields.js";
 import { clampPagination, buildPaginationMeta } from "../../utils/paginationValidation.js";
 import {
@@ -283,7 +284,7 @@ export const listPatientPrescriptions = asyncHandler(async (req, res) => {
 export const downloadPatientPrescription = asyncHandler(async (req, res) => {
   const prescription = await Prescription.findOne({ _id: req.params.id, patientId: req.user._id }).lean();
   if (!prescription) throw new AppError("Prescription not found", 404);
-  downloadFile(res, prescription.pdfPath, `prescription-${prescription._id}.pdf`);
+  await sendStoredPdf(res, { storageKey: prescription.pdfStorageKey, legacyPath: prescription.pdfPath, legacyCategory: "prescriptions", fileName: `prescription-${prescription._id}.pdf`, notFoundMessage: "Prescription PDF not found" });
 });
 
 // ── Patient-side certificate access (Phase DOC-06) ──────────────────────
@@ -308,7 +309,7 @@ export const listPatientCertificates = asyncHandler(async (req, res) => {
 export const downloadPatientCertificate = asyncHandler(async (req, res) => {
   const certificate = await Certificate.findOne({ _id: req.params.id, patientId: req.user._id }).lean();
   if (!certificate) throw new AppError("Certificate not found", 404);
-  downloadFile(res, certificate.pdfPath, `certificate-${certificate._id}.pdf`);
+  await sendStoredPdf(res, { storageKey: certificate.pdfStorageKey, legacyPath: certificate.pdfPath, legacyCategory: "certificates", fileName: `certificate-${certificate._id}.pdf`, notFoundMessage: "Certificate PDF not found" });
 });
 
 export const listFamilyMembers = asyncHandler(async (req, res) => {

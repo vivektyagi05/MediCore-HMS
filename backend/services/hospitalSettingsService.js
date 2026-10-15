@@ -24,6 +24,7 @@
 // did this correctly).
 // ─────────────────────────────────────────────────────────────────────────
 import HospitalSetting from "../models/HospitalSetting.js";
+import { resolveTimezone } from "../utils/hospitalTime.js";
 
 const CACHE_TTL_MS = 5000;
 let cached = null; // { value, at }
@@ -41,7 +42,7 @@ async function readSettings() {
   // public display (controllers/publicController.js), never enforced
   // anywhere. See getAppointmentLimits() below, the fix for that gap.
   const doc = await HospitalSetting.findOne({ singletonKey: "global" })
-    .select("paymentSettings appointmentLimits")
+    .select("paymentSettings appointmentLimits appointmentRules timezone")
     .lean();
   cached = { value: doc, at: Date.now() };
   return doc;
@@ -99,5 +100,54 @@ export async function getAppointmentLimits() {
       bookingWindowDaysRaw <= BOOKING_WINDOW_DAYS_MAX
         ? Math.floor(bookingWindowDaysRaw)
         : DEFAULT_BOOKING_WINDOW_DAYS,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Appointment lifecycle rules + hospital timezone — canonical readers.
+// Every value is validated against the schema bounds and falls back to the
+// schema default, so a corrupt/partial HospitalSetting can never disable a
+// guard (it only ever reverts to the documented default).
+// ─────────────────────────────────────────────────────────────────────────
+const RULE_PATH = (name) => HospitalSetting.schema.path(`appointmentRules.${name}`);
+const clampInt = (raw, name, fallback) => {
+  const path = RULE_PATH(name);
+  const min = path?.options?.min ?? 0;
+  const max = path?.options?.max ?? Number.MAX_SAFE_INTEGER;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : fallback;
+};
+const ruleDefault = (name, hard) => RULE_PATH(name)?.defaultValue ?? hard;
+
+export const DEFAULT_REMINDER_INTERVALS_MINUTES = [1440, 120, 30];
+
+/** @returns {Promise<string>} validated IANA timezone (default Asia/Kolkata) */
+export async function getHospitalTimezone() {
+  const settings = await readSettings();
+  return resolveTimezone(settings?.timezone);
+}
+
+/**
+ * @returns {Promise<{resolutionWindowDays:number, checkInEarlyWindowMinutes:number,
+ *   noShowGraceMinutes:number, reminderIntervalsMinutes:number[],
+ *   delayNotifyThresholdMinutes:number, defaultSlotMinutes:number,
+ *   earlyStartWindowMinutes:number, timezone:string}>}
+ */
+export async function getAppointmentRules() {
+  const settings = await readSettings();
+  const r = settings?.appointmentRules || {};
+  const intervals = Array.isArray(r.reminderIntervalsMinutes)
+    ? [...new Set(r.reminderIntervalsMinutes.map(Number).filter((n) => Number.isFinite(n) && n >= 1 && n <= 10080).map(Math.floor))].sort((a, b) => b - a)
+    : [];
+  return {
+    resolutionWindowDays: clampInt(r.resolutionWindowDays, "resolutionWindowDays", ruleDefault("resolutionWindowDays", 3)),
+    checkInEarlyWindowMinutes: clampInt(r.checkInEarlyWindowMinutes, "checkInEarlyWindowMinutes", ruleDefault("checkInEarlyWindowMinutes", 30)),
+    noShowGraceMinutes: clampInt(r.noShowGraceMinutes, "noShowGraceMinutes", ruleDefault("noShowGraceMinutes", 15)),
+    reminderIntervalsMinutes: intervals.length ? intervals : DEFAULT_REMINDER_INTERVALS_MINUTES,
+    delayNotifyThresholdMinutes: clampInt(r.delayNotifyThresholdMinutes, "delayNotifyThresholdMinutes", ruleDefault("delayNotifyThresholdMinutes", 15)),
+    defaultSlotMinutes: clampInt(r.defaultSlotMinutes, "defaultSlotMinutes", ruleDefault("defaultSlotMinutes", 30)),
+    earlyStartWindowMinutes: clampInt(r.earlyStartWindowMinutes, "earlyStartWindowMinutes", ruleDefault("earlyStartWindowMinutes", 15)),
+    travelBufferMinutes: clampInt(r.travelBufferMinutes, "travelBufferMinutes", ruleDefault("travelBufferMinutes", 45)),
+    timezone: resolveTimezone(settings?.timezone),
   };
 }

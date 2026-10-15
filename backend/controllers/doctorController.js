@@ -1,3 +1,4 @@
+import { flagScheduleImpact } from "../services/appointmentImpactService.js";
 import { containsRegex } from "../utils/regexSafe.js";
 import { serializeDoctorPublicProfile } from "../services/doctorPublicSerializer.js";
 import mongoose from "mongoose";
@@ -230,14 +231,18 @@ export const updateDoctor = asyncHandler(async (req, res) => {
   await doctor.save();
   await doctor.populate("userId", "name email role isActive");
 
-  if (!doctor) {
-    throw new AppError("Doctor profile not found", 404);
+  // Admin edits to working hours get the same impact treatment as the
+  // doctor's own schedule edits (flag + notify, never silently orphan).
+  let impact = { affected: [], recoveredCount: 0 };
+  if (updates.availability !== undefined) {
+    try { impact = await flagScheduleImpact({ doctor }); } catch (error) { logger.warn("flagScheduleImpact failed (doctor update itself is saved)", { message: error?.message }); }
   }
 
   res.status(200).json({
     success: true,
     data: doctor,
-    message: "Doctor profile updated successfully",
+    impact,
+    message: impact.affected.length ? `Doctor profile updated. ${impact.affected.length} existing appointment(s) no longer fit the new schedule.` : "Doctor profile updated successfully",
   });
 });
 

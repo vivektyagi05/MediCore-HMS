@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFinancialSync } from "../../hooks/useFinancialSync";
 import { Download, ArrowUpCircle, XCircle } from "lucide-react";
 import { getApiErrorMessage } from "../../api/axios";
 import { financeApi } from "../../api/financeApi";
@@ -61,9 +62,96 @@ function SubscriptionBilling() {
     }
   }, []);
 
+  useFinancialSync(loadBilling);
+
   useEffect(() => {
     loadBilling();
   }, [loadBilling]);
+
+  // F-001/F-017: a new plan is only ever shown as active after the backend says so.
+  // checkout.phase: awaiting_payment | confirming | unknown | failed. Success is not
+  // a local state: it reloads authoritative billing data.
+  const [checkout, setCheckout] = useState(null);
+  const checkoutRef = useRef(null);
+  checkoutRef.current = checkout;
+
+  const refreshOrderStatus = useCallback(async (orderId) => {
+    try {
+      const res = await financeApi.getSubscriptionOrderStatus(orderId);
+      const status = res.data.subscription?.status;
+      if (status === "active") {
+        setCheckout(null);
+        toast.success("Payment confirmed. Your subscription is active.");
+        loadBilling();
+      } else if (status === "payment_failed" || status === "renewal_failed") {
+        setCheckout((c) => c && { ...c, phase: "failed", message: "The payment did not go through. You have not been charged for an active plan." });
+      } else {
+        setCheckout((c) => c && { ...c, phase: "unknown", message: "We have not received payment confirmation yet. Check again in a moment; do not pay twice." });
+      }
+    } catch (statusError) {
+      setCheckout((c) => c && { ...c, phase: "unknown", message: getApiErrorMessage(statusError) });
+    }
+  }, [loadBilling, toast]);
+
+  const confirmPayment = async (orderId, response) => {
+    setCheckout((c) => c && { ...c, phase: "confirming", message: "Confirming your payment with the provider..." });
+    try {
+      await financeApi.verifySubscriptionPayment({
+        razorpayOrderId: response.razorpay_order_id,
+        paymentId: response.razorpay_payment_id,
+        signature: response.razorpay_signature,
+      });
+    } catch (verifyError) {
+      toast.error(getApiErrorMessage(verifyError));
+    }
+    // Whatever verify said, the backend record decides what the user sees.
+    await refreshOrderStatus(orderId);
+  };
+
+  const runTestPayment = async () => {
+    const current = checkoutRef.current;
+    if (!current) return;
+    try {
+      const response = await financeApi.completeTestSubscriptionPayment(current.order.id);
+      await confirmPayment(current.order.id, response.data);
+    } catch (testError) {
+      toast.error(getApiErrorMessage(testError));
+      await refreshOrderStatus(current.order.id);
+    }
+  };
+
+  const runTestFailure = async () => {
+    const current = checkoutRef.current;
+    if (!current) return;
+    try {
+      await financeApi.failTestSubscriptionPayment(current.order.id);
+    } catch (testError) {
+      toast.error(getApiErrorMessage(testError));
+    }
+    await refreshOrderStatus(current.order.id);
+  };
+
+  const openRazorpay = async (current) => {
+    const loaded = await new Promise((resolve) => {
+      if (window.Razorpay) return resolve(true);
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+    if (!loaded) throw new Error("Unable to load the payment provider");
+    new window.Razorpay({
+      key: current.razorpayKeyId,
+      amount: current.order.amount,
+      currency: current.order.currency,
+      name: "MediCore",
+      description: current.subscription.planName,
+      order_id: current.order.id,
+      handler: (response) => confirmPayment(current.order.id, response),
+      modal: { ondismiss: () => refreshOrderStatus(current.order.id) },
+    }).open();
+  };
 
   const subscribe = async (planCode) => {
     setIsSubscribing(true);
@@ -71,11 +159,13 @@ function SubscriptionBilling() {
       if (intelligence?.subscriptionId) {
         await practiceApi.changePlan(intelligence.subscriptionId, planCode);
         toast.success("Plan changed successfully");
-      } else {
-        await financeApi.createSubscription({ planCode });
-        toast.success("Subscription activated");
+        loadBilling();
+        return;
       }
-      loadBilling();
+      const res = await financeApi.createSubscription({ planCode });
+      const current = { ...res.data, phase: "awaiting_payment", message: "Complete the payment to activate this plan." };
+      setCheckout(current);
+      if (current.gateway !== "test") await openRazorpay(current);
     } catch (subscribeError) {
       toast.error(getApiErrorMessage(subscribeError));
     } finally {
@@ -151,6 +241,28 @@ function SubscriptionBilling() {
         <p className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-wider text-slate-400">
           <ArrowUpCircle size={15} /> Plan Comparison
         </p>
+        {checkout && (
+          <Card className="mb-4 space-y-3 p-4">
+            <p className="text-sm font-bold text-slate-900">
+              {checkout.subscription.planName}: payment {checkout.phase === "confirming" ? "being confirmed" : "required"}
+            </p>
+            <p className="text-sm text-slate-600">{checkout.message}</p>
+            <p className="text-xs text-slate-500">This plan is not active until the payment is confirmed.</p>
+            <div className="flex flex-wrap gap-2">
+              {checkout.gateway === "test" && checkout.phase !== "confirming" && (
+                <>
+                  <Button onClick={runTestPayment}>[SUCCESSFUL PAYMENT]</Button>
+                  <Button variant="secondary" onClick={runTestFailure}>[FAIL PAYMENT]</Button>
+                </>
+              )}
+              {checkout.gateway !== "test" && checkout.phase !== "confirming" && (
+                <Button onClick={() => openRazorpay(checkout).catch((e) => toast.error(getApiErrorMessage(e)))}>Open payment</Button>
+              )}
+              <Button variant="secondary" onClick={() => refreshOrderStatus(checkout.order.id)}>Check payment status</Button>
+              <Button variant="secondary" onClick={() => setCheckout(null)}>Close</Button>
+            </div>
+          </Card>
+        )}
         <SubscriptionPlans plans={plans} isLoading={isSubscribing} onSubscribe={subscribe} />
       </div>
 

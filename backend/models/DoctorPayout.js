@@ -48,6 +48,26 @@ const doctorPayoutSchema = new mongoose.Schema(
       index: true,
     },
     adjustedAt: Date,
+    // Platform-side counterpart of refundAdjustmentAmount (platform revenue
+    // reversed by refunds). Together doctor + platform adjustments always
+    // equal the refunded share of grossAmount.
+    platformRefundAdjustmentAmount: { type: Number, default: 0, min: 0 },
+    // One immutable entry per refund applied to this payout. `refundKey` is the
+    // idempotency key: the same refund can never adjust the earning twice.
+    refundAdjustments: {
+      type: [{
+        _id: false,
+        refundKey: { type: String, required: true },
+        refundAmount: { type: Number, required: true },
+        doctorAdjustment: { type: Number, required: true },
+        platformAdjustment: { type: Number, required: true },
+        gatewayRefundId: String,
+        payoutStatusAtAdjustment: String,
+        actorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        at: { type: Date, default: Date.now },
+      }],
+      default: [],
+    },
   },
   { timestamps: true },
 );

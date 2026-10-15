@@ -12,6 +12,7 @@ import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { getIO } from "../../socket/socketServer.js";
 import { emailService } from "../../services/emailService.js";
 import { env } from "../../config/env.js";
+import { storageService } from "../../storage/storageService.js";
 import { getLatestRunPerJob } from "../../utils/cronRunTracker.js";
 import { getAIProviderStatus } from "../../ai/providers/textGenerationProvider.js";
 import { buildSmartAlerts } from "./missionControlAdminController.js";
@@ -50,29 +51,37 @@ function socketStatus() {
   return { healthy: true, connectedClients: io.engine?.clientsCount ?? io.sockets?.sockets?.size ?? 0 };
 }
 
-// Real filesystem check against the exact directory invoiceService already
-// writes PDFs to — not a synthetic path. Reports free space when the
-// runtime supports fs.statfs (Node 18.15+); degrades gracefully (reports
-// "unknown" rather than a fabricated number) when it does not.
+// N-007: a REAL write/read/delete round-trip through storageService -- the same
+// code path invoices and prescriptions use -- so the check reflects the
+// effective driver and root (local volume or S3), not a guessed directory.
+// Reports free space only for the local driver when fs.statfs exists.
 async function storageStatus() {
-  const dir = env.invoiceStorageDir;
-  const result = { path: dir, writable: false, freeBytes: null, totalBytes: null };
+  const driver = storageService.driverName();
+  const result = { driver, writable: false, freeBytes: null, totalBytes: null };
+  if (driver === "local") result.path = env.storage.localRoot;
+  let key;
   try {
-    await fs.promises.mkdir(dir, { recursive: true });
-    await fs.promises.access(dir, fs.constants.W_OK);
-    result.writable = true;
+    const probe = Buffer.from(`healthcheck ${Date.now()}`);
+    ({ key } = await storageService.upload("healthcheck", probe, { originalName: "probe.txt", contentType: "text/plain" }));
+    const back = await storageService.read(key);
+    result.writable = back.equals(probe);
+    if (!result.writable) result.error = "read-back did not match written bytes";
   } catch (error) {
     result.error = error.message;
     return { ...result, healthy: false };
+  } finally {
+    if (key) await storageService.delete(key).catch(() => {});
   }
-  try {
-    if (typeof fs.promises.statfs === "function") {
-      const stats = await fs.promises.statfs(dir);
-      result.freeBytes = stats.bfree * stats.bsize;
-      result.totalBytes = stats.blocks * stats.bsize;
+  if (driver === "local") {
+    try {
+      if (typeof fs.promises.statfs === "function") {
+        const stats = await fs.promises.statfs(env.storage.localRoot);
+        result.freeBytes = stats.bfree * stats.bsize;
+        result.totalBytes = stats.blocks * stats.bsize;
+      }
+    } catch {
+      // Non-fatal -- disk usage reporting just isn't available on this platform.
     }
-  } catch {
-    // Non-fatal — disk usage reporting just isn't available on this platform.
   }
   return { ...result, healthy: result.writable };
 }

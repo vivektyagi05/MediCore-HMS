@@ -15,7 +15,6 @@ import { couponService } from "../payments/couponService.js";
 import { paymentRetryService } from "../payments/paymentRetryService.js";
 import { reconciliationService } from "../payments/reconciliationService.js";
 import { subscriptionService } from "../payments/subscriptionService.js";
-import { createSubscriptionInvoiceRecord } from "../services/invoiceService.js";
 import { practiceEmitter } from "../realtime/practiceEmitter.js";
 
 const parsePagination = (query) => {
@@ -128,64 +127,134 @@ export const getSubscriptions = asyncHandler(async (req, res) => {
   });
 });
 
+// F-001: starting a paid plan only opens a PENDING intent + provider order. The
+// subscription is entitled/invoiced/ledgered only after verifySubscriptionPayment
+// (or the webhook) confirms provider capture. Price is server-derived; the body
+// carries only the plan code.
 export const createSubscription = asyncHandler(async (req, res) => {
   const { planCode } = req.body;
   if (!planCode) throw new AppError("Plan code is required", 400);
 
   const doctor = req.user.role === ROLES.DOCTOR ? await Doctor.findOne({ userId: req.user._id }).lean() : null;
-  const subscription = await subscriptionService.createSubscription({
+  const { subscription, order, reused } = await subscriptionService.createIntent({
     userId: req.user._id,
     doctorId: doctor?._id,
     planCode,
   });
 
-  await TransactionLedger.create({
-    userId: req.user._id,
-    subscriptionId: subscription._id,
-    type: "subscription",
-    direction: "debit",
-    amount: subscription.amount,
-    currency: subscription.currency,
-    referenceId: subscription._id.toString(),
-    idempotencyKey: `subscription:create:${subscription._id}`,
-    metadata: { planCode },
-  });
-
-  // Subscription Intelligence (Phase D4): previously no invoice or
-  // notification was ever generated for a subscription payment, unlike
-  // appointment payments which always got both.
-  let invoice = null;
-  try {
-    const doctorUser = await User.findById(req.user._id).select("name email").lean();
-    invoice = await createSubscriptionInvoiceRecord({ subscription, doctorUser });
-  } catch (error) {
-    logger.warn("createSubscriptionInvoiceRecord failed on subscription create", { message: error?.message });
-  }
-
   try {
     await practiceEmitter.subscriptionUpdated({
       doctorUserId: req.user._id,
       subscriptionId: subscription._id,
-      status: "active",
+      status: subscription.status,
       planName: subscription.planName,
     });
-    if (invoice) {
-      await practiceEmitter.invoiceGenerated({
-        doctorUserId: req.user._id,
-        invoiceId: invoice._id,
-        totalAmount: invoice.totalAmount,
-        currency: invoice.currency,
-      });
-    }
   } catch (error) {
-    logger.warn("practiceEmitter failed on subscription create", { message: error?.message });
+    logger.warn("practiceEmitter failed on subscription intent", { message: error?.message });
   }
 
-  res.status(201).json({
+  res.status(reused ? 200 : 201).json({
     success: true,
-    data: { subscription, invoice },
-    message: "Subscription activated successfully",
+    data: { subscription, order, razorpayKeyId: paymentGateway.keyId(), gateway: paymentGateway.mode() },
+    message: "Subscription payment order created. The plan is not active until payment is confirmed.",
   });
+});
+
+const finishSubscriptionActivation = async (subscription, { gatewayPaymentId, source, userId }) => {
+  const { subscription: current, activated } = await subscriptionService.activateFromCapture({ subscription, gatewayPaymentId, source });
+  const needsPosting = activated || current?.postProcessingState === "failed" || current?.postProcessingState === "pending";
+  let invoice = null;
+  if (current?.status === "active" && needsPosting) {
+    const doctorUser = await User.findById(current.userId).select("name email").lean();
+    const posted = await subscriptionService.completePostProcessing(current, { doctorUser });
+    invoice = posted.invoice || null;
+  }
+  financeEmitter.invalidate({ userIds: [current?.userId], admin: true, domain: "subscription", entityId: subscription._id });
+  if (activated) {
+    try {
+      await practiceEmitter.subscriptionUpdated({ doctorUserId: userId || current.userId, subscriptionId: current._id, status: current.status, planName: current.planName });
+      if (invoice) await practiceEmitter.invoiceGenerated({ doctorUserId: userId || current.userId, invoiceId: invoice._id, totalAmount: invoice.totalAmount, currency: invoice.currency });
+    } catch (error) {
+      logger.warn("practiceEmitter failed on subscription activation", { message: error?.message });
+    }
+  }
+  return Subscription.findById(subscription._id).lean();
+};
+export { finishSubscriptionActivation };
+
+export const verifySubscriptionPayment = asyncHandler(async (req, res) => {
+  const { razorpayOrderId, paymentId, signature } = req.body;
+  if (!razorpayOrderId || !paymentId || !signature) throw new AppError("Order id, payment id, and signature are required", 400);
+
+  const subscription = await Subscription.findOne({ userId: req.user._id, $or: [{ gatewayOrderId: razorpayOrderId }, { "paymentHistory.gatewayOrderId": razorpayOrderId }] });
+  if (!subscription) throw new AppError("Subscription order not found", 404);
+
+  // Duplicate verification of an already-captured order is an idempotent read.
+  const alreadyCaptured = subscription.paymentHistory.find((entry) => entry.gatewayOrderId === razorpayOrderId && entry.status === "captured");
+  if (alreadyCaptured) {
+    const current = await finishSubscriptionActivation(subscription, { gatewayPaymentId: alreadyCaptured.gatewayPaymentId, source: "patient", userId: req.user._id });
+    return res.status(200).json({ success: true, data: { subscription: current }, message: "Subscription payment already confirmed" });
+  }
+  if (subscription.gatewayOrderId !== razorpayOrderId) throw new AppError("This payment order is no longer current", 409);
+
+  if (!paymentGateway.verifyPaymentSignature({ razorpayOrderId, paymentId, signature })) {
+    throw new AppError("Payment verification could not be confirmed. Check the subscription status again shortly.", 400);
+  }
+  let gatewayPayment;
+  try {
+    gatewayPayment = await paymentGateway.fetchPayment({ paymentId, orderId: razorpayOrderId, amount: subscription.amount, currency: subscription.currency });
+  } catch {
+    throw new AppError("Payment status could not be confirmed yet. Please check status again.", 503);
+  }
+  if (gatewayPayment?.order_id && gatewayPayment.order_id !== razorpayOrderId) throw new AppError("Payment order does not match this subscription", 400);
+  const expectedPaise = toPaise(subscription.amount);
+  const gatewayAmountPaise = gatewayPayment?.amount == null ? expectedPaise : Number(gatewayPayment.amount);
+  const gatewayCurrency = String(gatewayPayment?.currency || subscription.currency).toUpperCase();
+  if (gatewayAmountPaise !== expectedPaise || gatewayCurrency !== String(subscription.currency).toUpperCase()) {
+    throw new AppError("Payment details could not be reconciled with this subscription. Please contact support.", 409);
+  }
+  const providerStatus = String(gatewayPayment?.status || "").toLowerCase();
+  if (providerStatus === "failed") {
+    await subscriptionService.markPaymentFailed({ subscription, gatewayPaymentId: paymentId, reason: "Provider reported failed payment", source: "gateway" });
+    throw new AppError("Payment was not captured by the provider.", 402);
+  }
+  if (!["captured", "processed"].includes(providerStatus)) {
+    return res.status(202).json({ success: true, data: { subscription }, message: "Payment is still pending confirmation from the provider" });
+  }
+  const current = await finishSubscriptionActivation(subscription, { gatewayPaymentId: paymentId, source: "patient", userId: req.user._id });
+  res.status(200).json({ success: true, data: { subscription: current }, message: "Subscription activated successfully" });
+});
+
+// Authoritative status for refresh/recovery; never invents success.
+export const getSubscriptionPaymentStatus = asyncHandler(async (req, res) => {
+  const subscription = await Subscription.findOne({ userId: req.user._id, $or: [{ gatewayOrderId: req.params.gatewayOrderId }, { "paymentHistory.gatewayOrderId": req.params.gatewayOrderId }] }).lean();
+  if (!subscription) throw new AppError("Subscription order not found", 404);
+  res.status(200).json({ success: true, data: { subscription }, message: "Subscription status fetched" });
+});
+
+// Test gateway only: records a provider-style FAILED payment for the order so the
+// failure path runs through the same markPaymentFailed state transition.
+export const failTestSubscriptionPayment = asyncHandler(async (req, res) => {
+  if (paymentGateway.mode() !== "test") throw new AppError("Test payment gateway is disabled", 404);
+  const razorpayOrderId = typeof req.body?.razorpayOrderId === "string" ? req.body.razorpayOrderId.trim() : "";
+  const subscription = razorpayOrderId ? await Subscription.findOne({ userId: req.user._id, gatewayOrderId: razorpayOrderId }) : null;
+  if (!subscription) throw new AppError("Subscription order not found", 404);
+  const updated = await subscriptionService.markPaymentFailed({ subscription, reason: "Test gateway: payment failed", source: "test-gateway" });
+  if (!updated) throw new AppError("This subscription order is no longer payable", 409);
+  res.status(200).json({ success: true, data: { subscription: updated }, message: "Test payment failure recorded" });
+});
+
+export const completeTestSubscriptionPayment = asyncHandler(async (req, res) => {
+  if (paymentGateway.mode() !== "test") throw new AppError("Test payment gateway is disabled", 404);
+  const razorpayOrderId = typeof req.body?.razorpayOrderId === "string" ? req.body.razorpayOrderId.trim() : "";
+  if (!razorpayOrderId) throw new AppError("Order id is required", 400);
+  const subscription = await Subscription.findOne({ userId: req.user._id, gatewayOrderId: razorpayOrderId });
+  if (!subscription) throw new AppError("Subscription order not found", 404);
+  if (!["pending_payment", "payment_processing", "payment_failed", "renewal_pending", "renewal_failed"].includes(subscription.status)) {
+    throw new AppError("This subscription order is no longer payable", 409);
+  }
+  const response = paymentGateway.buildPaymentResponse(subscription.gatewayOrderId, `test_payment_${subscription._id.toString()}_${subscription.paymentHistory.length}`, subscription.amount, subscription.currency);
+  res.status(200).json({ success: true, data: response, message: "Test gateway response generated" });
 });
 
 export const cancelSubscription = asyncHandler(async (req, res) => {
@@ -259,6 +328,7 @@ export const getLedger = asyncHandler(async (req, res) => {
 // verification path).
 import WalletRecharge, { WALLET_RECHARGE_STATUS } from "../models/WalletRecharge.js";
 import { appendWalletRechargeTransition } from "../payments/walletRechargeStateMachine.js";
+import { financeEmitter } from "../realtime/financeEmitter.js";
 import { toPaise } from "../payments/money.js";
 
 export const createWalletRechargeOrder = asyncHandler(async (req, res) => {
@@ -443,8 +513,13 @@ const postWalletRechargeCapture = async (rechargeDoc, { gatewayPaymentId, actorI
     }
   }
 
-  const wallet = await Wallet.findOneAndUpdate(
-    { userId: claimed.userId },
+  // F-004: the credit is keyed on this recharge's own id inside the wallet
+  // document, so replaying the posting after a crash (captured -> ledger written
+  // -> crash before "posted") can never credit twice. A null result from the
+  // conditional update means "already credited", not an error.
+  const rechargeRef = `recharge:${claimed._id.toString()}`;
+  let wallet = await Wallet.findOneAndUpdate(
+    { userId: claimed.userId, transactions: { $not: { $elemMatch: { referenceType: "recharge", referenceId: rechargeRef } } } },
     {
       $setOnInsert: { userId: claimed.userId, currency: claimed.currency },
       $inc: { balance: claimed.amount },
@@ -454,14 +529,18 @@ const postWalletRechargeCapture = async (rechargeDoc, { gatewayPaymentId, actorI
           amount: claimed.amount,
           currency: claimed.currency,
           status: "completed",
-          referenceType: "payment",
-          referenceId: gatewayPaymentId,
+          referenceType: "recharge",
+          referenceId: rechargeRef,
           description: "Wallet recharge",
         },
       },
     },
     { returnDocument: "after", upsert: true },
-  );
+  ).catch((error) => {
+    if (error?.code === 11000) return null; // upsert collided with the existing (already-credited) wallet
+    throw error;
+  });
+  if (!wallet) wallet = await Wallet.findOne({ userId: claimed.userId });
 
   appendWalletRechargeTransition(claimed, WALLET_RECHARGE_STATUS.POSTED, {
     actorId, source, reason: "Wallet credited and ledger posted",
@@ -469,6 +548,7 @@ const postWalletRechargeCapture = async (rechargeDoc, { gatewayPaymentId, actorI
   claimed.ledgerEntryId = ledgerEntry?._id;
   claimed.attempts.push({ completedAt: new Date(), outcome: "captured", gatewayPaymentId });
   await claimed.save();
+  financeEmitter.invalidate({ userIds: [claimed.userId], admin: false, domain: "wallet", entityId: claimed._id });
 
   return { recharge: claimed, wallet, ledger: ledgerEntry };
 };

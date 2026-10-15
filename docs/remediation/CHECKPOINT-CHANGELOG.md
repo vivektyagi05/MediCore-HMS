@@ -359,3 +359,9 @@ already generic across all three levels and required no changes).
 - One engine (`services/chat/*`), one policy (`resolveChatAccess`), Doctor + Patient Communication Hubs, attachments (PNG/JPEG/PDF, private storage, magic-byte validated), reconnect sync, receipts, multi-tab convergence.
 - 152/152 backend tests, ESLint 0, Vite build OK. Live MongoDB and browser E2E NOT VERIFIED. See COMMUNICATION-IMPLEMENTATION-REPORT.md.
 - Run `npm run migrate:chat-state` after deploy.
+
+## 2026-10-07 PAYMENT slice 1
+Fixed test-gateway verify key mismatch (root cause), atomic shared capture claim, webhook dedupe via unique index, idempotent replay (no bogus refund, payout heal, no receipt resend), canonical paise payout allocation, outbox cron registered in scheduler doc. 160/160 tests. See docs/PAYMENT-IMPLEMENTATION-REPORT.md.
+
+## 2026-10-07 PAYMENT slice 2 — refund engine + earning reversal
+Truthful gateway refund outcomes (processed/pending/failed/unknown), fixed illegal failure transition, reconciliation path (endpoint, cron pass, admin action), partial refunds no longer mark appointment refunded, idempotent per-refund doctor/platform reversal with compensating ledger entries, net-of-refund doctor balances, webhook convergence and failed-event retry. 163/163 tests. See docs/PAYMENT-IMPLEMENTATION-REPORT.md.

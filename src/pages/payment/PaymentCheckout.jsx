@@ -1,5 +1,5 @@
 import { ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { appointmentApi } from "../../api/appointmentApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -16,6 +16,7 @@ import Loader from "../../components/ui/Loader";
 import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
+import { classifyVerifyFailure, deriveCheckoutView, pollAuthoritativeStatus } from "./paymentConfirmation";
 
 const loadRazorpayScript = () =>
   new Promise((resolve) => {
@@ -72,6 +73,15 @@ function PaymentCheckout() {
   const [recovery, setRecovery] = useState(null);
   const [isCheckingRecovery, setIsCheckingRecovery] = useState(true);
   const [isRetrying, setIsRetrying] = useState(false);
+  // Phase 01: "confirming" while we re-read authoritative backend state after a
+  // callback/verification whose outcome is not yet known; "unknown" when the
+  // bounded re-read budget ran out. Neither is ever shown as success or failure.
+  const [confirmPhase, setConfirmPhase] = useState(null);
+  // Phase 01: true while the gateway checkout is open or a verification is in
+  // flight, so a second click cannot submit a duplicate payment.
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const appointment = useMemo(
     () => appointments.find((item) => item._id === appointmentId),
@@ -130,6 +140,20 @@ function PaymentCheckout() {
     setError("");
     try {
       const response = await paymentApi.retry(recovery.payment._id);
+      if (response.data.walletOnly) {
+        // F-018: the server settled this entirely from the wallet; there is no
+        // gateway step. Success is only shown if the backend says it captured.
+        window.sessionStorage.removeItem(`hms-payment-${appointmentId}`);
+        const settledStatus = response.data.payment?.status;
+        if (["captured", "completed"].includes(settledStatus)) {
+          toast.success("Paid from wallet");
+          navigate(response.data.invoice?._id ? `/invoices/${response.data.invoice._id}` : "/patient/payments", { replace: true });
+        } else {
+          setPayment(response.data.payment);
+          await checkRecovery();
+        }
+        return;
+      }
       setPayment(response.data.payment);
       setOrder(response.data.order);
       setRazorpayKeyId(response.data.razorpayKeyId);
@@ -183,26 +207,80 @@ function PaymentCheckout() {
       setWorkflowStep(2);
       toast.success(t("paymentFlow.orderCreated"));
     } catch (prepareError) {
-      setError(getApiErrorMessage(prepareError));
+      if (prepareError?.response?.data?.details?.code === "ACTIVE_PAYMENT_EXISTS") {
+        // A payment already exists for this appointment: show ITS authoritative state.
+        await checkRecovery();
+      } else {
+        setError(getApiErrorMessage(prepareError));
+      }
     } finally {
       setIsPreparing(false);
     }
   };
 
+  const goToResult = (data) => {
+    window.sessionStorage.removeItem(`hms-payment-${appointmentId}`);
+    const invoiceId = data?.invoice?._id || data?.payment?.invoiceId?._id || data?.payment?.invoiceId;
+    navigate(invoiceId ? `/invoices/${invoiceId}` : "/patient/payments", { replace: true });
+  };
+
+  // Re-read authoritative backend state (bounded backoff) after an outcome the
+  // browser cannot decide. Success is shown ONLY when the backend says captured.
+  const confirmWithBackend = async () => {
+    setConfirmPhase("confirming");
+    setWorkflowStep(4);
+    const result = await pollAuthoritativeStatus({
+      fetchStatus: () => paymentApi.getStatus(appointmentId),
+      shouldStop: () => !mountedRef.current,
+    });
+    if (!mountedRef.current) return;
+    if (result.state === "success") {
+      setConfirmPhase(null);
+      toast.success("Payment confirmed");
+      goToResult({ payment: result.data?.payment });
+      return;
+    }
+    setRecovery(result.data || { payment: null, attempts: [], recoveryState: "NONE" });
+    setConfirmPhase(result.state === "unknown" ? "unknown" : null);
+    if (result.state === "failed") toast.error("The payment provider did not complete this payment.");
+  };
+
+  // The gateway callback is only a hint. Every branch below is decided by what
+  // the backend reports; a timeout is never presented as a failed payment.
+  const verifyAndRoute = async (gatewayResponse) => {
+    setWorkflowStep(4);
+    setCheckoutBusy(true);
+    try {
+      const verified = await paymentApi.verifyPayment(gatewayResponse);
+      if (verified.data?.confirming) {
+        await confirmWithBackend(); // HTTP 202: provider has not finished; keep confirming
+        return;
+      }
+      goToResult(verified.data);
+    } catch (verifyError) {
+      const kind = classifyVerifyFailure(verifyError);
+      if (kind === "ambiguous") {
+        toast.info("Confirming your payment with the provider...");
+        await confirmWithBackend();
+      } else {
+        toast.error(getApiErrorMessage(verifyError));
+        setWorkflowStep(3);
+        await checkRecovery();
+      }
+    } finally {
+      if (mountedRef.current) setCheckoutBusy(false);
+    }
+  };
+
   const startPayment = async () => {
+    if (checkoutBusy || isPaying || confirmPhase) return; // no duplicate checkout submission
     setIsPaying(true);
+    setCheckoutBusy(true);
     setWorkflowStep(3);
     try {
       if (gateway === "test") {
         const response = await paymentApi.completeTestPayment(order.id);
-        setWorkflowStep(4);
-        const verified = await paymentApi.verifyPayment(response.data);
-        window.sessionStorage.removeItem(`hms-payment-${appointmentId}`);
-        if (verified.data.invoice?._id) {
-          navigate(`/invoices/${verified.data.invoice._id}`, { replace: true });
-        } else {
-          navigate("/patient/payments", { replace: true });
-        }
+        await verifyAndRoute(response.data);
         return;
       }
 
@@ -216,28 +294,45 @@ function PaymentCheckout() {
         description: "Hospital appointment payment",
         order_id: order.id,
         prefill: { name: user?.name, email: user?.email },
-        handler: async (response) => {
-          setWorkflowStep(4);
-          const verified = await paymentApi.verifyPayment({
+        modal: {
+          // Closing the checkout proves nothing (the provider may already have captured):
+          // re-enable the button and re-read the backend rather than assuming failure.
+          ondismiss: () => {
+            if (!mountedRef.current) return;
+            setCheckoutBusy(false);
+            setIsPaying(false);
+            checkRecovery();
+          },
+        },
+        handler: (response) => {
+          // F-017: this callback runs outside the surrounding try/catch; verifyAndRoute
+          // handles every failure itself and falls back to the authoritative status read.
+          setIsPaying(false);
+          verifyAndRoute({
             razorpayOrderId: response.razorpay_order_id,
             paymentId: response.razorpay_payment_id,
             signature: response.razorpay_signature,
           });
-          window.sessionStorage.removeItem(`hms-payment-${appointmentId}`);
-          if (verified.data.invoice?._id) {
-            navigate(`/invoices/${verified.data.invoice._id}`, { replace: true });
-          } else {
-            navigate("/patient/payments", { replace: true });
-          }
         },
       });
       checkout.open();
     } catch (paymentError) {
       toast.error(getApiErrorMessage(paymentError));
       setWorkflowStep(3);
-    } finally {
+      setCheckoutBusy(false);
       setIsPaying(false);
     }
+  };
+
+  // Resume an unpaid order the backend says is still awaiting checkout (refresh/reconnect).
+  const resumeFromRecovery = () => {
+    if (!recovery?.currentOrder || !recovery?.payment) return;
+    setPayment(recovery.payment);
+    setOrder(recovery.currentOrder);
+    setRazorpayKeyId(recovery.razorpayKeyId || "");
+    setGateway(recovery.gateway || "razorpay");
+    setWorkflowStep(2);
+    setRecovery({ ...recovery, recoveryState: "NONE" });
   };
 
   if (isLoading || isCheckingRecovery) return <Loader label="Checking your payment status..." />;
@@ -246,8 +341,9 @@ function PaymentCheckout() {
   // all short-circuit the normal "prepare a new order" flow so we never
   // create a second payment while one already exists in an authoritative
   // non-fresh state.
+  const view = confirmPhase ? "confirming" : deriveCheckoutView(recovery);
   const recoveryState = recovery?.recoveryState;
-  const showRecoveryBanner = recoveryState && recoveryState !== "NONE";
+  const showRecoveryBanner = confirmPhase || (recoveryState && recoveryState !== "NONE");
 
   return (
     <div className="space-y-6">
@@ -262,7 +358,7 @@ function PaymentCheckout() {
 
       {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
 
-      {!error && recoveryState === "SUCCESS" && (
+      {!error && !confirmPhase && view === "success" && (
         <Card title="Payment already completed">
           <div className="space-y-3">
             <p className="text-sm text-slate-600">This appointment has already been paid for.</p>
@@ -275,18 +371,29 @@ function PaymentCheckout() {
         </Card>
       )}
 
-      {!error && recoveryState === "PENDING" && (
-        <Card title="Checking your payment status...">
-          <div className="space-y-3">
+      {!error && (view === "confirming" || confirmPhase === "unknown") && (
+        <Card title={confirmPhase === "unknown" ? "Still confirming your payment" : "Confirming your payment..."}>
+          <div className="space-y-3" role="status" aria-live="polite">
             <p className="text-sm text-slate-600">
-              We're confirming your payment with the payment provider. This can take a moment — please don't start a new payment.
+              {confirmPhase === "unknown"
+                ? "We have not received a final answer from the payment provider yet. If money was deducted it will be matched to this appointment automatically. Please don't start a new payment."
+                : "We're confirming your payment with the payment provider. This can take a moment. Please don't start a new payment or close this page."}
             </p>
-            <Button variant="secondary" onClick={checkRecovery}>Refresh status</Button>
+            <Button variant="secondary" onClick={confirmWithBackend} disabled={confirmPhase === "confirming"}>Refresh status</Button>
           </div>
         </Card>
       )}
 
-      {!error && recoveryState === "REQUIRES_RECONCILIATION" && (
+      {!error && !confirmPhase && view === "continue" && (
+        <Card title="Your payment is ready">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">A secure payment order was already created for this appointment. You can continue where you left off.</p>
+            <Button onClick={resumeFromRecovery}>Continue payment</Button>
+          </div>
+        </Card>
+      )}
+
+      {!error && !confirmPhase && view === "reconciliation" && (
         <Card title="We're reviewing this payment">
           <p className="text-sm text-slate-600">
             Something about this payment needs a closer look on our end before it can proceed. Our team has been notified —
@@ -295,7 +402,7 @@ function PaymentCheckout() {
         </Card>
       )}
 
-      {!error && recoveryState === "FAILED" && (
+      {!error && !confirmPhase && view === "failed" && (
         <Card title="Payment failed">
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
@@ -311,7 +418,11 @@ function PaymentCheckout() {
                 ))}
               </div>
             )}
-            <Button onClick={retryPayment} isLoading={isRetrying}>Try Again</Button>
+            {recovery?.retryAvailable === false ? (
+              <p className="text-sm font-semibold text-slate-600">The retry limit for this payment was reached. Please start a new payment from your appointments.</p>
+            ) : (
+              <Button onClick={retryPayment} isLoading={isRetrying}>Try Again</Button>
+            )}
           </div>
         </Card>
       )}
@@ -407,7 +518,7 @@ function PaymentCheckout() {
                 Payment is verified only by the backend using Razorpay signature validation.
                 Webhooks, invoice generation, wallet ledger, and email receipts are handled server-side.
               </p>
-              <Button className="mt-6 w-full" onClick={startPayment} isLoading={isPaying} disabled={!order}>
+              <Button className="mt-6 w-full" onClick={startPayment} isLoading={isPaying} disabled={!order || checkoutBusy || Boolean(confirmPhase)}>
                 Pay Securely
               </Button>
             </div>

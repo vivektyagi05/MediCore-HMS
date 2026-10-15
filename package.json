@@ -19,24 +19,27 @@
     "smoke:production": "node scripts/production-smoke.mjs"
   },
   "dependencies": {
-    "@tailwindcss/vite": "latest",
+    "@tailwindcss/vite": "^4.3.3",
     "axios": "^1.16.1",
     "framer-motion": "^12.39.0",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "react-router-dom": "latest",
+    "lucide-react": "^1.31.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
     "socket.io-client": "^4.8.3",
-    "vite": "latest",
+    "vite": "^8.2.1",
     "leaflet": "^1.9.4",
     "react-leaflet": "^5.0.0"
   },
   "devDependencies": {
-    "@eslint/js": "latest",
-    "@vitejs/plugin-react": "latest",
-    "eslint": "latest",
-    "eslint-plugin-react-hooks": "latest",
-    "eslint-plugin-react-refresh": "latest",
-    "globals": "latest"
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.4",
+    "globals": "^17.11.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

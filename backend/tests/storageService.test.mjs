@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 console.log("storageService.test.mjs");
 
@@ -100,11 +101,12 @@ const s3ProbeScript = `
 `;
 const { spawnSync } = await import("node:child_process");
 const probe = spawnSync(process.execPath, ["--input-type=module", "-e", s3ProbeScript], {
-  cwd: new URL("..", import.meta.url).pathname,
+  cwd: fileURLToPath(new URL("..", import.meta.url)),
   encoding: "utf8",
   env: { PATH: process.env.PATH, MONGO_URI: process.env.MONGO_URI, JWT_SECRET: process.env.JWT_SECRET },
 });
-assert.ok(probe.stdout.includes("S3_PROBE_OK"), `S3 driver probe failed: ${probe.stdout}${probe.stderr}`);
+assert.equal(probe.status, 0, `S3 driver probe exited ${probe.status}: ${probe.stdout ?? ""}${probe.stderr ?? ""}`);
+assert.ok((probe.stdout ?? "").includes("S3_PROBE_OK"), `S3 driver probe failed: ${probe.stdout ?? ""}${probe.stderr ?? ""}`);
 console.log("PASS: S3 driver round-trips through the real PutObject/GetObject/HeadObject/DeleteObject code path (injected client), and never exposes a local path");
 
 fs.rmSync(tmpRoot, { recursive: true, force: true });

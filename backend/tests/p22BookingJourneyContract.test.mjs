@@ -19,9 +19,9 @@ console.log("PASS: booking idempotency + conflict recovery contract");
 
 assert.ok(model.includes("statusHistory"), "Appointment must own lifecycle history");
 assert.ok(controller.includes("appendAppointmentHistory"), "status transitions must record history");
-assert.ok(cancellation.includes("appendAppointmentHistory"), "cancellation must record history");
-assert.ok(expiry.includes("appendAppointmentHistory"), "payment-window expiry must record history");
-assert.ok(payment.includes("appendAppointmentHistory"), "payment completion must record history");
+assert.ok(/atomicTransition\([\s\S]*history:/.test(cancellation), "cancellation must record history atomically with the status write");
+assert.ok(/atomicTransition|cancelAppointmentCore/.test(expiry), "payment-window expiry must transition atomically with history");
+assert.ok(/atomicTransition\([\s\S]*PAYMENT_COMPLETED[\s\S]*history:/.test(payment), "payment completion must record history atomically");
 console.log("PASS: lifecycle history is shared by appointment/payment/cancellation/expiry flows");
 
 assert.ok(routes.includes('router.get(\n  "/:id"'), "patient/doctor/admin appointment detail endpoint must exist");

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useFinancialSync } from "../../hooks/useFinancialSync";
 import { Landmark, Loader2 } from "lucide-react";
 
 import { withdrawalApi } from "../../api/withdrawalApi";
@@ -21,6 +22,8 @@ const STATUS_TONE = {
   requested: "info",
   reserved: "info",
   processing: "warning",
+  manual_pending: "warning",
+  manual_completed: "success",
   completed: "success",
   failed: "danger",
   retry_required: "warning",
@@ -32,6 +35,8 @@ const STATUS_LABEL = {
   requested: "Requested",
   reserved: "Reserved",
   processing: "Processing",
+  manual_pending: "Awaiting manual settlement",
+  manual_completed: "Settled manually by admin",
   completed: "Completed",
   failed: "Failed",
   retry_required: "Retry required",
@@ -83,6 +88,8 @@ function DoctorWithdrawalPanel() {
       setHistoryLoading(false);
     }
   }, []);
+
+  useFinancialSync(useCallback(async () => { await Promise.all([loadBalance(), loadHistory()]); }, [loadBalance, loadHistory]));
 
   useEffect(() => {
     loadBalance();
@@ -153,7 +160,7 @@ function DoctorWithdrawalPanel() {
           <MetricCard icon={Landmark} tone="success" label="Available to withdraw" value={money(balance?.withdrawableBalance)} caption="Settled earnings, ready now" />
           <MetricCard icon={Loader2} tone="warning" label="Pending withdrawal" value={money(balance?.pendingWithdrawal)} caption="Already requested, in progress" />
           <MetricCard icon={Landmark} tone="danger" label="Refund liability" value={money(balance?.refundLiability)} caption="Held back pending refund adjustments" />
-          <MetricCard icon={Landmark} tone="info" label="Already withdrawn" value={money(balance?.alreadyWithdrawn)} caption="Lifetime completed withdrawals" />
+          <MetricCard icon={Landmark} tone="info" label="Already withdrawn" value={money(balance?.alreadyWithdrawn)} caption="Lifetime manually settled withdrawals" />
         </div>
       )}
 

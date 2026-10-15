@@ -95,6 +95,9 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: "INR",
     },
+    // N-007: opaque storageService key (category "invoices"). pdfPath is the
+    // LEGACY raw filesystem path kept only so old rows still download.
+    pdfStorageKey: String,
     pdfPath: String,
     downloadUrl: String,
     metadata: {
@@ -136,6 +139,16 @@ invoiceSchema.pre("validate", function enforceInvoiceLinkage() {
     throw new Error("Invoice must reference either a payment+appointment or a subscription");
   }
 });
+
+// F-008: one invoice per payment, enforced by the database. Partial so invoices
+// without a payment (legacy/subscription-without-payment) are unaffected.
+// Named so it coexists with the older non-unique paymentId_1 index. If legacy
+// duplicates exist the index build fails; run `npm run migrate:invoice-uniqueness`
+// which reports duplicates and refuses to build the index until they are resolved.
+invoiceSchema.index(
+  { paymentId: 1 },
+  { unique: true, name: "uniq_invoice_payment", partialFilterExpression: { paymentId: { $type: "objectId" } } },
+);
 
 const Invoice = mongoose.model("Invoice", invoiceSchema);
 

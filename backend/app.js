@@ -1,3 +1,4 @@
+import { getReadiness } from "./services/readinessService.js";
 import cors from "cors";
 import path from "path";
 import compression from "compression";
@@ -118,6 +119,7 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) =>
     req.path === "/health" ||
+    req.path === "/health/ready" ||
     req.path.startsWith("/auth/") ||
     req.path.startsWith("/public/"),
   message: {
@@ -263,6 +265,22 @@ app.get("/api/health", (_req, res) => {
     },
     message: "Health check passed",
   });
+});
+
+// N-023: readiness (vs. liveness above). 503 when the DB is unreachable or a
+// correctness-bearing index (scheduler lock, idempotency/uniqueness) is missing,
+// so the platform stops routing to / flags a deployment whose migrations did not run.
+app.get("/api/health/ready", async (_req, res, next) => {
+  try {
+    const readiness = await getReadiness();
+    res.status(readiness.ready ? 200 : 503).json({
+      success: readiness.ready,
+      data: { service: "hms-pro-backend", ...readiness },
+      message: readiness.ready ? "Ready" : "Not ready",
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.use("/api/auth", authRoutes);

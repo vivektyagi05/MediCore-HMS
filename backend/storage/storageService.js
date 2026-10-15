@@ -101,7 +101,23 @@ const localDriver = {
   async put(key, buffer) {
     const absolute = localAbsolutePath(key);
     await fs.promises.mkdir(path.dirname(absolute), { recursive: true });
-    await fs.promises.writeFile(absolute, buffer);
+    // N-007: atomic write. Bytes go to a temp file in the same directory and are
+    // renamed into place, so a crash or full disk can never leave a truncated
+    // PDF/document under the real key (readers see the old file or the new one).
+    const temp = `${absolute}.${randomUUID()}.tmp`;
+    try {
+      const handle = await fs.promises.open(temp, "w");
+      try {
+        await handle.writeFile(buffer);
+        await handle.sync(); // durable before the rename publishes it
+      } finally {
+        await handle.close();
+      }
+      await fs.promises.rename(temp, absolute);
+    } catch (error) {
+      await fs.promises.unlink(temp).catch(() => {});
+      throw error;
+    }
     return { key, size: buffer.length };
   },
   async get(key) {

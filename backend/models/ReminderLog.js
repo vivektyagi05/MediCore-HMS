@@ -31,13 +31,21 @@ const reminderLogSchema = new mongoose.Schema(
     scheduledFor: { type: Date, required: true, index: true },
     sentAt: Date,
     failureReason: String,
-    eventKey: { type: String, unique: true, sparse: true },
+    eventKey: { type: String },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },
 );
 
 reminderLogSchema.index({ userId: 1, reminderType: 1, scheduledFor: -1 });
+// N-024: was { unique: true, sparse: true }. sparse indexes still index explicit
+// nulls, so a null/duplicate-null row breaks the build or collides later. The
+// partial $type:"string" form indexes only real keys. Explicit name so it can
+// be created additively beside a legacy sparse index (see migration 011).
+reminderLogSchema.index(
+  { eventKey: 1 },
+  { unique: true, name: "uniq_reminderlog_event_key", partialFilterExpression: { eventKey: { $type: "string" } } },
+);
 
 const ReminderLog = mongoose.model("ReminderLog", reminderLogSchema);
 

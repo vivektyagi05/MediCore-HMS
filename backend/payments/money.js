@@ -31,3 +31,21 @@ export const calculateBill = ({ subtotal, discount = 0, taxRate = 0 }) => {
     total: fromPaise(totalPaise),
   };
 };
+
+// ONE canonical doctor/platform allocation. Integer-paise arithmetic, and the
+// two parts always sum exactly to the gross (the doctor share is the remainder,
+// never an independently rounded product). The fee percentage is configurable
+// (PLATFORM_FEE_PERCENT, default 10 = the previously hard-coded split).
+export const platformFeePercent = (source = process.env) => {
+  const parsed = Number(source.PLATFORM_FEE_PERCENT);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : 10;
+};
+
+export const allocatePayout = (grossAmount, feePercent = platformFeePercent()) => {
+  const platformFee = percentOf(grossAmount, feePercent);
+  return {
+    grossAmount: fromPaise(toPaise(grossAmount)),
+    platformFee,
+    doctorAmount: subtractMoney(grossAmount, platformFee),
+  };
+};

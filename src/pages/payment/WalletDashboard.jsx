@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useFinancialSync } from "../../hooks/useFinancialSync";
 import { Filter, WalletCards } from "lucide-react";
 import { financeApi } from "../../api/financeApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -91,6 +92,8 @@ function WalletDashboard() {
       setIsLoading(false);
     }
   }, [type, from, to, page]);
+
+  useFinancialSync(loadWallet);
 
   useEffect(() => {
     loadWallet();

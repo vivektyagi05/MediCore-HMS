@@ -22,6 +22,18 @@ export const financeApi = {
   createSubscription(payload) {
     return apiClient.post("/finance/subscriptions", payload).then((res) => res.data);
   },
+  verifySubscriptionPayment(payload) {
+    return apiClient.post("/finance/subscriptions/verify", payload).then((res) => res.data);
+  },
+  completeTestSubscriptionPayment(razorpayOrderId) {
+    return apiClient.post("/finance/subscriptions/test/complete", { razorpayOrderId }).then((res) => res.data);
+  },
+  failTestSubscriptionPayment(razorpayOrderId) {
+    return apiClient.post("/finance/subscriptions/test/fail", { razorpayOrderId }).then((res) => res.data);
+  },
+  getSubscriptionOrderStatus(gatewayOrderId) {
+    return apiClient.get(`/finance/subscriptions/orders/${gatewayOrderId}/status`).then((res) => res.data);
+  },
   cancelSubscription(id) {
     return apiClient.patch(`/finance/subscriptions/${id}/cancel`).then((res) => res.data);
   },

@@ -303,7 +303,7 @@ export async function buildSubscriptionIntelligence(doctor, userId) {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const activeSubscription = await Subscription.findOne({ userId, status: { $in: ["active", "past_due"] } })
+  const activeSubscription = await Subscription.findOne({ userId, status: { $in: ["active", "past_due", "renewal_pending", "renewal_failed"] }, $or: [{ status: { $in: ["active", "past_due"] } }, { currentPeriodEnd: { $gt: new Date() } }] })
     .sort({ createdAt: -1 })
     .lean();
   const planCode = activeSubscription?.planCode || FREE_PLAN_CODE;

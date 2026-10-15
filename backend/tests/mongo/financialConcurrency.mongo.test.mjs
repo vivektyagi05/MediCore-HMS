@@ -45,7 +45,7 @@ await check("F-005 coupon: same payment claimed twice is idempotent; release twi
 });
 
 await check("F-006 retry: 10 concurrent claimRetry on one failed payment -> exactly one winner", async () => {
-  const payment = await Payment.create({ appointmentId: oid(), userId: oid(), doctorId: oid(), amount: 100, totalAmount: 100, currency: "INR", status: "failed", paymentState: "failed", idempotencyKey: `k${Date.now()}` });
+  const payment = await Payment.create({ appointmentId: oid(), userId: oid(), doctorId: oid(), amount: 100, totalAmount: 100, currency: "INR", status: "failed", paymentState: "failed", razorpayOrderId: `order_retry_${Date.now()}`, idempotencyKey: `k${Date.now()}` });
   const claims = await Promise.all(Array.from({ length: 10 }, () => paymentRetryService.claimRetry(payment._id)));
   assert.strictEqual(claims.filter(Boolean).length, 1);
 });

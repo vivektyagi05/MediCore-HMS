@@ -85,11 +85,7 @@ const pick = (row, aliases) => {
   return "";
 };
 
-// Canonicalize Windows CRLF to LF before hashing so Git line-ending conversion
-// does not make an otherwise identical committed LGD CSV fail integrity checks.
-const sha256File = (file) => crypto.createHash("sha256")
-  .update(fs.readFileSync(file, "utf8").replace(/\r\n?/g, "\n"), "utf8")
-  .digest("hex");
+const sha256File = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 
 const readSourceFile = (file) => {
   if (!fs.existsSync(file)) {

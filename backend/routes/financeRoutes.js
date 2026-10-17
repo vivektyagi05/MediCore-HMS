@@ -7,6 +7,7 @@ import {
   cancelSubscription,
   cancelWalletRecharge,
   createCoupon,
+  getCouponUsage,
   createSubscription,
   verifySubscriptionPayment,
   getSubscriptionPaymentStatus,
@@ -34,6 +35,7 @@ const router = Router();
 router.post("/coupons/validate", protect, authorizeRoles(ROLES.PATIENT), validateCoupon);
 router.get("/coupons", protect, authorizeRoles(ROLES.SUPER_ADMIN), listCoupons);
 router.post("/coupons", protect, authorizeRoles(ROLES.SUPER_ADMIN), createCoupon);
+router.get("/coupons/:id/usage", protect, authorizeRoles(ROLES.SUPER_ADMIN), getCouponUsage);
 router.patch("/coupons/:id", protect, authorizeRoles(ROLES.SUPER_ADMIN), updateCoupon);
 
 router.get("/subscriptions/plans", protect, authorizeRoles(ROLES.SUPER_ADMIN, ROLES.DOCTOR), getPlans);

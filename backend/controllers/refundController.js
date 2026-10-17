@@ -25,6 +25,7 @@ import { GATEWAY_REFUND_OUTCOME, classifyGatewayRefund, isDefinitiveGatewayRejec
 import { applyRefundToDoctorEarning } from "../payments/refundEarningAdjustment.js";
 import { appendPaymentTransition } from "../payments/paymentStateMachine.js";
 import { appendRefundTransition, assertRefundTransition, REFUND_STATES } from "../payments/refundStateMachine.js";
+import { acquireRefundLock, releaseRefundLock } from "../payments/refundLock.js";
 import {
   computeRefundableAmount,
   computeFundingAllocation,
@@ -47,25 +48,6 @@ const validatePaymentId = (paymentId) => {
 // currently holds it. No Mongo transaction/session is needed because this
 // serializes access to a single document via one atomic operation, which
 // is all the actual risk here requires.
-const acquireRefundLock = async (paymentId) => {
-  const locked = await Payment.findOneAndUpdate(
-    { _id: paymentId, refundLockedAt: { $exists: false } },
-    { $set: { refundLockedAt: new Date() } },
-    { new: true },
-  );
-  if (!locked) {
-    throw new AppError(
-      "Another refund operation is already in progress for this payment. Please try again in a moment.",
-      409,
-    );
-  }
-  return locked;
-};
-
-const releaseRefundLock = async (paymentId) => {
-  await Payment.findByIdAndUpdate(paymentId, { $unset: { refundLockedAt: 1 } });
-};
-
 // Reused by both createRefundRequest (patient/admin submitting a new
 // request) and initiateRefund (admin direct refund) — the same real
 // duplicate-request rule applies to both entry points. Previously only
@@ -239,6 +221,11 @@ const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAm
     }).catch(() => {});
   }
 
+  // Phase 03: the receipt is enqueued BEFORE the request is marked processed. The outbox
+  // row is deduplicated by eventKey, so if the process dies between these two writes the
+  // replay (state still gateway_processing/reconciliation_required) re-enqueues harmlessly
+  // instead of the receipt being lost behind an already-processed request.
+  await financialEmails.refundProcessed({ payment, refundId: refund?.id, amount: refundAmount, user: payment.userId });
   if (refundRequest) {
     refundRequest.status = "processed";
     if (refundRequest.refundState !== REFUND_STATES.PROCESSED) {
@@ -258,7 +245,6 @@ const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAm
   }
 
   financeEmitter.invalidate({ userIds: [payment.userId?._id || payment.userId], domain: "refund", entityId: payment._id });
-  await financialEmails.refundProcessed({ payment, refundId: refund?.id, amount: refundAmount, user: payment.userId });
   if (req) {
     await writeAdminLog({
       req, action: "refund.processed", resourceType: "RefundRequest", resourceId: refundRequest?._id?.toString(),
@@ -271,7 +257,7 @@ const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAm
 };
 
 const processRefund = async ({ paymentId, refundAmount, reason, actorId, refundRequest, req }) => {
-  await acquireRefundLock(paymentId);
+  const lockToken = await acquireRefundLock(paymentId);
 
   try {
     const payment = await Payment.findById(paymentId).populate("userId", "name email");
@@ -361,7 +347,7 @@ const processRefund = async ({ paymentId, refundAmount, reason, actorId, refundR
     });
     return { payment, refund, wallet, refundRequest, walletRefundAmount, gatewayRefundAmount, pending: false };
   } finally {
-    await releaseRefundLock(paymentId);
+    await releaseRefundLock(paymentId, lockToken);
   }
 };
 
@@ -372,7 +358,7 @@ export const settlePendingGatewayRefund = async ({ refundRequestId, refund, sour
   const outcome = classifyGatewayRefund(refund);
   const initial = await RefundRequest.findById(refundRequestId).lean();
   if (!initial) return { settled: false, reason: "not_found" };
-  await acquireRefundLock(initial.paymentId);
+  const lockToken = await acquireRefundLock(initial.paymentId);
   try {
     const rr = await RefundRequest.findById(refundRequestId);
     if (rr.refundState === REFUND_STATES.PROCESSED) return { settled: true, replay: true };
@@ -400,7 +386,7 @@ export const settlePendingGatewayRefund = async ({ refundRequestId, refund, sour
     await recordRefundNotCompleted({ payment, refundRequest: rr, definitive: false, actorId, req: null, gatewayStatus: outcome, failureReason: `Unrecognised provider refund status (${source})` });
     return { settled: false, unknown: true };
   } finally {
-    await releaseRefundLock(initial.paymentId);
+    await releaseRefundLock(initial.paymentId, lockToken);
   }
 };
 
@@ -409,14 +395,21 @@ export const settlePendingGatewayRefund = async ({ refundRequestId, refund, sour
 // as admin/webhook-owned refunds, so counters, wallet, ledger, doctor-earning and
 // platform-fee reversal all happen once. Anything it cannot safely account for is
 // flagged reconciliation_required instead of mutating counters.
+const planAmountFromRefund = (refund) => Number(refund?.amount || 0) / 100;
+
 export const settleOutOfBandGatewayRefund = async ({ gatewayPaymentId, refund, source = "webhook" }) => {
   const initial = await Payment.findOne({ paymentId: gatewayPaymentId }).select("_id").lean();
   if (!initial) return { settled: false, reason: "payment_not_found" };
-  await acquireRefundLock(initial._id);
+  const lockToken = await acquireRefundLock(initial._id);
   try {
     const payment = await Payment.findById(initial._id).populate("userId", "name email");
     const plan = planOutOfBandRefund({ payment, gatewayRefundId: refund?.id, providerAmountPaise: refund?.amount });
-    if (plan.action === "skip_duplicate") return { settled: true, replay: true };
+    if (plan.action === "skip_duplicate") {
+      // Replay after a crash that happened between the counters and the receipt enqueue:
+      // the eventKey dedupes, so this is a no-op when the receipt already exists.
+      await financialEmails.refundProcessed({ payment, refundId: refund?.id, amount: planAmountFromRefund(refund), user: payment.userId });
+      return { settled: true, replay: true };
+    }
     if (plan.action !== "finalize") {
       if (payment) {
         payment.paymentState = "reconciliation_required";
@@ -432,7 +425,7 @@ export const settleOutOfBandGatewayRefund = async ({ gatewayPaymentId, refund, s
     });
     return { settled: true };
   } finally {
-    await releaseRefundLock(initial._id);
+    await releaseRefundLock(initial._id, lockToken);
   }
 };
 
@@ -455,13 +448,13 @@ export const reconcileRefundRequest = async (refundRequestId, { actorId = null }
     refund = (list || []).find((item) => item?.notes?.refundRequestId === rr._id.toString()) || null;
     if (!refund) {
       // Lookup succeeded and the provider has no such refund: definitively not created.
-      await acquireRefundLock(rr.paymentId);
+      const lockToken = await acquireRefundLock(rr.paymentId);
       try {
         const fresh = await RefundRequest.findById(rr._id);
         const pay = await Payment.findById(rr.paymentId).populate("userId", "name email");
         await recordRefundNotCompleted({ payment: pay, refundRequest: fresh, definitive: true, actorId, req: null, failureReason: "Provider confirmed no refund was created" });
       } finally {
-        await releaseRefundLock(rr.paymentId);
+        await releaseRefundLock(rr.paymentId, lockToken);
       }
       return { settled: true, failed: true };
     }

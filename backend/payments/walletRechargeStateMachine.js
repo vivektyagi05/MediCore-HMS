@@ -19,9 +19,11 @@ export const WALLET_RECHARGE_TRANSITIONS = Object.freeze({
   verification_pending: ["captured", "failed", "reconciliation_required"],
   captured: ["posted", "reconciliation_required"],
   posted: ["reconciliation_required"],
-  failed: ["order_created", "cancelled", "expired", "reconciliation_required"],
-  cancelled: ["order_created"],
-  expired: ["order_created", "reconciliation_required"],
+  failed: ["order_created", "captured", "cancelled", "expired", "reconciliation_required"],
+  // A recharge has no appointment to conflict with, so a provider capture that arrives
+  // AFTER a reported failure/cancel/expiry is real money and must still be credited.
+  cancelled: ["order_created", "captured"],
+  expired: ["order_created", "captured", "reconciliation_required"],
   reconciliation_required: ["pending", "captured", "posted", "failed"],
 });
 

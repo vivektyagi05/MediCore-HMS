@@ -145,7 +145,23 @@ function WalletDashboard() {
             <div className="rounded-2xl bg-slate-950 p-6 text-white">
               <WalletCards className="text-blue-400" size={30} />
               <p className="mt-5 text-sm font-bold text-slate-400">Available balance</p>
-              <p className="mt-2 text-5xl font-black">{wallet.currency} {wallet.balance}</p>
+              {/* Server-computed: posted balance minus funds held for checkouts in progress. */}
+              <p className="mt-2 text-5xl font-black">{wallet.currency} {wallet.availableBalance ?? wallet.balance}</p>
+              <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+                <div>
+                  <dt className="font-bold text-slate-400">Posted balance</dt>
+                  <dd className="font-black">{wallet.currency} {wallet.balance}</dd>
+                </div>
+                <div>
+                  <dt className="font-bold text-slate-400">Held for pending payments</dt>
+                  <dd className="font-black">{wallet.currency} {wallet.heldBalance ?? 0}</dd>
+                </div>
+              </dl>
+              {Number(wallet.heldBalance) > 0 && (
+                <p className="mt-3 text-xs font-semibold text-slate-400">
+                  Held funds are released automatically if a payment does not complete, and become a debit once it does.
+                </p>
+              )}
             </div>
           </Card>
 

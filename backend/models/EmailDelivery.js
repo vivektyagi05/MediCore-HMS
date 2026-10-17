@@ -20,6 +20,13 @@ const emailDeliverySchema = new mongoose.Schema(
     providerMessageId: { type: String, maxlength: 200 },
     sentAt: Date,
     claimedAt: Date,
+    // Phase 03: lease fencing token. Every claim mints a new token and every
+    // outcome write is conditional on it, so a stale worker (whose lease was
+    // reclaimed after a crash/slow send) can never overwrite a newer worker's result.
+    claimToken: { type: String, maxlength: 64 },
+    lastErrorAt: Date,
+    requeuedAt: Date,
+    requeueCount: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 );

@@ -13,7 +13,23 @@ const couponSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
     appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: "Appointment", index: true },
     isActive: { type: Boolean, default: true, index: true },
-    usedBy: [{ userId: mongoose.Schema.Types.ObjectId, paymentId: mongoose.Schema.Types.ObjectId, usedAt: Date }],
+    // Phase 03 lifecycle. `usedCount` keeps its meaning (reserved + redeemed = slots consumed)
+    // so every existing limit check stays correct. Each usedBy entry now says which it is:
+    //   state "reserved"  - claimed at order creation; releasable
+    //   state "redeemed"  - payment captured; permanent, never released
+    //   state undefined   - legacy entry written before this lifecycle; left unclassified
+    usedBy: [{
+      userId: mongoose.Schema.Types.ObjectId,
+      paymentId: mongoose.Schema.Types.ObjectId,
+      usedAt: Date,
+      state: { type: String, enum: ["reserved", "redeemed"] },
+      reservedAt: Date,
+      redeemedAt: Date,
+    }],
+    redeemedCount: { type: Number, default: 0, min: 0 },
+    releasedCount: { type: Number, default: 0, min: 0 },
+    rejectedCount: { type: Number, default: 0, min: 0 },
+    lastRejectionCode: { type: String, maxlength: 60 },
   },
   { timestamps: true },
 );

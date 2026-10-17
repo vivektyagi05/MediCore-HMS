@@ -10,6 +10,9 @@ import {
   getFinanceAttentionQueue,
   getFinanceActivityTimeline,
   getFinanceExecutiveSummary,
+  getWalletLedgerDiscrepancies,
+  getFinancialOutbox,
+  requeueOutboxEvent,
 } from "../../controllers/admin/financeAdminController.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { requireAdmin, requirePermission } from "../../middleware/adminMiddleware.js";
@@ -30,6 +33,9 @@ router.get("/collections", gate, getCollections);
 router.get("/reconciliation", gate, getReconciliation);
 router.post("/reconciliation/wallets", gate, reconcileWalletBalances);
 router.post("/reconciliation/wallets/:userId", gate, reconcileWalletBalances);
+router.get("/reconciliation/discrepancies", gate, getWalletLedgerDiscrepancies);
+router.get("/outbox", gate, getFinancialOutbox);
+router.post("/outbox/:id/requeue", gate, requeueOutboxEvent);
 router.get("/attention-queue", gate, getFinanceAttentionQueue);
 router.get("/activity-timeline", gate, getFinanceActivityTimeline);
 router.get("/ai/executive-summary", gate, getFinanceExecutiveSummary);

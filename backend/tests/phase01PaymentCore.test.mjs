@@ -22,6 +22,7 @@ const { default: WebhookEvent } = await import("../models/WebhookEvent.js");
 const { default: Subscription } = await import("../models/Subscription.js");
 const { default: RefundRequest } = await import("../models/RefundRequest.js");
 const { default: Invoice } = await import("../models/Invoice.js");
+const { default: WalletRecharge } = await import("../models/WalletRecharge.js");
 const { installMemoryModels, newId } = await import("./helpers/memoryModels.mjs");
 const { paymentGateway } = await import("../payments/paymentGateway.js");
 const { paymentDeps } = await import("../payments/paymentDeps.js");
@@ -42,6 +43,7 @@ const mem = installMemoryModels([
   { model: Subscription },
   { model: RefundRequest },
   { model: Invoice },
+  { model: WalletRecharge }, // Phase 02: the webhook now checks recharge orders before subscriptions
 ]);
 
 // ---- fakes at the boundaries -------------------------------------------------

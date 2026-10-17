@@ -16,6 +16,11 @@ import { paymentRetryService } from "../payments/paymentRetryService.js";
 import { reconciliationService } from "../payments/reconciliationService.js";
 import { subscriptionService } from "../payments/subscriptionService.js";
 import { practiceEmitter } from "../realtime/practiceEmitter.js";
+import AdminActivityLog from "../models/AdminActivityLog.js";
+import { writeAdminLog } from "../utils/adminAudit.js";
+import { summarizeCouponUsage, validateCouponRules } from "../payments/couponRules.js";
+
+const escapeRegex = (value) => value.replace(/[.*+?^$|()[\]{}\\]/g, "\\$&");
 
 const parsePagination = (query) => {
   const page = Math.max(Number(query.page) || 1, 1);
@@ -51,28 +56,52 @@ export const validateCoupon = asyncHandler(async (req, res) => {
 
 export const listCoupons = asyncHandler(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);
-  const filter = req.query.status === "inactive" ? { isActive: false } : {};
+  const filter = req.query.status === "inactive" ? { isActive: false } : req.query.status === "active" ? { isActive: true } : {};
+  if (typeof req.query.search === "string" && req.query.search.trim()) {
+    filter.code = { $regex: `^${escapeRegex(req.query.search.trim().toUpperCase())}` };
+  }
 
   const [coupons, total] = await Promise.all([
     Coupon.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Coupon.countDocuments(filter),
   ]);
+  // The list never ships the per-use entries (user/payment ids); it ships the server-computed summary.
+  const rows = coupons.map(({ usedBy, ...rest }) => ({ ...rest, usage: summarizeCouponUsage({ ...rest, usedBy }) }));
 
   res.status(200).json({
     success: true,
-    data: { coupons, pagination: { page, limit, total, pages: Math.ceil(total / limit) } },
+    data: { coupons: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } },
     message: "Coupons fetched successfully",
   });
 });
 
+export const getCouponUsage = asyncHandler(async (req, res) => {
+  assertObjectId(req.params.id, "coupon id");
+  const coupon = await Coupon.findById(req.params.id).lean();
+  if (!coupon) throw new AppError("Coupon not found", 404);
+  const history = await AdminActivityLog.find({ resourceType: "Coupon", resourceId: String(coupon._id) })
+    .populate("actorId", "name email").sort({ createdAt: -1 }).limit(50).lean();
+  res.status(200).json({
+    success: true,
+    data: {
+      coupon: { _id: coupon._id, code: coupon.code, isActive: coupon.isActive, rejectedCount: coupon.rejectedCount || 0, lastRejectionCode: coupon.lastRejectionCode || null },
+      usage: summarizeCouponUsage(coupon),
+      entries: (coupon.usedBy || []).slice(-100).map((e) => ({ paymentId: e.paymentId, state: e.state || "legacy", usedAt: e.usedAt, redeemedAt: e.redeemedAt || null })),
+      history: history.map((h) => ({ action: h.action, at: h.createdAt, actor: h.actorId ? { name: h.actorId.name, email: h.actorId.email } : null, metadata: h.metadata })),
+    },
+    message: "Coupon usage fetched successfully",
+  });
+});
+
+const COUPON_EDITABLE = ["description", "value", "maxDiscount", "expiresAt", "usageLimit", "isActive"];
+
 export const createCoupon = asyncHandler(async (req, res) => {
+  const errors = validateCouponRules(req.body || {}, { isCreate: true });
+  if (errors.length) throw new AppError(errors[0].message, 400, { code: "COUPON_VALIDATION", errors });
   const { code, type, value, expiresAt, usageLimit = 1 } = req.body;
-  if (!code || !type || !value || !expiresAt) {
-    throw new AppError("Code, type, value, and expiry date are required", 400);
-  }
 
   const coupon = await Coupon.create({
-    code,
+    code: String(code).trim(),
     description: req.body.description,
     type,
     value: Number(value),
@@ -82,6 +111,7 @@ export const createCoupon = asyncHandler(async (req, res) => {
     userId: req.body.userId,
     appointmentId: req.body.appointmentId,
   });
+  await writeAdminLog({ req, action: "coupon.created", resourceType: "Coupon", resourceId: String(coupon._id), metadata: { code: coupon.code, type: coupon.type, value: coupon.value, usageLimit: coupon.usageLimit, expiresAt: coupon.expiresAt } });
 
   res.status(201).json({
     success: true,
@@ -92,14 +122,21 @@ export const createCoupon = asyncHandler(async (req, res) => {
 
 export const updateCoupon = asyncHandler(async (req, res) => {
   assertObjectId(req.params.id, "coupon id");
-  const allowed = ["description", "value", "maxDiscount", "expiresAt", "usageLimit", "isActive"];
-  const updates = allowed.reduce((acc, field) => {
+  const updates = COUPON_EDITABLE.reduce((acc, field) => {
     if (req.body[field] !== undefined) acc[field] = req.body[field];
     return acc;
   }, {});
+  if (Object.keys(updates).length === 0) throw new AppError("No editable fields supplied", 400);
+
+  const existing = await Coupon.findById(req.params.id).lean();
+  if (!existing) throw new AppError("Coupon not found", 404);
+  const errors = validateCouponRules(updates, { existing });
+  if (errors.length) throw new AppError(errors[0].message, 400, { code: "COUPON_VALIDATION", errors });
 
   const coupon = await Coupon.findByIdAndUpdate(req.params.id, updates, { returnDocument: "after", runValidators: true });
-  if (!coupon) throw new AppError("Coupon not found", 404);
+  const before = {}; const after = {};
+  for (const field of Object.keys(updates)) { before[field] = existing[field]; after[field] = coupon[field]; }
+  await writeAdminLog({ req, action: "coupon.updated", resourceType: "Coupon", resourceId: String(coupon._id), metadata: { code: coupon.code, before, after } });
 
   res.status(200).json({
     success: true,
@@ -330,29 +367,18 @@ import WalletRecharge, { WALLET_RECHARGE_STATUS } from "../models/WalletRecharge
 import { appendWalletRechargeTransition } from "../payments/walletRechargeStateMachine.js";
 import { financeEmitter } from "../realtime/financeEmitter.js";
 import { toPaise } from "../payments/money.js";
+import { createRechargeIntent, finishRechargePosting, flagRecharge, persistRechargeGuarded, settleRechargeFromProviderPayment, postRechargeCapture as postWalletRechargeCaptureShared } from "../payments/walletRechargeService.js";
+const postWalletRechargeCapture = (recharge, opts) => postWalletRechargeCaptureShared(recharge, opts);
 
 export const createWalletRechargeOrder = asyncHandler(async (req, res) => {
   const amount = Number(req.body.amount);
-  if (!amount || amount < 1) throw new AppError("Recharge amount must be at least INR 1", 400);
+  if (!Number.isFinite(amount) || amount < 1) throw new AppError("Recharge amount must be at least INR 1", 400);
+  // Money has at most 2 decimals: reject (never round) so the stored amount always equals the provider amount in paise.
+  if (Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-6) throw new AppError("Recharge amount can have at most 2 decimal places", 400);
+  if (Math.round(amount * 100) > 10_000_000) throw new AppError("Recharge amount exceeds the allowed maximum", 400);
 
-  const order = await paymentGateway.createOrder({
-    amount,
-    currency: "INR",
-    receipt: `wallet_${req.user._id.toString().slice(-10)}_${Date.now()}`,
-    notes: { userId: req.user._id.toString(), module: "hms_wallet_recharge" },
-  });
-
-  const recharge = new WalletRecharge({
-    userId: req.user._id,
-    amount,
-    currency: "INR",
-    gatewayOrderId: order.id,
-    status: WALLET_RECHARGE_STATUS.CREATED,
-  });
-  appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.ORDER_CREATED, {
-    actorId: req.user._id, source: "patient", reason: "Gateway order created",
-  });
-  await recharge.save();
+  // Phase 02: the recharge intent is persisted BEFORE the provider order exists.
+  const { recharge, order } = await createRechargeIntent({ userId: req.user._id, amount });
 
   res.status(201).json({
     success: true,
@@ -386,10 +412,14 @@ export const cancelWalletRecharge = asyncHandler(async (req, res) => {
   appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.CANCELLED, {
     actorId: req.user._id, source: "patient", reason: "Checkout dismissed by patient",
   });
-  recharge.attempts.push({ completedAt: new Date(), outcome: "cancelled" });
-  await recharge.save();
+  const cancelled = await persistRechargeGuarded(recharge, { attempt: { completedAt: new Date(), outcome: "cancelled" } });
+  if (!cancelled) {
+    // A capture won the race; never let a late "cancelled" override it.
+    const current = await WalletRecharge.findById(recharge._id);
+    return res.status(200).json({ success: true, data: { recharge: current }, message: "Recharge already completed" });
+  }
 
-  res.status(200).json({ success: true, data: { recharge }, message: "Recharge cancelled" });
+  res.status(200).json({ success: true, data: { recharge: cancelled }, message: "Recharge cancelled" });
 });
 
 // Section 8/15 — recovery. Lets the frontend re-check a recharge's real
@@ -426,11 +456,7 @@ export const getWalletRechargeStatus = asyncHandler(async (req, res) => {
     if (["captured", "processed"].includes(status)) {
       await postWalletRechargeCapture(recharge, { gatewayPaymentId: recharge.gatewayPaymentId, actorId: req.user._id, source: "recovery" });
     } else if (["failed"].includes(status)) {
-      appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.FAILED, {
-        actorId: req.user._id, source: "recovery", reason: `Gateway payment status: ${status}`,
-      });
-      recharge.failureReason = `Gateway payment status: ${status}`;
-      await recharge.save();
+      await settleRechargeFromProviderPayment({ recharge, entity: { id: recharge.gatewayPaymentId, status: "failed", order_id: recharge.gatewayOrderId }, source: "recovery" });
     }
     // Any other provider status (created/authorized) genuinely means "still
     // pending" — leave the recharge exactly as-is, do not guess.
@@ -459,100 +485,8 @@ export const listWalletRecharges = asyncHandler(async (req, res) => {
   });
 });
 
-// Shared atomic capture step (idempotent — Section 9). Only ever called
-// once the caller has already confirmed authoritative provider capture.
-// Uses the recharge document's own status field as the concurrency mutex,
-// same pattern as the pre-existing pending->posted fix this replaces:
-// only the request that wins the atomic order_created/pending/etc ->
-// captured transition proceeds to credit the wallet; everything else
-// (concurrent duplicate verify call, webhook racing the sync call) is
-// answered idempotently from the already-captured/posted state.
-const postWalletRechargeCapture = async (rechargeDoc, { gatewayPaymentId, actorId, source }) => {
-  const claimed = await WalletRecharge.findOneAndUpdate(
-    {
-      _id: rechargeDoc._id,
-      status: { $in: [WALLET_RECHARGE_STATUS.ORDER_CREATED, WALLET_RECHARGE_STATUS.CHECKOUT_STARTED, WALLET_RECHARGE_STATUS.PENDING, WALLET_RECHARGE_STATUS.VERIFICATION_PENDING, WALLET_RECHARGE_STATUS.RECONCILIATION_REQUIRED] },
-    },
-    {
-      $set: { status: WALLET_RECHARGE_STATUS.CAPTURED, gatewayPaymentId, reconciliationState: "matched" },
-      $push: { stateHistory: { from: rechargeDoc.status, to: WALLET_RECHARGE_STATUS.CAPTURED, actorId, source, reason: "Gateway payment captured", at: new Date() } },
-    },
-    { returnDocument: "after" },
-  );
-
-  if (!claimed) {
-    // Lost the race or genuinely already posted — return the current
-    // authoritative document rather than crediting a second time.
-    const current = await WalletRecharge.findById(rechargeDoc._id);
-    return current;
-  }
-
-  // Ledger + wallet credit, atomic and idempotent via a unique
-  // idempotencyKey keyed on this recharge's own _id (never the mutable
-  // gatewayPaymentId) — a duplicate call after this point can only ever
-  // hit the unique-index conflict below, never double-post.
-  let ledgerEntry;
-  try {
-    ledgerEntry = await TransactionLedger.create({
-      userId: claimed.userId,
-      type: "wallet_credit",
-      direction: "credit",
-      amount: claimed.amount,
-      currency: claimed.currency,
-      status: "posted",
-      referenceId: gatewayPaymentId,
-      idempotencyKey: `wallet:recharge:${claimed._id.toString()}`,
-    });
-  } catch (error) {
-    if (error?.code === 11000) {
-      // Ledger row already posted by a concurrent winner of a prior race
-      // window — treat as the benign idempotent no-op it is.
-      ledgerEntry = await TransactionLedger.findOne({ idempotencyKey: `wallet:recharge:${claimed._id.toString()}` }).lean();
-    } else {
-      throw error;
-    }
-  }
-
-  // F-004: the credit is keyed on this recharge's own id inside the wallet
-  // document, so replaying the posting after a crash (captured -> ledger written
-  // -> crash before "posted") can never credit twice. A null result from the
-  // conditional update means "already credited", not an error.
-  const rechargeRef = `recharge:${claimed._id.toString()}`;
-  let wallet = await Wallet.findOneAndUpdate(
-    { userId: claimed.userId, transactions: { $not: { $elemMatch: { referenceType: "recharge", referenceId: rechargeRef } } } },
-    {
-      $setOnInsert: { userId: claimed.userId, currency: claimed.currency },
-      $inc: { balance: claimed.amount },
-      $push: {
-        transactions: {
-          type: "credit",
-          amount: claimed.amount,
-          currency: claimed.currency,
-          status: "completed",
-          referenceType: "recharge",
-          referenceId: rechargeRef,
-          description: "Wallet recharge",
-        },
-      },
-    },
-    { returnDocument: "after", upsert: true },
-  ).catch((error) => {
-    if (error?.code === 11000) return null; // upsert collided with the existing (already-credited) wallet
-    throw error;
-  });
-  if (!wallet) wallet = await Wallet.findOne({ userId: claimed.userId });
-
-  appendWalletRechargeTransition(claimed, WALLET_RECHARGE_STATUS.POSTED, {
-    actorId, source, reason: "Wallet credited and ledger posted",
-  });
-  claimed.ledgerEntryId = ledgerEntry?._id;
-  claimed.attempts.push({ completedAt: new Date(), outcome: "captured", gatewayPaymentId });
-  await claimed.save();
-  financeEmitter.invalidate({ userIds: [claimed.userId], admin: false, domain: "wallet", entityId: claimed._id });
-
-  return { recharge: claimed, wallet, ledger: ledgerEntry };
-};
-
+// Capture/credit pipeline lives in payments/walletRechargeService.js (one pipeline
+// for verify, webhook, status polling and recovery).
 export const verifyWalletRecharge = asyncHandler(async (req, res) => {
   const { razorpayOrderId, paymentId, signature } = req.body;
   if (!razorpayOrderId || !paymentId || !signature) {
@@ -567,12 +501,11 @@ export const verifyWalletRecharge = asyncHandler(async (req, res) => {
     return res.status(200).json({ success: true, data: { wallet, recharge }, message: "Wallet recharge already completed" });
   }
   if (recharge.status === WALLET_RECHARGE_STATUS.CAPTURED) {
-    // Race with a concurrent verify/webhook call that already claimed
-    // capture but hasn't finished posting — retry the same atomic step,
-    // which is itself idempotent, rather than erroring.
-    const result = await postWalletRechargeCapture(recharge, { gatewayPaymentId: paymentId, actorId: req.user._id, source: "patient" });
+    // Capture already claimed (concurrent verify/webhook, or a crash before posting):
+    // finish the idempotent credit pipeline instead of re-claiming.
+    const result = await finishRechargePosting(recharge, { actorId: req.user._id, source: "patient" });
     const wallet = result.wallet || (await Wallet.findOne({ userId: req.user._id }).lean());
-    return res.status(200).json({ success: true, data: { wallet, recharge: result.recharge || result }, message: "Wallet recharge completed successfully" });
+    return res.status(200).json({ success: true, data: { wallet, recharge: result.recharge }, message: "Wallet recharge completed successfully" });
   }
 
   // Step 1 — signature verification (Section 5). A failure here does NOT
@@ -584,8 +517,7 @@ export const verifyWalletRecharge = asyncHandler(async (req, res) => {
     appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.VERIFICATION_PENDING, {
       actorId: req.user._id, source: "patient", reason: "Gateway signature verification failed; authoritative state requires review",
     });
-    recharge.reconciliationState = "required";
-    await recharge.save();
+    await persistRechargeGuarded(recharge, { set: { reconciliationState: "required" } });
     throw new AppError("Recharge verification could not be confirmed. Your payment status is being checked.", 400);
   }
 
@@ -601,25 +533,25 @@ export const verifyWalletRecharge = asyncHandler(async (req, res) => {
     appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.VERIFICATION_PENDING, {
       actorId: req.user._id, source: "gateway", reason: "Gateway payment lookup failed",
     });
-    recharge.reconciliationState = "required";
-    recharge.gatewayPaymentId = paymentId;
-    await recharge.save();
+    await persistRechargeGuarded(recharge, { set: { reconciliationState: "required", gatewayPaymentId: paymentId } });
     throw new AppError("Payment status could not be confirmed yet. Please check status again.", 503);
   }
 
   // Steps 3-5 — order match, amount match, currency match (Section 5).
   const expectedPaise = toPaise(recharge.amount);
-  const gatewayAmountPaise = gatewayPayment?.amount == null ? expectedPaise : Number(gatewayPayment.amount);
-  const gatewayCurrency = String(gatewayPayment?.currency || recharge.currency).toUpperCase();
+  const gatewayAmountPaise = Number(gatewayPayment?.amount);
+  const gatewayCurrency = typeof gatewayPayment?.currency === "string" ? gatewayPayment.currency.trim().toUpperCase() : "";
+  const providerSaysCaptured = ["captured", "processed"].includes(String(gatewayPayment?.status || "").toLowerCase());
+  if (providerSaysCaptured && (!Number.isInteger(gatewayAmountPaise) || gatewayAmountPaise <= 0 || gatewayCurrency.length !== 3)) {
+    // Never fabricate a missing provider amount/currency from our own record.
+    await flagRecharge(recharge, "Provider capture is missing amount or currency", { gatewayPaymentId: paymentId });
+    throw new AppError("Recharge details could not be reconciled. Please contact support.", 409);
+  }
   if (gatewayPayment?.order_id && gatewayPayment.order_id !== razorpayOrderId) {
     throw new AppError("Payment order does not match this recharge", 400);
   }
-  if (gatewayAmountPaise !== expectedPaise || gatewayCurrency !== recharge.currency.toUpperCase()) {
-    appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.RECONCILIATION_REQUIRED, {
-      actorId: req.user._id, source: "gateway", reason: "Gateway amount or currency did not match authoritative recharge",
-    });
-    recharge.gatewayPaymentId = paymentId;
-    await recharge.save();
+  if (providerSaysCaptured && (gatewayAmountPaise !== expectedPaise || gatewayCurrency !== recharge.currency.toUpperCase())) {
+    await flagRecharge(recharge, "Gateway amount or currency did not match authoritative recharge", { gatewayPaymentId: paymentId });
     throw new AppError("Recharge details could not be reconciled. Please contact support.", 409);
   }
 
@@ -628,14 +560,10 @@ export const verifyWalletRecharge = asyncHandler(async (req, res) => {
   // gets its own honest state, never a blind credit.
   const providerStatus = String(gatewayPayment?.status || "").toLowerCase();
   if (!["captured", "processed"].includes(providerStatus)) {
-    recharge.gatewayPaymentId = paymentId;
-    recharge.attempts.push({ completedAt: new Date(), outcome: providerStatus === "failed" ? "failed" : "unknown", gatewayPaymentId: paymentId, failureReason: `Gateway payment status: ${providerStatus}` });
+    const pendingAttempt = { completedAt: new Date(), outcome: providerStatus === "failed" ? "failed" : "unknown", gatewayPaymentId: paymentId, failureReason: `Gateway payment status: ${providerStatus}` };
     if (providerStatus === "failed") {
-      appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.FAILED, {
-        actorId: req.user._id, source: "gateway", reason: `Gateway payment status: ${providerStatus}`,
-      });
-      recharge.failureReason = `Gateway payment status: ${providerStatus}`;
-      await recharge.save();
+      // CAS from OPEN states only: a concurrent capture (webhook) is never overwritten by a stale save().
+      await settleRechargeFromProviderPayment({ recharge, entity: { id: paymentId, status: "failed", order_id: razorpayOrderId }, source: "gateway" });
       throw new AppError("Payment was not captured by the provider.", 402);
     }
     // created/authorized/pending — genuinely still in flight, not a
@@ -643,13 +571,11 @@ export const verifyWalletRecharge = asyncHandler(async (req, res) => {
     appendWalletRechargeTransition(recharge, WALLET_RECHARGE_STATUS.PENDING, {
       actorId: req.user._id, source: "gateway", reason: `Gateway payment status: ${providerStatus}`,
     });
-    await recharge.save();
-    return res.status(202).json({ success: true, data: { recharge }, message: "Payment is still pending confirmation from the provider" });
+    const pending = await persistRechargeGuarded(recharge, { set: { gatewayPaymentId: paymentId }, attempt: pendingAttempt });
+    return res.status(202).json({ success: true, data: { recharge: pending || (await WalletRecharge.findById(recharge._id)) }, message: "Payment is still pending confirmation from the provider" });
   }
 
-  recharge.gatewayPaymentId = paymentId;
-  recharge.signature = signature;
-  await recharge.save();
+  await persistRechargeGuarded(recharge, { transitioned: false, set: { gatewayPaymentId: paymentId, signature } });
 
   const result = await postWalletRechargeCapture(recharge, { gatewayPaymentId: paymentId, actorId: req.user._id, source: "patient" });
 
@@ -694,7 +620,6 @@ export const repairIncompletePayments = asyncHandler(async (_req, res) => {
 // ─── Admin: Doctor Payout Settlement ──────────────────────────────────────────
 import DoctorPayout from "../models/DoctorPayout.js";
 import { notificationEmitter } from "../realtime/notificationEmitter.js";
-import { writeAdminLog } from "../utils/adminAudit.js";
 
 export const listDoctorPayouts = asyncHandler(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);

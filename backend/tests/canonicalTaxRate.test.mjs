@@ -65,9 +65,9 @@ assert.equal(bill.tax, invoiceAmounts.taxAmount, "the invoice's tax figure must 
 console.log("PASS: invoiceService's tax calculation is percentage-correct and agrees with the real charge (calculateBill)");
 
 // ── source-level: the disconnected env var is gone from both call sites ──
-const root = fileURLToPath(new URL("../", import.meta.url));
-const paymentControllerSrc = fs.readFileSync(path.join(root, "controllers/paymentController.js"), "utf8");
-const invoiceServiceSrc = fs.readFileSync(path.join(root, "services/invoiceService.js"), "utf8");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const paymentControllerSrc = fs.readFileSync(path.join(root, "controllers", "paymentController.js"), "utf8");
+const invoiceServiceSrc = fs.readFileSync(path.join(root, "services", "invoiceService.js"), "utf8");
 assert.doesNotMatch(paymentControllerSrc, /process\.env\.CONSULTATION_TAX_RATE/);
 assert.doesNotMatch(invoiceServiceSrc, /process\.env\.CONSULTATION_TAX_RATE/);
 assert.match(paymentControllerSrc, /getTaxRatePercent\(\)/);

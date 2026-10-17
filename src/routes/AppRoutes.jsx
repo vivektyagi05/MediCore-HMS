@@ -96,6 +96,9 @@ const AdminAppointments = lazy(
       "../pages/admin/AdminAppointments"
     )
 );
+const AdminCaptureCases = lazy(
+  () => import("../pages/admin/AdminCaptureCases")
+);
 const AdminPayments = lazy(
   () => import("../pages/admin/AdminPayments")
 );
@@ -214,6 +217,7 @@ function AppRoutes() {
             element={<AdminPayments />}
           />
           
+          <Route path="capture-cases" element={<AdminCaptureCases />} />
           <Route
             path="refunds"
             element={<AdminRefunds />}

@@ -11,6 +11,11 @@ import Loader from "../../components/ui/Loader";
 import MetricCard from "../../components/ui/MetricCard";
 import SectionHeader from "../../components/ui/SectionHeader";
 import StatusBadge from "../../components/ui/StatusBadge";
+import Tabs from "../../components/ui/Tabs";
+import CouponManager from "./ops/CouponManager";
+import DiscrepancyReport from "./ops/DiscrepancyReport";
+import OutboxMonitor from "./ops/OutboxMonitor";
+import WalletReservationReview from "./ops/WalletReservationReview";
 import { useRealtime } from "../../context/RealtimeContext";
 import { useToast } from "../../context/ToastContext";
 
@@ -41,6 +46,7 @@ function FinanceOperations() {
   const [loadError, setLoadError] = useState("");
   const [isRetryingDue, setIsRetryingDue] = useState(false);
   const [isRepairing, setIsRepairing] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
 
   const loadAll = async () => {
     setIsLoading(true);
@@ -91,6 +97,29 @@ function FinanceOperations() {
     }
   };
 
+  const tabs = [
+    { id: "overview", label: "Collections & reconciliation" },
+    { id: "reservations", label: "Wallet reservations" },
+    { id: "discrepancies", label: "Ledger discrepancies" },
+    { id: "outbox", label: "Delivery health" },
+    { id: "coupons", label: "Coupons" },
+  ];
+  const tabBar = <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />;
+
+  // Phase 03 workspaces load their own data, so the overview's loading/error state must not block them.
+  if (activeTab !== "overview") {
+    return (
+      <div className="space-y-6">
+        <SectionHeader eyebrow="Finance Operations" title="Recovery & Controls" description="Evidence-first tools for wallet holds, ledger integrity, durable notifications and coupons." />
+        {tabBar}
+        {activeTab === "reservations" && <WalletReservationReview />}
+        {activeTab === "discrepancies" && <DiscrepancyReport onOpenPayment={(id) => navigate(`/admin/payments?search=${id}`)} />}
+        {activeTab === "outbox" && <OutboxMonitor />}
+        {activeTab === "coupons" && <CouponManager />}
+      </div>
+    );
+  }
+
   if (isLoading) return <Loader label="Loading finance operations" />;
   if (loadError) return <ErrorState description={loadError} onRetry={loadAll} />;
   if (!collections || !reconciliation) return null;
@@ -99,6 +128,7 @@ function FinanceOperations() {
 
   return (
     <div className="space-y-8">
+      {tabBar}
       <SectionHeader
         eyebrow="Finance Operations"
         title="Collections & Reconciliation"

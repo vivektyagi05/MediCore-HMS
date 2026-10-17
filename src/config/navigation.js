@@ -115,6 +115,7 @@ export const buildNavigation = (t) => [
   { name: "Subscription", path: "/doctor/billing", icon: CreditCard, roles: ["doctor"], group: "Finance" },
   { name: "Practice Settings", path: "/doctor/practice-settings", icon: Settings, roles: ["doctor"], group: "Administration" },
   { name: t("sidebar.payments"), path: "/admin/payments", icon: CreditCard, roles: ["super_admin"], group: "Finance" },
+  { name: "Capture Cases", path: "/admin/capture-cases", icon: ShieldCheck, roles: ["super_admin"], group: "Finance" },
   { name: t("sidebar.refunds"), path: "/admin/refunds", icon: CreditCard, roles: ["super_admin"], group: "Finance" },
   { name: "Withdrawals", path: "/admin/withdrawals", icon: CreditCard, roles: ["super_admin"], group: "Finance" },
   { name: t("sidebar.payments"), path: "/patient/payments", icon: CreditCard, roles: ["patient"], group: "Finance" },

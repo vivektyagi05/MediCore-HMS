@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 console.log("storageService.test.mjs");
 
 // env.js reads process.env at import time; point the local driver at a throwaway temp dir.
@@ -100,13 +99,33 @@ const s3ProbeScript = `
   console.log("S3_PROBE_OK");
 `;
 const { spawnSync } = await import("node:child_process");
-const probe = spawnSync(process.execPath, ["--input-type=module", "-e", s3ProbeScript], {
-  cwd: fileURLToPath(new URL("..", import.meta.url)),
-  encoding: "utf8",
-  env: { PATH: process.env.PATH, MONGO_URI: process.env.MONGO_URI, JWT_SECRET: process.env.JWT_SECRET },
-});
-assert.equal(probe.status, 0, `S3 driver probe exited ${probe.status}: ${probe.stdout ?? ""}${probe.stderr ?? ""}`);
-assert.ok((probe.stdout ?? "").includes("S3_PROBE_OK"), `S3 driver probe failed: ${probe.stdout ?? ""}${probe.stderr ?? ""}`);
+const probe = spawnSync(
+  process.execPath,
+  ["--input-type=module", "-e", s3ProbeScript],
+  {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      STORAGE_DRIVER: "s3",
+      STORAGE_S3_BUCKET: "medicore-test-bucket",
+      STORAGE_S3_REGION: "ap-south-1",
+    },
+  }
+);
+
+assert.ifError(probe.error);
+
+assert.equal(
+  probe.status,
+  0,
+  `S3 driver probe exited with status ${probe.status}:\n${probe.stdout ?? ""}\n${probe.stderr ?? ""}`
+);
+
+assert.ok(
+  (probe.stdout ?? "").includes("S3_PROBE_OK"),
+  `S3 driver probe did not report success:\n${probe.stdout ?? ""}\n${probe.stderr ?? ""}`
+);
 console.log("PASS: S3 driver round-trips through the real PutObject/GetObject/HeadObject/DeleteObject code path (injected client), and never exposes a local path");
 
 fs.rmSync(tmpRoot, { recursive: true, force: true });

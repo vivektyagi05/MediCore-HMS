@@ -5,26 +5,13 @@ import { env } from "../config/env.js";
 import { cancelAppointmentCore } from "./appointmentCancellationService.js";
 import { logger } from "../utils/logger.js";
 import Payment from "../models/Payment.js";
-import { couponService } from "../payments/couponService.js";
+import { cancelAndReleaseForAppointment } from "../payments/unpaidPaymentCleanup.js";
 
-// Only payments that provably never moved money release their coupon. In-flight
-// states (checkout_started, pending, authorized, verification_pending) are left
-// alone: releasing there could hand the coupon out twice if the capture lands.
-export const COUPON_RELEASABLE_PAYMENT_STATUSES = Object.freeze(["created", "order_created", "failed", "cancelled", "expired"]);
-
-export const releaseCouponsForUnpaidPayments = async (appointmentId) => {
-  const payments = await Payment.find({
-    appointmentId,
-    couponId: { $exists: true, $ne: null },
-    status: { $in: COUPON_RELEASABLE_PAYMENT_STATUSES },
-  }).select("_id couponId").lean();
-  let released = 0;
-  for (const payment of payments) {
-    const result = await couponService.release({ couponId: payment.couponId, paymentId: payment._id });
-    if (result.released) released += 1;
-  }
-  return released;
-};
+// Phase 02: the expiry hook cancels the appointment's unpaid payments (only those with
+// no provider evidence) and frees the coupon use and wallet hold they carried, through
+// the same guarded function the recovery sweep uses. In-flight/ambiguous payments are
+// never touched, so a capture that lands later is still preserved by the capture path.
+export const releaseCouponsForUnpaidPayments = (appointmentId) => cancelAndReleaseForAppointment(appointmentId, { reason: "Payment window expired", source: "system" });
 
 const DEFAULT_BATCH = 200;
 

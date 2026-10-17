@@ -11,6 +11,8 @@ import crypto from "crypto";
 import { toPaise } from "./money.js";
 import Payment, { REFUND_STATUS } from "../models/Payment.js";
 import WebhookEvent from "../models/WebhookEvent.js";
+import WalletRecharge from "../models/WalletRecharge.js";
+import { settleRechargeFromProviderPayment } from "./walletRechargeService.js";
 import RefundRequest from "../models/RefundRequest.js";
 import { env } from "../config/env.js";
 import { subscriptionService } from "./subscriptionService.js";
@@ -129,6 +131,16 @@ const handleCaptured = async (entity) => {
   }
 
   if (resolved.kind === "none") {
+    // Phase 02: a provider capture for a WALLET RECHARGE order. Same verified pipeline
+    // as browser verify; the webhook may beat (or replace) the browser callback.
+    const recharge = await WalletRecharge.findOne({ gatewayOrderId: entity.order_id });
+    if (recharge) {
+      const settled = await settleRechargeFromProviderPayment({ recharge, entity, source: "webhook" });
+      if (settled.outcome === "mismatch" || settled.outcome === "order_mismatch") {
+        throw new PermanentWebhookError("Recharge capture did not match the authoritative amount, currency or order", "amount_mismatch");
+      }
+      return `recharge_${settled.outcome}`;
+    }
     // F-001: a provider capture for a SUBSCRIPTION order (webhook may beat the browser).
     // Reached only when NO appointment payment or attempt owns this order.
     const subscription = await subscriptionService.findByGatewayOrder(entity.order_id);
@@ -205,6 +217,12 @@ const handleFailed = async (entity) => {
   if (resolved.kind === "orphan_attempt") throw new PermanentWebhookError("Payment attempt references a missing payment record", "orphan_attempt");
 
   if (resolved.kind === "none") {
+    const recharge = await WalletRecharge.findOne({ gatewayOrderId: entity.order_id });
+    if (recharge) {
+      // Fails only an OPEN recharge; a later capture on the same order is still credited.
+      const settled = await settleRechargeFromProviderPayment({ recharge, entity: { ...entity, status: "failed" }, source: "webhook" });
+      return `recharge_${settled.outcome}`;
+    }
     const subscription = await subscriptionService.findByGatewayOrder(entity.order_id);
     if (!subscription) return "ignored_unknown_order";
     await subscriptionService.markPaymentFailed({ subscription, gatewayPaymentId: entity.id, reason: "Gateway reported payment.failed", source: "webhook" });

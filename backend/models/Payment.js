@@ -196,6 +196,8 @@ const paymentSchema = new mongoose.Schema(
     // finally block. Not decorative: nothing else in this schema serializes
     // access to a single payment's refund state.
     refundLockedAt: Date,
+    // Phase 03: fencing token for the refund-lock lease (see payments/refundLock.js).
+    refundLockToken: String,
     paidAt: Date,
     failedAt: Date,
     // Phase 01: true while this payment is the ONE active/conflicting payment
@@ -219,6 +221,14 @@ const paymentSchema = new mongoose.Schema(
         source: String,
         disposition: String,
         at: { type: Date, default: Date.now },
+        // Phase 02: operator resolution (explicit state machine; absent == "open").
+        resolution: {
+          state: { type: String, enum: ["open", "insufficient_evidence", "verified_no_action", "refund_required"] },
+          reason: { type: String, maxlength: 500 },
+          actorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+          providerStatus: String,
+          at: Date,
+        },
       }],
       default: [],
       select: false,

@@ -12,8 +12,9 @@
 // human-readable invariant behind the correctness-bearing indexes.
 import fs from "fs";
 import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 import mongoose from "mongoose";
+import { pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = path.resolve(__dirname, "../../models");

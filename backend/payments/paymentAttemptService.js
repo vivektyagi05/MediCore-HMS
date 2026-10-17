@@ -15,6 +15,7 @@
 import mongoose from "mongoose";
 import Payment from "../models/Payment.js";
 import PaymentAttempt from "../models/PaymentAttempt.js";
+import { ensureReservationForPayment } from "./walletReservationService.js";
 import { paymentGateway } from "./paymentGateway.js";
 import { logger } from "../utils/logger.js";
 
@@ -63,6 +64,11 @@ const isDefinitiveProviderRejection = (error) => {
  * never used.
  */
 export const openGatewayOrder = async ({ payment, attempt, notes = {}, receipt = attemptReceipt(payment._id, attempt.attemptNumber) }) => {
+  // Phase 02: the wallet portion of a split payment is RESERVED before any
+  // chargeable provider order exists (idempotent per payment; throws 409
+  // WALLET_INSUFFICIENT rather than creating an order that could be captured
+  // while the wallet contribution can no longer be funded).
+  await ensureReservationForPayment(payment);
   let order;
   try {
     order = await paymentGateway.createOrder({

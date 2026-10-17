@@ -30,6 +30,7 @@ import {
 } from "../constants/appointmentStatus.js";
 import RefundRequest from "../models/RefundRequest.js";
 import { couponService } from "../payments/couponService.js";
+import { commitWalletReservation, ensureReservationForPayment, getAvailableBalancePaise, paymentAllowsRelease, releaseWalletReservation, walletReservationDeps } from "../payments/walletReservationService.js";
 import { paymentEmitter } from "../realtime/paymentEmitter.js";
 import ConsultationHistory
 from "../models/ConsultationHistory.js";
@@ -66,15 +67,52 @@ const populateAppointment = (query) =>
 // Idempotent, atomic wallet debit for a payment (balance guard + per-payment
 // transaction key + ledger key). Used both by the post-capture pipeline and by the
 // wallet-only path, which must debit BEFORE the payment may be called captured.
+const postWalletDebitLedger = async ({ payment, walletId, walletIdempotencyKey }) => {
+  try {
+    await TransactionLedger.create({
+      userId: payment.userId,
+      paymentId: payment._id,
+      walletId,
+      type: "wallet_debit",
+      direction: "debit",
+      amount: payment.walletAmount,
+      currency: payment.currency,
+      referenceId: payment._id.toString(),
+      idempotencyKey: walletIdempotencyKey,
+      metadata: { appointmentId: payment.appointmentId, via: "reservation" },
+    });
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+  }
+};
+
 export const debitWalletForPayment = async (payment) => {
   const walletIdempotencyKey = `wallet:debit:${payment._id}`;
   if (!(payment.walletAmount > 0)) return { debited: false };
+  // Phase 02: a payment with a wallet reservation consumes it (atomic hold -> debit,
+  // exactly once). The wallet effect is written FIRST; the ledger row follows and is
+  // replay-safe, so a crash between them is healed by the next pass, and no
+  // success-only ledger row can exist without its wallet effect.
+  const reservation = await walletReservationDeps.store.findReservation({ paymentId: payment._id });
+  if (reservation) {
+    try {
+      const committed = await commitWalletReservation({ paymentId: payment._id, userId: payment.userId, source: "payment" });
+      await postWalletDebitLedger({ payment, walletId: committed.reservation?.walletId, walletIdempotencyKey });
+      return { debited: !committed.replay, replay: Boolean(committed.replay), reserved: true };
+    } catch (commitError) {
+      // A provider capture exists but the hold was already released (late capture after
+      // release): the capture is real money, so fall through to the guarded, idempotent
+      // direct debit below. If funds are gone it fails 409 and the payment stays
+      // post_processing_failed / reconciliation-required with the capture preserved.
+      if (commitError?.code !== "RESERVATION_NOT_ACTIVE") throw commitError;
+    }
+  }
   const walletAlreadyDebited = await TransactionLedger.findOne({ idempotencyKey: walletIdempotencyKey }).lean();
   if (walletAlreadyDebited) return { debited: false, replay: true };
   let wallet = await Wallet.findOneAndUpdate(
     {
       userId: payment.userId,
-      balance: { $gte: payment.walletAmount },
+      $expr: { $gte: [{ $subtract: [{ $round: [{ $multiply: ["$balance", 100] }, 0] }, { $sum: { $ifNull: ["$holds.amountPaise", []] } }] }, toPaise(payment.walletAmount)] },
       transactions: { $not: { $elemMatch: { referenceType: "payment", referenceId: payment._id.toString() } } },
     },
     {
@@ -356,6 +394,7 @@ const toOrderView = (payment, attempt) => ({
   currency: payment.currency,
 });
 
+const ORDERLESS_COMPLETION_GRACE_MS = 60 * 1000;
 const isOrderless = (payment) => isPlaceholderOrderId(payment.razorpayOrderId) && !String(payment.razorpayOrderId).startsWith("wallet_");
 
 /**
@@ -472,6 +511,13 @@ export const createPaymentOrder = asyncHandler(async (req, res) => {
     let current = existing;
     let attempt = await PaymentAttempt.findOne({ paymentId: existing._id }).sort({ attemptNumber: -1 }).lean();
     if (isOrderless(existing)) {
+      // Phase 02: a young order-less payment is almost certainly still being created by the request that
+      // claimed it. A duplicate must NOT open its own provider order (that would leave an extra chargeable
+      // order); only a payment stale enough to be a genuine crash leftover is completed here.
+      const ageMs = Date.now() - new Date(existing.createdAt).getTime();
+      if (Number.isFinite(ageMs) && ageMs < ORDERLESS_COMPLETION_GRACE_MS) {
+        throw new AppError("This payment is still being created. Please check its status in a moment.", 409, { code: "PAYMENT_CREATION_IN_PROGRESS", paymentId: String(existing._id), recoveryState: "PENDING" });
+      }
       const finished = await completeOrderlessPayment({ payment: existing, notes: notesBase });
       current = finished.payment;
       attempt = finished.attempt;
@@ -533,17 +579,13 @@ export const createPaymentOrder = asyncHandler(async (req, res) => {
   const taxAmount = bill.tax;
   const totalAmount = bill.total;
   const requestedWalletAmount = Math.max(Number(walletAmount) || 0, 0);
-  const wallet = requestedWalletAmount
-    ? await Wallet.findOneAndUpdate(
-        { userId: req.user._id },
-        { $setOnInsert: { userId: req.user._id, balance: 0, currency: "INR" } },
-        { returnDocument: "after", upsert: true },
-      )
-    : null;
+  // Phase 02: spendable = posted balance minus ACTIVE holds (never a client value,
+  // never a stale earlier read). The authoritative check is the atomic reservation below.
+  const availableWalletPaise = requestedWalletAmount ? await getAvailableBalancePaise(req.user._id) : 0;
   // F-018: the SERVER decides the split. The wallet may cover the whole total
   // (wallet-only, no gateway order). A gateway remainder below INR 1 cannot be
   // charged, so in that case the wallet portion is reduced to leave exactly INR 1.
-  const split = computePaymentSplit({ totalAmount, requestedWalletAmount, walletBalance: wallet?.balance });
+  const split = computePaymentSplit({ totalAmount, requestedWalletAmount, walletBalance: availableWalletPaise / 100 });
   if (split.error) throw new AppError("A minimum payable gateway amount of INR 1 is required", 400);
   const walletApplied = split.walletAmount;
   const gatewayAmount = split.gatewayAmount;
@@ -619,9 +661,29 @@ export const createPaymentOrder = asyncHandler(async (req, res) => {
   // Cleanup used when order creation definitively fails: the payment can never be
   // paid, so it is cancelled (this releases the appointment slot) and the coupon freed.
   const abandonPayment = async (reasonText) => {
-    await transitionPayment({ paymentId: payment._id, to: "cancelled", from: ["created", "order_created", "pending"], source: "system", reason: String(reasonText).slice(0, 200) });
+    const cancelled = await transitionPayment({ paymentId: payment._id, to: "cancelled", from: ["created", "order_created", "pending"], source: "system", reason: String(reasonText).slice(0, 200) });
     await releaseCouponReservation();
+    // Release the wallet hold only once the payment is provably cancelled with no capture.
+    if (cancelled.payment && paymentAllowsRelease(cancelled.payment).ok) {
+      try { await releaseWalletReservation({ paymentId: payment._id, reason: String(reasonText).slice(0, 200), source: "system" }); } catch (releaseError) {
+        transactionLogger.payment("Wallet release failed after abandon; recovery will release", { paymentId: payment._id.toString(), error: releaseError.message });
+      }
+    }
   };
+
+  // Phase 02: reserve the wallet portion BEFORE any provider order exists. Idempotent
+  // per payment; a lost race for the funds is a definitive, user-facing 409.
+  if (walletApplied > 0) {
+    try {
+      await ensureReservationForPayment(payment);
+    } catch (reserveError) {
+      if (reserveError?.code === "WALLET_INSUFFICIENT" || reserveError?.details?.code === "WALLET_INSUFFICIENT") {
+        await abandonPayment("Wallet balance no longer covers the requested contribution");
+        throw new AppError("Your available wallet balance changed. Please review the payment and try again.", 409, { code: "WALLET_INSUFFICIENT" });
+      }
+      throw reserveError; // ambiguous: the payment keeps its slot; recovery completes the hold
+    }
+  }
 
   let attempt;
   let razorpayOrder;
@@ -709,8 +771,18 @@ export const createPaymentOrder = asyncHandler(async (req, res) => {
       // A wallet-only payment has no provider order and no retry path: cancel it (this
       // releases the appointment slot) instead of leaving a retryable "failed" payment
       // whose retry would create a full-amount gateway order.
-      await transitionPayment({ paymentId: payment._id, to: "cancelled", from: ["created", "order_created", "pending"], source: "wallet", reason: String(debitError.message).slice(0, 200) });
+      // Only a DEFINITIVE wallet refusal may cancel. A transient error (the debit may
+      // already have landed) leaves the payment for wallet-only recovery to finish.
+      const definitive = ["RESERVATION_NOT_ACTIVE", "RESERVATION_RECOVERY_REQUIRED", "WALLET_INSUFFICIENT", "RESERVATION_NOT_FOUND"].includes(debitError?.code || debitError?.details?.code);
+      if (!definitive) {
+        transactionLogger.payment("Wallet-only debit outcome ambiguous; recovery will complete or release", { paymentId: payment._id.toString(), error: debitError.message });
+        throw new AppError("Payment is being finalised. Please check payment status shortly.", 503, { code: "WALLET_PAYMENT_PENDING", paymentId: String(payment._id) });
+      }
+      const cancelled = await transitionPayment({ paymentId: payment._id, to: "cancelled", from: ["created", "order_created", "pending"], source: "wallet", reason: String(debitError.message).slice(0, 200) });
       await releaseCouponReservation();
+      if (cancelled.payment && paymentAllowsRelease(cancelled.payment).ok) {
+        await releaseWalletReservation({ paymentId: payment._id, reason: "Wallet-only payment could not be debited", source: "wallet" }).catch(() => {});
+      }
       throw debitError;
     }
     const capture = await claimPaymentCapture({ payment, attempt: { attemptNumber: 1, gatewayOrderId: placeholderOrderId }, gatewayPaymentId: `wallet_${payment._id}`, source: "wallet", reason: "Fully paid from wallet balance" });

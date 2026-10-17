@@ -1,5 +1,6 @@
 import Wallet from "../models/Wallet.js";
 import TransactionLedger from "../models/TransactionLedger.js";
+import { getWalletBalances } from "../payments/walletReservationService.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 
 export const getWallet = asyncHandler(async (req, res) => {
@@ -9,9 +10,13 @@ export const getWallet = asyncHandler(async (req, res) => {
     { returnDocument: "after", upsert: true },
   ).lean();
 
+  // Phase 02: `balance` is the POSTED balance; `availableBalance` excludes funds held by
+  // in-flight payments and is what a new checkout can actually spend. Holds are not exposed.
+  const { holds: _holds, ...publicWallet } = wallet;
+  const { heldPaise, availablePaise } = await getWalletBalances(req.user._id);
   res.status(200).json({
     success: true,
-    data: { wallet },
+    data: { wallet: { ...publicWallet, heldBalance: heldPaise / 100, availableBalance: availablePaise / 100 } },
     message: "Wallet fetched successfully",
   });
 });

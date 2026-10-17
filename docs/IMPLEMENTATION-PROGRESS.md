@@ -71,3 +71,18 @@ Baseline re-measured on the uploaded Phase 00 zip: 172/172 backend tests. Final:
 5. A wallet-only payment whose wallet debit fails is now `cancelled` (was a retryable `failed`).
 6. Retried orders get status `pending` + paymentState `pending` (was status `failed` + `pending` for cron/webhook retries and `order_created` for patient retries). Legacy rows in the old shape are still classified correctly.
 7. Machine additions (additive): capture is legal from any pre-capture state including `failed`; every pre-capture state may enter `reconciliation_required`; `expired -> pending`.
+
+## Phase 02 checkpoint (2026-10-16)
+Done (LOCALLY_VERIFIED): wallet reservation service+model, split/wallet-only integration, wallet-only recovery, recharge pipeline+webhook+recovery, coupon orphan recovery + guarded release, unpaid-payment sweep, capture-evidence resolution API, frontend contract. Index: schema-declared, picked up by re-run migration 011.
+Tests: backend 179/179 (`npm test`), `npx eslint backend src` clean, `npm run build` OK. `npm run test:mongo` NOT RUN (no mongod).
+Next task: run `MONGODB_TEST_URI=... npm run test:mongo` on a disposable DB; Razorpay sandbox; admin UI for capture cases; then Phase 03.
+
+## Phase 02 FINAL CLOSURE (2026-10-16)
+Status: implementation-complete locally; NOT integration-verified. Backend 185/185 (exit 0), ESLint exit 0, build exit 0, `test:mongo` SKIPPED (no disposable Mongo). New: capture-case workspace UI, controller-level crash matrix (25), authorization sweep, index inventory test, read-only wallet audit script; 3 new defects fixed (N-P2-08/09/10). Full report: docs/PHASE-02-FINAL-CLOSURE.md.
+Next task: run `npm run test:mongo` on a disposable DB, Razorpay sandbox, browser E2E; then Phase 03 (separate commit).
+
+## Phase 03 checkpoint (2026-10-16) — PARTIAL
+Done (LOCALLY_VERIFIED unless noted): refund lock lease+fencing (P3-01), receipt-before-terminal-save (P3-02), outbox claim fencing + health + audited requeue (P3-03), read-only paginated discrepancy report with 6 classes (P3-04), coupon reserved/redeemed lifecycle + validated/audited admin + usage (P3-05/06), FinanceOperations tabs: wallet-reservation review, discrepancies, delivery health, coupons (IMPLEMENTED), wallet held/available display (P3-07), doctor payout refund-adjustment display (P3-09).
+Tests: backend 190/190 (exit 0), ESLint exit 0, build exit 0. `test:mongo` NOT RUN (phase03.mongo.test.mjs authored, unexecuted). No Razorpay sandbox, no browser E2E.
+NOT done: refund test matrix beyond lock, remaining reconciliation classes + audited repair, admin overview/payment drill-down/refund-queue completion, doctor refund-review request, patient receipt/eligibility audit, indexes/migrations, wallet precision (BLOCKED_EXTERNAL). Full list: docs/PHASE-03-REFUND-LEDGER-OUTBOX.md.
+Next task: run `npm run test:mongo` on a disposable DB; then close the NOT done list above.

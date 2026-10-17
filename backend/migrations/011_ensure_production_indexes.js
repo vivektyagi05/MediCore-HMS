@@ -19,6 +19,8 @@ import { buildInventory, criticalSpecs, lintInventory, loadAllModels } from "./l
 import { ensureIndexes } from "./lib/indexMigration.js";
 import { acquireMigrationLock, finishMigration } from "./lib/migrationState.js";
 
+
+
 export const MIGRATION_ID = "011_ensure_production_indexes";
 
 export const run = async ({ argv = process.argv.slice(2), db, out = console } = {}) => {

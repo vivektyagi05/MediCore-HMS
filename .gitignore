@@ -1,5 +1,40 @@
-node_modules
+@'
+
+# --- Local secrets and environment files ---
 .env
-backend/.env
+.env.*
+!.env.example
+!.env.*.example
+
+# --- Dependencies and generated builds ---
 node_modules/
-backend/node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+coverage/
+.nyc_output/
+.vite/
+
+# --- Logs and local runtime data ---
+*.log
+logs/
+tmp/
+temp/
+*.pid
+*.seed
+
+# --- Local editor and OS files ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Private keys, certificates and credentials ---
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+secrets/
+credentials/

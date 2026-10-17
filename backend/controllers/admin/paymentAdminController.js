@@ -397,3 +397,36 @@ export const getPaymentDetailAdmin = asyncHandler(async (req, res) => {
     message: "Payment detail fetched successfully",
   });
 });
+
+// Phase 02 — duplicate/unapplicable capture evidence: read + audited resolution.
+// Mutates nothing financial (see payments/captureResolution.js).
+import { listCaptureCases, resolveCaptureEvidence } from "../../payments/captureResolution.js";
+import { writeAdminLog } from "../../utils/adminAudit.js";
+
+export const listCaptureCasesAdmin = asyncHandler(async (req, res) => {
+  const cases = await listCaptureCases({ state: req.query.state || "unresolved", limit: req.query.limit });
+  res.status(200).json({ success: true, data: { cases } });
+});
+
+export const resolveCaptureCaseAdmin = asyncHandler(async (req, res) => {
+  const { gatewayPaymentId, disposition, action, reason } = req.body || {};
+  const result = await resolveCaptureEvidence({
+    actor: req.user, paymentId: req.params.id, gatewayPaymentId, disposition, action, reason,
+    audit: (entry) => writeAdminLog({ req, ...entry }),
+  });
+  res.status(200).json({ success: true, data: result, message: "Capture evidence resolution recorded" });
+});
+
+// Phase 02 — wallet reservations the recovery job could not resolve safely (recovery_required).
+import { adminResolveReservation, listReservationsForReview } from "../../payments/walletReservationService.js";
+
+export const listWalletReservationsAdmin = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: { reservations: await listReservationsForReview({ limit: req.query.limit }) } });
+});
+
+export const resolveWalletReservationAdmin = asyncHandler(async (req, res) => {
+  const { action, reason } = req.body || {};
+  const result = await adminResolveReservation({ actor: req.user, paymentId: req.params.id, action, reason });
+  await writeAdminLog({ req, action: "payment.wallet_reservation_resolved", resourceType: "payment", resourceId: String(req.params.id), severity: "warning", metadata: { action, reason: String(reason).trim() } });
+  res.status(200).json({ success: true, data: { outcome: result.outcome || (result.committed ? "committed" : "released") }, message: "Wallet reservation resolution recorded" });
+});

@@ -63,3 +63,26 @@ Evidence level for every row: **LOCALLY_VERIFIED** means `tests/phase01PaymentCo
 | F-022 ▲ | PARTIALLY_FIXED (was NOT VERIFIED) | Invoice/prescription/certificate PDFs now use `storageService`; production storage driver/volume setting still unverified. |
 | F-023 | PARTIALLY_FIXED | No dunning policy beyond expiry. |
 | F-024 | PARTIALLY_FIXED | Other money screens not audited line-by-line. |
+
+## Phase 02 updates (wallet / split / recharge / coupon) — all LOCALLY_VERIFIED at best; real Mongo/Razorpay BLOCKED_EXTERNAL
+| ID | Status | Note |
+|---|---|---|
+| N-P2-01 | LOCALLY_VERIFIED | Wallet double-spend: split contribution is now reserved atomically (`Wallet.holds`, available = balance − holds) before any provider order; commit/release at-most-once. Real-Mongo race test written, NOT RUN. |
+| N-P2-02 | LOCALLY_VERIFIED | Capture after a failed wallet debit: commit of a reservation cannot fail for lack of funds; late capture after release falls back to guarded debit or stays reconciliation-required with capture preserved. |
+| N-P2-03 | LOCALLY_VERIFIED | Wallet-only crash windows (after reserve / after commit) recovered by `recoverWalletOnlyPayments`; ambiguous debit errors no longer cancel a possibly-debited payment. |
+| N-P2-04 | LOCALLY_VERIFIED | Recharge: intent before order, wallet-before-ledger, late-capture credit, recovery job, strict amount/currency, webhook path added (none existed), stale-save downgrade closed. |
+| N-P2-05 | LOCALLY_VERIFIED | Coupon orphan reservations recovered; release gated on provider evidence. Reservation/redemption still one list (documented limit). |
+| N-P2-06 | LOCALLY_VERIFIED | Held funds/coupons of unpayable appointments are now released (cleanup sweep + expiry hook). |
+| N-P2-07 | LOCALLY_VERIFIED | Audited SUPER_ADMIN capture-evidence resolution API. **No UI** (NOT_FIXED). |
+| F-018 | PARTIALLY_FIXED → LOCALLY_VERIFIED (wallet-only now reservation-backed); no real-Mongo/HTTP run. |
+
+## Phase 02 closure updates
+| ID | Status | Note |
+|---|---|---|
+| N-P2-07 | API LOCALLY_VERIFIED / UI IMPLEMENTED (not browser-verified) | `/admin/capture-cases` SUPER_ADMIN workspace |
+| N-P2-08 | LOCALLY_VERIFIED | stale whole-document recharge `save()` replaced by guarded updates |
+| N-P2-09 | LOCALLY_VERIFIED | duplicate concurrent checkout opened extra provider orders → in-progress guard |
+| N-P2-10 | LOCALLY_VERIFIED | recharge amount: finite, ≤2 decimals |
+| N-P2-11 | NOT_FIXED (documented) | `Wallet.balance` rupee float; needs reviewed migration; `npm run audit:wallet-precision` |
+| N-P2-12 | NOT_FIXED | no UI for `recovery_required` wallet reservations (API exists) |
+| N-P2-13 | NOT_FIXED | coupon reservation/redemption share `usedBy[]` |

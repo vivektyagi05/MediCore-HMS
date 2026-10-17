@@ -1,5 +1,6 @@
 import Coupon from "../models/Coupon.js";
 import { AppError } from "../middleware/errorMiddleware.js";
+import { computeCouponDiscount } from "./couponRules.js";
 
 const idString = (value) => (value === undefined || value === null ? "" : value.toString());
 
@@ -48,8 +49,7 @@ export const couponService = {
     if (coupon.appointmentId && coupon.appointmentId.toString() !== appointmentId.toString()) throw new AppError("Coupon is not valid for this appointment", 403);
     if (coupon.usedBy.some((entry) => entry.userId.toString() === userId.toString())) throw new AppError("Coupon already used by this user", 409);
 
-    const rawDiscount = coupon.type === "percentage" ? (amount * coupon.value) / 100 : coupon.value;
-    const discountAmount = Number(Math.min(rawDiscount, coupon.maxDiscount || rawDiscount, amount).toFixed(2));
+    const discountAmount = computeCouponDiscount({ coupon, amount });
     return { discountAmount, coupon };
   },
 
@@ -64,7 +64,7 @@ export const couponService = {
     const now = new Date();
     const updated = await Coupon.findOneAndUpdate(
       buildClaimFilter({ couponId: coupon._id, userId, paymentId, now }),
-      { $inc: { usedCount: 1 }, $push: { usedBy: { userId, paymentId, usedAt: now } } },
+      { $inc: { usedCount: 1 }, $push: { usedBy: { userId, paymentId, usedAt: now, state: "reserved", reservedAt: now } } },
       { returnDocument: "after" },
     );
     if (updated) return { claimed: true, alreadyClaimed: false };
@@ -72,24 +72,49 @@ export const couponService = {
     const current = await Coupon.findById(coupon._id).lean();
     const reason = classifyClaimFailure(current, { userId, paymentId, now });
     if (reason.alreadyClaimed) return { claimed: false, alreadyClaimed: true };
+    // Observable rejection statistics (best-effort; never masks the real rejection).
+    await Coupon.updateOne({ _id: coupon._id }, { $inc: { rejectedCount: 1 }, $set: { lastRejectionCode: reason.code } }).catch(() => {});
     throw new AppError(reason.message, reason.status, { code: reason.code });
   },
 
-  /** Backwards-compatible name used by post-processing: now just an idempotent claim. */
+  /**
+   * Post-capture: make sure the coupon is claimed for this payment (legacy payments
+   * created before reservations existed) and then REDEEM it. Both steps are
+   * idempotent, so capture re-runs / recovery never double-count.
+   */
   async markUsed({ coupon, userId, paymentId }) {
-    return this.claim({ coupon, userId, paymentId });
+    const claim = await this.claim({ coupon, userId, paymentId });
+    const redeem = await this.redeem({ couponId: coupon?._id, paymentId });
+    return { ...claim, ...redeem };
   },
 
   /**
-   * Release a reservation (order creation failed, payment expired/cancelled).
-   * Conditional on the usedBy entry existing, so a double release can never
-   * decrement twice.
+   * reserved -> redeemed. The conditional $elemMatch means only a not-yet-redeemed
+   * entry for this payment matches, so a replay cannot increment redeemedCount twice.
+   * Legacy (state-less) entries are upgraded the same way.
+   */
+  async redeem({ couponId, paymentId }) {
+    if (!couponId || !paymentId) return { redeemed: false };
+    const now = new Date();
+    const updated = await Coupon.findOneAndUpdate(
+      { _id: couponId, usedBy: { $elemMatch: { paymentId, state: { $ne: "redeemed" } } } },
+      { $set: { "usedBy.$.state": "redeemed", "usedBy.$.redeemedAt": now }, $inc: { redeemedCount: 1 } },
+      { returnDocument: "after" },
+    );
+    return { redeemed: Boolean(updated), alreadyRedeemed: !updated };
+  },
+
+  /**
+   * Release a RESERVATION (order creation failed, payment expired/cancelled). A
+   * redeemed entry can never be released: the conditional match excludes it, and
+   * the pull is restricted to non-redeemed entries, so a double release cannot
+   * decrement twice and a captured payment's coupon is never given back.
    */
   async release({ couponId, paymentId }) {
     if (!couponId || !paymentId) return { released: false };
     const updated = await Coupon.findOneAndUpdate(
-      { _id: couponId, "usedBy.paymentId": paymentId, usedCount: { $gt: 0 } },
-      { $inc: { usedCount: -1 }, $pull: { usedBy: { paymentId } } },
+      { _id: couponId, usedCount: { $gt: 0 }, usedBy: { $elemMatch: { paymentId, state: { $ne: "redeemed" } } } },
+      { $inc: { usedCount: -1, releasedCount: 1 }, $pull: { usedBy: { paymentId, state: { $ne: "redeemed" } } } },
       { returnDocument: "after" },
     );
     return { released: Boolean(updated) };

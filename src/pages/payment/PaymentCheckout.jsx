@@ -190,6 +190,7 @@ function PaymentCheckout() {
   };
 
   const prepareOrder = async () => {
+    if (isPreparing) return; // never start a second chargeable order while a request is active
     setIsPreparing(true);
     setError("");
 
@@ -207,9 +208,19 @@ function PaymentCheckout() {
       setWorkflowStep(2);
       toast.success(t("paymentFlow.orderCreated"));
     } catch (prepareError) {
-      if (prepareError?.response?.data?.details?.code === "ACTIVE_PAYMENT_EXISTS") {
+      if (["ACTIVE_PAYMENT_EXISTS", "PAYMENT_CREATION_IN_PROGRESS"].includes(prepareError?.response?.data?.details?.code)) {
         // A payment already exists for this appointment: show ITS authoritative state.
         await checkRecovery();
+      } else if (prepareError?.response?.data?.details?.code === "WALLET_INSUFFICIENT") {
+        // Phase 02: the server could not reserve the wallet portion. Show the AUTHORITATIVE
+        // balance again instead of a stale one, and let the user choose a new amount.
+        try { setWallet((await walletApi.getWallet()).data.wallet); } catch { /* keep the previous view */ }
+        setWalletAmount("");
+        setError("Your available wallet balance changed, so the wallet portion could not be reserved. Please review the amount and try again.");
+      } else if (prepareError?.response?.data?.details?.code === "WALLET_PAYMENT_PENDING") {
+        // The wallet payment may already have been taken: show its authoritative state, never start a new one.
+        await checkRecovery();
+        toast("Your payment is being finalised. Please check its status shortly.");
       } else {
         setError(getApiErrorMessage(prepareError));
       }
@@ -471,7 +482,7 @@ function PaymentCheckout() {
                     <div>
                       <p className="font-black text-slate-950">Wallet contribution</p>
                       <p className="text-xs font-semibold text-slate-500">
-                        Available balance: {wallet?.currency || "INR"} {wallet?.balance || 0}
+                        Available balance: {wallet?.currency || "INR"} {wallet?.availableBalance ?? wallet?.balance ?? 0}
                       </p>
                     </div>
                   </div>

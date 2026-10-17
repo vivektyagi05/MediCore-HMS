@@ -10,6 +10,8 @@ import path from "node:path";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "hms-storage-"));
 process.env.STORAGE_LOCAL_ROOT = root;
+// Set explicitly before importing config/env.js: dotenv does not override an
+// existing process.env value, while a .env file may otherwise restore a path.
 process.env.INVOICE_STORAGE_DIR = path.join(root, "invoices");
 
 const { env } = await import("../config/env.js");

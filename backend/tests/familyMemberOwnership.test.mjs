@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import mongoose from "mongoose";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import mongoose from "mongoose";
 import FamilyMember from "../models/FamilyMember.js";
 import { FAMILY_MEMBER_WRITABLE_FIELDS, pickFamilyMemberFields } from "../utils/familyMemberFields.js";
 
@@ -43,7 +43,8 @@ assert.equal(await created.validate().then(() => undefined), undefined);
 console.log("PASS: a document built from an allowlisted body keeps the server-assigned owner");
 
 // ── controller wiring (source-level, since there is no live DB here) ─────
-const src = fs.readFileSync(new URL("../controllers/patient/patientWorkflowController.js", import.meta.url), "utf8");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const src = fs.readFileSync(path.join(root, "controllers", "patient", "patientWorkflowController.js"), "utf8");
 const body = (name) => src.slice(src.indexOf(`export const ${name}`), src.indexOf("});", src.indexOf(`export const ${name}`)) + 3);
 const createBody = body("createFamilyMember");
 const updateBody = body("updateFamilyMember");
@@ -56,7 +57,6 @@ assert.ok(updateBody.includes("isActive: { $ne: false }"), "a deactivated member
 console.log("PASS: create/update handlers use the allowlist, session ownership and $set only");
 
 // ── repo-wide: no unsafe spread of req.body into privileged models ───────
-const root = fileURLToPath(new URL("../", import.meta.url));
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
   if (["node_modules", "tests"].includes(e.name)) return [];
   const full = path.join(dir, e.name);

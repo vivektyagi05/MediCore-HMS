@@ -115,6 +115,31 @@ export const adminApi = {
   getPaymentDetailAdmin(id) {
     return apiClient.get(`/admin/payments/${id}`).then((res) => res.data);
   },
+  // Phase 02 capture-case workspace. Resolving only RECORDS a decision server-side; it never moves money.
+  getCaptureCasesAdmin(params = {}) {
+    return apiClient.get("/admin/payments/capture-cases", { params }).then((res) => res.data);
+  },
+  resolveCaptureCaseAdmin(paymentId, body) {
+    return apiClient.post(`/admin/payments/${paymentId}/capture-cases/resolve`, body).then((res) => res.data);
+  },
+  // Phase 03 finance operations. Wallet-reservation review reuses the Phase 02 endpoints;
+  // resolving only goes through the canonical reservation service (never edits a balance).
+  getWalletReservationsAdmin(params = {}) {
+    return apiClient.get("/admin/payments/wallet-reservations", { params }).then((res) => res.data);
+  },
+  resolveWalletReservationAdmin(paymentId, body) {
+    return apiClient.post(`/admin/payments/${paymentId}/wallet-reservations/resolve`, body).then((res) => res.data);
+  },
+  // Read-only wallet/ledger discrepancy report (never repairs anything).
+  getFinanceDiscrepancies(params = {}) {
+    return apiClient.get("/admin/finance/reconciliation/discrepancies", { params }).then((res) => res.data);
+  },
+  getFinanceOutbox(params = {}) {
+    return apiClient.get("/admin/finance/outbox", { params }).then((res) => res.data);
+  },
+  requeueFinanceOutboxEvent(id, reason) {
+    return apiClient.post(`/admin/finance/outbox/${id}/requeue`, { reason }).then((res) => res.data);
+  },
   // Refunds Management Workspace (Phase UI-6). Approve/reject/retry/
   // initiate all stay on refundApi (existing /refunds routes) — this is
   // only the admin-only read surface (registry, summary, detail

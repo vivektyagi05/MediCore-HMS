@@ -29,6 +29,10 @@ import {
 import { generativeAssistant } from "../../ai/generativeAssistant.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
+import mongoose from "mongoose";
+import { writeAdminLog } from "../../utils/adminAudit.js";
+import { buildWalletLedgerDiscrepancyReport } from "../../services/finance/walletReconciliationService.js";
+import { getOutboxHealth, requeueFailedEmail } from "../../services/emailOutboxService.js";
 
 export const getFinanceOverview = asyncHandler(async (_req, res) => {
   const overview = await buildFinanceOverview();
@@ -104,4 +108,34 @@ export const reconcileWalletBalances = asyncHandler(async (req, res) => {
   const afterId = req.query.afterId && mongooseLib.Types.ObjectId.isValid(req.query.afterId) ? req.query.afterId : null;
   const report = await reconcileAllWallets({ afterId, maxBatches: 10 });
   res.status(200).json({ success: true, data: { report }, message: report.done ? "All wallets reconciled" : "Partial pass; continue with nextCursor" });
+});
+
+// Phase 03: read-only wallet/ledger discrepancy report. Sensitive-report access is audited.
+export const getWalletLedgerDiscrepancies = asyncHandler(async (req, res) => {
+  const { category, page, limit, from, to } = req.query;
+  let report;
+  try {
+    report = await buildWalletLedgerDiscrepancyReport({ category, page, limit, from, to });
+  } catch (error) {
+    if (error.statusCode === 400) throw new AppError(error.message, 400);
+    throw error;
+  }
+  await writeAdminLog({ req, action: "finance.discrepancy_report_viewed", resourceType: "Reconciliation", resourceId: category || "all", metadata: { category: category || "all", page: report.page, from: from || null, to: to || null } });
+  res.status(200).json({ success: true, data: report, message: "Discrepancy report fetched successfully" });
+});
+
+// Phase 03: durable financial-event (email outbox) health + exhausted-event recovery.
+export const getFinancialOutbox = asyncHandler(async (req, res) => {
+  const data = await getOutboxHealth({ page: req.query.page, limit: req.query.limit, entityType: typeof req.query.entityType === "string" ? req.query.entityType : undefined });
+  res.status(200).json({ success: true, data, message: "Outbox health fetched successfully" });
+});
+
+export const requeueOutboxEvent = asyncHandler(async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new AppError("Invalid event id", 400);
+  const reason = String(req.body?.reason || "").trim();
+  if (reason.length < 5 || reason.length > 300) throw new AppError("A reason of 5-300 characters is required", 400);
+  const result = await requeueFailedEmail({ id: req.params.id });
+  if (!result.requeued) throw new AppError("Only exhausted (failed) events can be re-queued; this event is not in that state", 409);
+  await writeAdminLog({ req, action: "finance.outbox_requeued", resourceType: "EmailDelivery", resourceId: String(req.params.id), severity: "warning", metadata: { reason, eventKey: result.row.eventKey, entityType: result.row.entityType } });
+  res.status(200).json({ success: true, data: { event: result.row }, message: "Event re-queued for delivery" });
 });

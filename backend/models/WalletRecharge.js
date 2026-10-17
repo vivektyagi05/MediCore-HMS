@@ -46,6 +46,13 @@ const walletRechargeSchema = new mongoose.Schema(
     },
     reconciliationState: { type: String, enum: ["not_required", "required", "matched"], default: "not_required" },
     failureReason: { type: String, trim: true, maxlength: 500 },
+    // Phase 02: bounded, observable recovery bookkeeping.
+    recoveryAttempts: { type: Number, default: 0 },
+    nextRecoveryAt: Date,
+    lastRecoveryAt: Date,
+    lastRecoveryError: { type: String, maxlength: 300 },
+    // A second, different provider payment captured for the same recharge order: evidence only, never a second credit.
+    duplicateCaptures: [{ gatewayPaymentId: String, amountPaise: Number, at: { type: Date, default: Date.now } }],
     walletTransactionId: { type: mongoose.Schema.Types.ObjectId },
     ledgerEntryId: { type: mongoose.Schema.Types.ObjectId, ref: "TransactionLedger" },
     // Per-attempt history — a single recharge intent (one gateway order)

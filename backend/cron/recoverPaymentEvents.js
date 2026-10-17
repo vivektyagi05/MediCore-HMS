@@ -5,6 +5,10 @@
 import { connectDB } from "../config/db.js";
 import { recoverWebhookEvents } from "../payments/webhookHandler.js";
 import { recoverOrphanAttempts } from "../payments/paymentAttemptService.js";
+import { recoverWalletReservations } from "../payments/walletReservationService.js";
+import { recoverWalletOnlyPayments } from "../payments/walletOnlyRecovery.js";
+import { recoverStuckWalletRecharges } from "../payments/walletRechargeService.js";
+import { recoverOrphanCouponReservations, sweepUnpayablePayments } from "../payments/unpaidPaymentCleanup.js";
 import { logger } from "../utils/logger.js";
 import { trackRun } from "../utils/cronRunTracker.js";
 
@@ -13,9 +17,16 @@ export const runRecoverPaymentEvents = async () => {
   return trackRun("recoverPaymentEvents", async () => {
     const events = await recoverWebhookEvents();
     const attempts = await recoverOrphanAttempts();
+    // Phase 02: wallet-side recovery rides the SAME leased job (no second scheduler).
+    const walletOnly = await recoverWalletOnlyPayments();
+    const reservations = await recoverWalletReservations();
+    const recharges = await recoverStuckWalletRecharges();
+    const unpayable = await sweepUnpayablePayments();
+    const couponOrphans = await recoverOrphanCouponReservations();
     const processed = events.filter((r) => r.state === "processed").length;
-    logger.info("Payment event recovery completed", { events: events.length, processed, attempts: attempts.length });
-    return { events: events.length, processed, attempts: attempts.length };
+    const summary = { events: events.length, processed, attempts: attempts.length, walletOnly: walletOnly.length, reservations: reservations.length, recharges: recharges.length, unpayable: unpayable.length, couponOrphans: couponOrphans.length };
+    logger.info("Payment event recovery completed", summary);
+    return summary;
   });
 };
 

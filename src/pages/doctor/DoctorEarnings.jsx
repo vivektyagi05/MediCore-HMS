@@ -1,5 +1,4 @@
 import {
-  Wallet,
   IndianRupee,
   Clock3,
   CheckCircle2,
@@ -558,6 +557,19 @@ function DoctorEarnings() {
                       <p className="text-sm font-medium text-slate-500">{formatDate(payout.createdAt)}</p>
                     </div>
                   </div>
+                  {Number(payout.refundAdjustmentAmount) > 0 && (
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      <p className="font-black">
+                        Refund adjustment: −{money(payout.refundAdjustmentAmount)} · Net share {money(Math.max(Number(payout.doctorAmount) - Number(payout.refundAdjustmentAmount), 0))}
+                      </p>
+                      <p className="mt-1 text-xs font-semibold">
+                        {payout.paymentId?.refundStatus === "full"
+                          ? "The patient was refunded for this consultation, so your share of it was reversed."
+                          : "Part of this consultation was refunded to the patient, so your share was reduced in proportion."}
+                        {payout.status === "paid" ? " This payout was already paid, so the reversal is reflected in your net earnings and any available withdrawal balance." : ""}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -613,19 +625,6 @@ function DoctorEarnings() {
             ))}
           </div>
         )}
-      </Card>
-
-      <Card>
-        <div className="flex items-center gap-3">
-          <Wallet className="text-blue-600" />
-          <div>
-            <p className="font-black text-slate-950">Withdrawal System</p>
-            <p className="text-sm text-slate-500">
-              Bank transfer, UPI payout, and withdrawal requests will be available in the next update — the settlement
-              timeline and payout history above already reflect your real, current data.
-            </p>
-          </div>
-        </div>
       </Card>
     </div>
   );

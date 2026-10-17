@@ -58,6 +58,21 @@ const walletSchema = new mongoose.Schema(
       type: [walletTransactionSchema],
       default: [],
     },
+    // Phase 02: ACTIVE funds holds only (a hold is removed atomically when it is
+    // committed or released). Available balance = balance - sum(holds.amountPaise).
+    // Embedded in the wallet document on purpose: placing, committing and
+    // releasing a hold are each ONE single-document atomic update, which is the
+    // only multi-statement guarantee MongoDB gives without transactions. The
+    // durable lifecycle/recovery record lives in WalletReservation.
+    holds: {
+      type: [new mongoose.Schema({
+        reservationId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        paymentId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        amountPaise: { type: Number, required: true, min: 1 },
+        createdAt: { type: Date, default: Date.now },
+      }, { _id: false })],
+      default: [],
+    },
   },
   {
     timestamps: true,

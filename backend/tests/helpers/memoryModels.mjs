@@ -27,7 +27,14 @@ const clone = (v) => {
   for (const [k, val] of Object.entries(v)) out[k] = clone(val);
   return out;
 };
-const getPath = (doc, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), doc);
+// Additive (Phase 02): a dotted path through an ARRAY of subdocuments yields the array of
+// values (Mongo's matching semantics for e.g. "usedBy.paymentId"), which matchValue's
+// array handling then treats as "any element equals".
+const getPath = (doc, path) => path.split(".").reduce((o, k) => {
+  if (o == null) return undefined;
+  if (Array.isArray(o) && !/^\d+$/.test(k)) return o.map((el) => (el == null ? undefined : el[k]));
+  return o[k];
+}, doc);
 const setPath = (doc, path, value) => {
   const keys = path.split(".");
   let o = doc;
@@ -72,10 +79,24 @@ const matchDoc = (doc, filter = {}) =>
     return matchValue(getPath(doc, key), cond);
   });
 
-const applyUpdate = (doc, update) => {
-  for (const [k, v] of Object.entries(update.$set || {})) if (v !== undefined) setPath(doc, k, v);
+const applyUpdate = (doc, update, filter = {}) => {
+  for (const [k0, v] of Object.entries(update.$set || {})) {
+    if (v === undefined) continue;
+    let k = k0;
+    if (k.includes(".$.")) { // Additive (Phase 02): positional operator resolved against the filter's $elemMatch
+      const [arrPath, rest] = k.split(".$.");
+      const arr = getPath(doc, arrPath) || [];
+      const cond = filter?.[arrPath]?.$elemMatch;
+      const idx = cond ? arr.findIndex((el) => matchDoc(el, cond)) : -1;
+      if (idx < 0) continue;
+      k = `${arrPath}.${idx}.${rest}`;
+    }
+    setPath(doc, k, v);
+  }
   for (const k of Object.keys(update.$unset || {})) unsetPath(doc, k);
   for (const [k, v] of Object.entries(update.$push || {})) { const arr = getPath(doc, k) || []; arr.push(clone(v)); setPath(doc, k, arr); }
+  // Phase 03: $pull conditions are evaluated as a query on each element, as in Mongo.
+  for (const [k, v] of Object.entries(update.$pull || {})) { const arr = getPath(doc, k); if (Array.isArray(arr)) setPath(doc, k, arr.filter((el) => !(el && typeof el === "object" && !isId(el) ? matchDoc(el, v) : eqv(el, v)))); }
   for (const [k, v] of Object.entries(update.$inc || {})) setPath(doc, k, (getPath(doc, k) || 0) + v);
 };
 
@@ -143,7 +164,7 @@ export const installMemoryModels = (specs) => {
       if (!found) return null;
       const before = clone(found);
       const next = clone(found);
-      applyUpdate(next, update);
+      applyUpdate(next, update, filter);
       checkUnique(next, next._id);
       store.set(String(next._id), next);
       return out(opts.returnDocument === "after" || opts.new ? next : before, q);
@@ -152,7 +173,7 @@ export const installMemoryModels = (specs) => {
       await tick();
       const rows = all().filter((o) => matchDoc(o, filter));
       const targets = many ? rows : rows.slice(0, 1);
-      for (const t of targets) { const next = clone(t); applyUpdate(next, update); checkUnique(next, next._id); store.set(String(next._id), next); }
+      for (const t of targets) { const next = clone(t); applyUpdate(next, update, filter); checkUnique(next, next._id); store.set(String(next._id), next); }
       return { matchedCount: targets.length, modifiedCount: targets.length };
     };
     patch("updateOne", updateOneLike(false));

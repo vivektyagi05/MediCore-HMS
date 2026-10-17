@@ -10,6 +10,9 @@ export const financeApi = {
   createCoupon(payload) {
     return apiClient.post("/finance/coupons", payload).then((res) => res.data);
   },
+  getCouponUsage(id) {
+    return apiClient.get(`/finance/coupons/${id}/usage`).then((res) => res.data);
+  },
   updateCoupon(id, payload) {
     return apiClient.patch(`/finance/coupons/${id}`, payload).then((res) => res.data);
   },

@@ -1,6 +1,4 @@
-<div align="center">
 
-<<<<<<< HEAD
 # 🏥 MediCore HMS
 
 ### Healthcare operations, clinical workflows & financial integrity — in one full-stack platform
@@ -659,8 +657,3 @@ MediCore HMS is distributed under the MIT License. See [`license`](license) for 
 **Built for learning and engineering practice around real-world healthcare workflows.** 🏥🔐💳
 
 [⬆ Back to top](#-medicore-hms)
-
-</div>
-=======
-The repository includes the MIT license in [`license`](license). Preserve its copyright and license text when redistributing the project.
->>>>>>> 7b10e9b (Clean up and reorganize project documentation)

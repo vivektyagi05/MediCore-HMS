@@ -1,40 +1,47 @@
-@'
 
-# --- Local secrets and environment files ---
+# Dependencies
+node_modules/
+
+# Environment files
 .env
 .env.*
 !.env.example
 !.env.*.example
 
-# --- Dependencies and generated builds ---
-node_modules/
-**/node_modules/
-dist/
-**/dist/
-build/
+# Python environments and cache
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Test reports and coverage
 coverage/
 .nyc_output/
-.vite/
+test-results/
 
-# --- Logs and local runtime data ---
+# Logs and temporary files
 *.log
 logs/
 tmp/
 temp/
-*.pid
-*.seed
 
-# --- Local editor and OS files ---
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# Local uploaded data
+storage/doctor-profile/
+storage/patient-profile/
+storage/uploads/
+storage/invoices/
 
-# --- Private keys, certificates and credentials ---
+# Private keys and certificates
 *.pem
 *.key
 *.p12
 *.pfx
-*.keystore
-secrets/
-credentials/
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -33,7 +33,22 @@ export const authoritativeGatewayAmount = (payment) => Number(payment.gatewayAmo
 
 export const attemptReceipt = (paymentId, attemptNumber) => `pay_${paymentId}_${attemptNumber}`;
 
-export const reserveAttempt = async ({ payment, gateway = paymentGateway.mode(), maxTries = 6 }) => {
+const isAttemptNumberCollision = (error) => {
+  if (error?.code !== 11000) return false;
+  const pattern = error?.keyPattern;
+  if (pattern) return Boolean(pattern.paymentId && pattern.attemptNumber);
+  // Older MongoDB/Mongoose combinations may omit keyPattern. Fall back to the
+  // explicit index name only; other unique-index violations must not be retried.
+  return /paymentId_1_attemptNumber_1/.test(String(error?.message || ""));
+};
+
+const retryDelay = (attemptIndex) => new Promise((resolve) => {
+  // Small jitter prevents all losing writers from colliding again in lockstep.
+  const backoff = Math.min(2 ** attemptIndex, 25);
+  setTimeout(resolve, backoff + Math.floor(Math.random() * 8));
+});
+
+export const reserveAttempt = async ({ payment, gateway = paymentGateway.mode(), maxTries = 16 }) => {
   const amount = authoritativeGatewayAmount(payment);
   for (let i = 0; i < maxTries; i += 1) {
     const last = await PaymentAttempt.findOne({ paymentId: payment._id }).sort({ attemptNumber: -1 }).select("attemptNumber").lean();
@@ -46,7 +61,10 @@ export const reserveAttempt = async ({ payment, gateway = paymentGateway.mode(),
         status: "created", amount, currency: payment.currency, startedAt: new Date(),
       });
     } catch (error) {
-      if (error?.code !== 11000) throw error; // another worker took this number: re-read and take the next
+      if (!isAttemptNumberCollision(error)) throw error;
+      // Another writer claimed this number. Re-read after a short jittered
+      // backoff so concurrent requests do not repeatedly race on the same value.
+      if (i + 1 < maxTries) await retryDelay(i);
     }
   }
   const error = new Error("Could not reserve a payment attempt number"); error.statusCode = 409; throw error;

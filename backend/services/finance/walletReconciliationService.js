@@ -132,7 +132,15 @@ const dateRange = ({ from, to }, field) => {
   return Object.keys(range).length ? { [field]: range } : {};
 };
 
-const countOf = async (agg) => (await agg.concat([{ $count: "n" }]))?.[0]?.n || 0;
+const countOf = async (agg) => {
+  const pipeline = agg.pipeline();
+  const result = await agg.model().aggregate([
+    ...pipeline,
+    { $count: "n" },
+  ]);
+
+  return result[0]?.n || 0;
+};
 
 const finders = {
   async [DISCREPANCY_CATEGORIES.WALLET_BALANCE_DRIFT]({ skip, limit, filters }) {

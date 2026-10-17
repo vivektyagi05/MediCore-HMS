@@ -1,83 +1,41 @@
-# Documentation Index
+# Documentation index
 
-This directory has grown across many development phases. If you're new to
-the project, read the files under **Start Here** in order — everything
-else is either deeper technical detail or historical record.
+This directory separates current developer guidance from historical records. Current documents are intended to describe the repository as supplied; historical documents retain point-in-time context and may contain claims that are no longer current.
 
-## Start Here
+## Start here
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the system is put together
-  (frontend, backend, cross-cutting concerns) and why.
-- [`SYSTEM_DESIGN.md`](SYSTEM_DESIGN.md) — how a request actually flows
-  through the system, including the financial flows in more detail.
-- [`FEATURES.md`](FEATURES.md) — current feature map by product area, each
-  item marked Implemented / Partial / Planned.
-- [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — current engineering focus,
-  what's done, what isn't, and verification status.
+1. [Architecture](ARCHITECTURE.md) — major components and their boundaries.
+2. [System Design](SYSTEM_DESIGN.md) — request and data-flow descriptions.
+3. [Features](FEATURES.md) — feature areas and evidence limits.
+4. [Project Status](PROJECT_STATUS.md) — what can and cannot be concluded from the supplied repository.
+5. [Remaining Risks](REMAINING_RISKS.md) — known gaps and checks still required.
+6. [Deployment Guide](DEPLOYMENT_GUIDE.md) — repository-defined local/container deployment guidance.
+7. [Testing and Release Gates](TESTING-AND-RELEASE-GATES.md) and [Test Matrix](TEST_MATRIX.md) — commands, scenarios, and verification boundaries.
 
-## Financial System
+## Domain references
 
-- [`FINANCIAL_ARCHITECTURE.md`](FINANCIAL_ARCHITECTURE.md) — the canonical
-  reference for how payments, wallet, refunds, payouts, withdrawals, and
-  the ledger relate to each other.
-- [`PHASE-P23-FINANCIAL-AUDIT.md`](PHASE-P23-FINANCIAL-AUDIT.md) — audit
-  notes from the P23 financial-correctness phase.
-- [`financial-engine-test-scenarios.md`](financial-engine-test-scenarios.md) —
-  test-scenario notes for the financial engine.
-- Root-level `CHANGELOG-P23-*.md` files (repo root, not in `docs/`) — the
-  detailed record of the most recent financial-correctness work; see the
-  repo-root `CHANGELOG.md` for a summary and reading order.
+- [Financial Architecture](FINANCIAL_ARCHITECTURE.md)
+- [Financial Accounting Contract](FINANCIAL-ACCOUNTING-CONTRACT.md)
+- [Payment Business Logic](PAYMENT-BUSINESS-LOGIC-SPEC.md)
+- [Scheduler Architecture](SCHEDULER-ARCHITECTURE.md)
+- [Engineering Decisions](ENGINEERING_DECISIONS.md)
+- [Financial Implementation Map](FINANCIAL-IMPLEMENTATION-MAP.md)
+- [Security Audit Summary](SECURITY_AUDIT_SUMMARY.md)
 
-## Deployment
+## Testing scenarios
 
-- [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) — local dev, Docker Compose,
-  environment variables, backups, and CI.
+Scenario descriptions are under [`testing/scenarios/`](testing/scenarios). A scenario document is a plan or description, not proof that the scenario has been executed.
 
-## Security
+## Historical records
 
-- [`SECURITY_AUDIT_SUMMARY.md`](SECURITY_AUDIT_SUMMARY.md) — findings from
-  the most recent internal security review pass.
-- [`REMAINING_RISKS.md`](REMAINING_RISKS.md) — the current, maintained list
-  of open risks and gaps (read this one — it's kept honest and current).
-- Repo-root [`SECURITY.md`](../SECURITY.md) — how to report a
-  vulnerability.
+`history/changelogs/`, `history/phases/`, `history/audits/`, and `history/remediation/` preserve dated or phase-specific reports. Treat test counts, completion statements, dependency findings, and deployment claims in these files as historical unless their exact commit, date, command, and environment are confirmed.
 
-## Testing & Verification
+## Evidence language
 
-- [`TEST_MATRIX.md`](TEST_MATRIX.md) — what's covered by automated tests.
-- [`VERIFICATION_REPORT.md`](VERIFICATION_REPORT.md),
-  [`PRODUCTION_READINESS_REPORT.md`](PRODUCTION_READINESS_REPORT.md),
-  [`PERFORMANCE_AUDIT_SUMMARY.md`](PERFORMANCE_AUDIT_SUMMARY.md),
-  [`AUDIT_REPORT.md`](AUDIT_REPORT.md) — point-in-time audit/verification
-  reports from specific phases. Treat these as historical snapshots, not
-  live status — for live status, use `PROJECT_STATUS.md` and
-  `REMAINING_RISKS.md`.
-- `*-test-scenarios.md` files (`doctor-workflow-test-scenarios.md`,
-  `patient-workflow-test-scenarios.md`, `ai-automation-test-scenarios.md`,
-  `realtime-test-scenarios.md`) — scenario notes per domain area.
+Use these labels consistently:
 
-## Historical Phases
-
-The project was built in many small, named phases. Each has its own
-changelog and sometimes its own architecture/verification note:
-
-- `CHANGELOG-<phase-name>.md` and `CHANGELOG-PHASE-<code>-<name>.md` —
-  one per phase, in the order the phase codes suggest (P1, P2, ... P23;
-  DOC-01 onward for the doctor workspace track; UI-4 onward for the
-  admin/UI track; A5.x/A6.x for the automation/process-governance track).
-- `ARCHITECTURE-<phase>.md` / `VERIFICATION-<phase>.md` — deeper
-  architecture or verification notes for a specific phase, where one was
-  written (e.g. the A6.2.x monitoring/workflow-intelligence phases).
-- Other phase-specific summaries: `DOCTOR_WORKSPACE_PHASE_SUMMARY.md`,
-  `PATIENT_CARE_JOURNEY_PHASE_SUMMARY.md`, `ENGINEERING_DECISIONS.md`,
-  `ENTERPRISE_READINESS_SCORE.md`, `ARCHITECTURE_REVIEW.md`,
-  `SESSION_CHANGELOG.md`, `bug-fixes-report.md`, `integration-report.md`,
-  `missing-connections-report.md`, `validation-report.md`,
-  `final-package-checklist.md`, and the `P11-`/`P12-` prefixed QA/delivery
-  notes.
-
-These are preserved for historical context. **Do not treat a historical
-file as current status** — if a historical file says a feature was
-"planned" and it has since shipped, the up-to-date answer is in
-`FEATURES.md` and `PROJECT_STATUS.md`, not in the old file (which is left
-as-is, as a record of what was true when it was written).
+- **Documented and source reference found** — the named file or symbol was located; behavior is not thereby proven.
+- **Partially documented** — only part of the workflow or its boundaries are described.
+- **Historical claim** — a past report records the claim; it is not a current result.
+- **Unverified** — available evidence is insufficient to decide.
+- **Requires runtime verification** — a live service, browser, database, gateway, CI runner, or deployment is needed.

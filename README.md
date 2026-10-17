@@ -1,5 +1,6 @@
 <div align="center">
 
+<<<<<<< HEAD
 # 🏥 MediCore HMS
 
 ### Healthcare operations, clinical workflows & financial integrity — in one full-stack platform
@@ -306,12 +307,136 @@ cp .env.example .env
 ```
 
 The root example currently includes these frontend values:
+=======
+MediCore HMS is a full-stack healthcare-management application for patient, doctor, and administrative workflows. The repository contains a React/Vite frontend, a Node.js/Express backend, MongoDB persistence through Mongoose, and supporting real-time and payment-related modules.
+
+**Project status:** active development. The presence of code or documentation for a feature does not establish end-to-end correctness or production readiness. See [Project Status](docs/PROJECT_STATUS.md) and [Remaining Risks](docs/REMAINING_RISKS.md).
+
+## Main areas
+
+Feature documentation describes patient and doctor workflows, appointments, authentication and role-based access, clinical records, notifications, and financial workflows. Availability and verification depth vary by feature; consult [Feature Map](docs/FEATURES.md) rather than treating this list as a production guarantee.
+
+Financial workflows have dedicated design documentation: [Financial Architecture](docs/FINANCIAL_ARCHITECTURE.md), [Accounting Contract](docs/FINANCIAL-ACCOUNTING-CONTRACT.md), and [Payment Business Logic](docs/PAYMENT-BUSINESS-LOGIC-SPEC.md).
+
+## Technology
+
+- **Frontend:** React, Vite, JavaScript, React Router, Axios, Tailwind CSS integration, Framer Motion, Socket.IO client.
+- **Backend:** Node.js (repository `.nvmrc`: 22), Express, Mongoose, JWT-based authentication, Socket.IO.
+- **Database:** MongoDB.
+- **Integrations:** Razorpay payment gateway and Brevo transactional email are referenced by the repository configuration. Live integration behavior is not asserted here.
+
+See the root and `backend` package manifests for the exact dependency declarations and scripts.
+
+## Repository layout
+
+```text
+src/                  React frontend
+backend/              Express API, domain modules, models, tests and migrations
+shared/               Shared modules
+docs/                 Current guides, architecture and historical reports
+.github/workflows/    CI workflow definitions
+docker-compose.yml    Local/container orchestration configuration
+Dockerfile            Frontend/container build configuration
+backend/Dockerfile     Backend container configuration
+```
+
+## Prerequisites
+
+- Node.js compatible with the repository's `.nvmrc` (currently `22`).
+- npm.
+- A MongoDB instance for database-backed workflows.
+- Credentials only for integrations you intend to exercise. Do not use production credentials for local development.
+
+Docker is an alternative if you choose the repository's Compose setup. Container and deployment instructions must be verified in your own environment before relying on them.
+
+## Local setup
+
+Install the root and backend dependencies separately:
+
+```bash
+npm install
+npm --prefix backend install
+```
+
+Create local environment files from the checked-in examples:
+
+```bash
+# Windows PowerShell
+Copy-Item .env.example .env
+Copy-Item backend/.env.example backend/.env
+
+# macOS/Linux
+cp .env.example .env
+cp backend/.env.example backend/.env
+```
+
+Fill in the required values for your local environment. At minimum, configure the backend MongoDB connection and authentication secret. Never commit `.env` files or real credentials.
+
+Start the frontend development server from the repository root:
+
+```bash
+npm run dev
+```
+
+Start the backend in a second terminal:
+
+```bash
+npm run dev:backend
+```
+
+The root environment example uses `VITE_API_BASE_URL` for the frontend API base URL. The backend environment example documents backend settings such as `MONGO_URI`, `JWT_SECRET`, `PORT`, `CORS_ORIGIN`, and `FRONTEND_URL`. Read the example files before running the application; not every integration variable is required for every workflow.
+
+## Database and migrations
+
+Use a MongoDB database dedicated to local development. Do not point development scripts or tests at production data. The backend package declares migration and integrity-audit scripts; review the relevant migration file and its documented prerequisites before running any migration. This README does not claim that migrations have been executed against a live database.
+
+## Existing commands
+
+Run commands from the repository root unless noted.
+
+| Purpose | Command |
+|---|---|
+| Frontend development server | `npm run dev` |
+| Backend development server | `npm run dev:backend` |
+| Frontend build | `npm run build` |
+| Lint | `npm run lint` |
+| Backend test suite | `npm run test:backend` |
+| Backend tests directly | `npm --prefix backend test` |
+| Production smoke script | `npm run smoke:production` |
+
+The backend also declares `npm --prefix backend test:mongo` for MongoDB integration tests. These tests require the environment described by their test files and are not equivalent to the ordinary backend test suite. Commands are listed from manifests; this documentation task did not run them.
+
+## Documentation guide
+
+- [Documentation index](docs/README.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [System design and request flow](docs/SYSTEM_DESIGN.md)
+- [Feature map](docs/FEATURES.md)
+- [Project status](docs/PROJECT_STATUS.md)
+- [Remaining risks](docs/REMAINING_RISKS.md)
+- [Deployment guide](docs/DEPLOYMENT_GUIDE.md)
+- [Testing and release gates](docs/TESTING-AND-RELEASE-GATES.md)
+- [Test matrix](docs/TEST_MATRIX.md)
+- [Financial architecture](docs/FINANCIAL_ARCHITECTURE.md)
+- [Documentation audit report](docs/audits/DOCUMENTATION_AUDIT_REPORT.md)
+
+Historical phase notes, audit snapshots, and remediation reports are kept under `docs/history/`. They describe past work and must not be read as current verification without checking their date, commit, and environment.
+
+## Deployment
+
+The repository contains Docker and split-host deployment configuration. Follow [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) and verify the setup in the intended environment. No deployment URL, successful live integration, compliance certification, or production-readiness claim is made here.
+
+## Contributing and security
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md). Report vulnerabilities privately rather than publishing exploit details in a public issue.
+>>>>>>> 7b10e9b (Clean up and reorganize project documentation)
 
 ```dotenv
 VITE_API_BASE_URL=http://localhost:5000/api
 VITE_SITE_URL=http://localhost:5173
 ```
 
+<<<<<<< HEAD
 Vite environment values are compiled into the frontend build. Rebuild the frontend after changing production `VITE_*` values.
 
 ### 3. Configure the backend
@@ -536,3 +661,6 @@ MediCore HMS is distributed under the MIT License. See [`license`](license) for 
 [⬆ Back to top](#-medicore-hms)
 
 </div>
+=======
+The repository includes the MIT license in [`license`](license). Preserve its copyright and license text when redistributing the project.
+>>>>>>> 7b10e9b (Clean up and reorganize project documentation)

@@ -1,69 +1,66 @@
 # Security Policy
 
-MediCore HMS is a healthcare-domain project under active development (see
-`docs/PROJECT_STATUS.md`). It is not currently operating as a deployed
-production service processing real patient data. This document explains
-how to report a security issue and what security posture actually exists
-today — see `docs/REMAINING_RISKS.md` for a fuller, honest list of open
-gaps.
+MediCore HMS is a healthcare-domain application under active development. The repository contains authentication, role-based access controls, clinical workflows, file handling, real-time features, and financial operations. It is **not to be assumed safe for real patient data or production financial activity** merely because security controls exist in the code. See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) and [`docs/REMAINING_RISKS.md`](docs/REMAINING_RISKS.md) for the documented status and open gaps.
 
 ## Reporting a vulnerability
 
-If you find a security issue in this repository:
+**Please do not publish exploitable security details in a public issue or pull request.**
 
-1. **Do not open a public GitHub issue for it.** Public issues are
-   searchable and would disclose the problem before it can be fixed.
-2. Report it privately to the maintainer (see the repository's GitHub
-   profile / commit history for current contact details).
-3. Include: what you found, the affected file(s)/endpoint(s), how to
-   reproduce it, and its potential impact.
-4. Please allow time for a fix before any public disclosure.
+1. Contact the maintainer privately using the current contact route listed on the repository owner's GitHub profile.
+2. Include a concise description, affected component or file, impact, prerequisites, and reproducible steps where safe.
+3. Include logs or screenshots only after removing secrets, personal information, tokens, and patient/payment data.
+4. Allow the maintainer reasonable time to assess and address the issue before public disclosure.
 
-There is currently no formal bug-bounty program and no dedicated security
-team — this is a solo/small-scale project. Reports are still welcome and
-will be taken seriously.
+Do not test against systems or data that you do not own or have explicit permission to assess. There is currently no formal bug bounty program or dedicated security response team. Reports are welcome, but a particular response time cannot be guaranteed.
 
-## Do not report or publish sensitive data
+If the issue concerns the maintainer or the normal contact route is unsuitable, use the reporting mechanisms provided by GitHub where appropriate.
 
-Because this is a healthcare-domain project:
+## Sensitive data handling
 
-- Never include real patient information, real credentials, or real
-  payment details in an issue, pull request, commit, or vulnerability
-  report. Use synthetic/example data only.
-- If you discover real sensitive data accidentally committed to the
-  repository (a leaked `.env`, a real API key, etc.), report it privately
-  first rather than opening a public issue that points to it.
+Never include real patient information, clinical records, credentials, access tokens, private keys, payment card details, gateway secrets, production database dumps, or other sensitive data in public issues, pull requests, commits, or examples.
 
-## What is actually in place today
+Use synthetic data that is unmistakably fictitious. Do not use real names or payment references to make test fixtures appear production-derived.
 
-- Passwords are hashed with `bcrypt`; sessions use JWTs (`jsonwebtoken`).
-- Role-based access control (admin / doctor / patient) is enforced in
-  backend middleware (`backend/middleware/`), not just hidden in the UI.
-- `helmet` and `express-rate-limit` are applied at the Express app level;
-  see `backend/app.js`.
-- Financial writes (payments, refunds, wallet, payouts) go through
-  explicit state machines with server-side gateway verification — see
-  `docs/FINANCIAL_ARCHITECTURE.md` — rather than trusting client-reported
-  outcomes.
-- Environment configuration is validated at boot (`backend/config/env.js`);
-  the app refuses to start in production without the required secrets set.
+If a secret has been committed accidentally:
 
-## What is explicitly not in place / known limitations
+- Report it privately; do not create a public issue that republishes it.
+- Revoke or rotate the exposed credential promptly.
+- Review the exposure window and relevant access logs where available.
+- Remember that removing the value in a later commit does not remove it from Git history; follow an appropriate history-cleanup process when necessary.
 
-See `docs/REMAINING_RISKS.md` for the current, maintained list. As of this
-writing that includes (non-exhaustive): no independent penetration test or
-SAST/DAST scan has been run; no git-history secret scan has been run; no
-formal security certification (SOC 2, HIPAA compliance audit, PCI-DSS,
-etc.) has been obtained or claimed; the realtime layer's presence-tracking
-and rate limiting are in-process only and not yet safe for multiple backend
-instances; and dependency upgrades for two known high-severity advisories
-(Vite, react-router-dom) are still pending a dedicated regression pass.
+## Security controls represented in the codebase
 
-Do not treat this project as HIPAA-compliant, PCI-DSS-compliant, or
-production-hardened for real patient or payment data without independently
-verifying these gaps have been closed.
+The repository currently includes code for the following controls; their presence does not replace verification of configuration and behavior in each deployment:
+
+- Password hashing using `bcrypt` and JWT-based authentication.
+- Backend middleware for patient, doctor, and administrative authorization.
+- Express security headers through Helmet and request-rate limiting through `express-rate-limit`.
+- Startup environment validation, including required configuration and production guards.
+- Financial workflows with explicit state machines and server-side payment verification paths.
+- Duplicate-processing and integrity protections in selected financial workflows.
+
+Relevant implementation and design references include `backend/middleware/`, `backend/config/`, `backend/app.js`, and [`docs/FINANCIAL_ARCHITECTURE.md`](docs/FINANCIAL_ARCHITECTURE.md). A control's existence in source code does not establish that every route or deployment is configured correctly.
+
+## Known limitations and unverified areas
+
+The following are documented limitations from the current project status and should be rechecked before any production use:
+
+- No independent penetration test, formal security certification, or comprehensive SAST/DAST assessment has been completed.
+- No dedicated Git-history secret scan has been completed.
+- The real Razorpay path has not been fully validated against a live Razorpay sandbox in the documented environment; test-gateway results are not proof of live integration correctness.
+- Real deployment, multi-instance scaling, and full end-to-end clinical/payment flows require separate verification.
+- Presence tracking and some rate-limit counters are held in process memory, which is not sufficient by itself for consistent multi-instance operation.
+- Uploaded-file backup and recovery need operational configuration; database backups alone do not back up local uploaded files.
+- The project status documents record dependency advisories that require a dedicated upgrade and regression pass. Re-check current advisories rather than treating that historical snapshot as a live vulnerability report.
+
+This list is not exhaustive. Consult [`docs/REMAINING_RISKS.md`](docs/REMAINING_RISKS.md) for the maintained risk register.
+
+## Production and compliance statements
+
+Do not treat MediCore HMS as HIPAA-compliant, PCI-DSS-certified, independently audited, or production-hardened for real patient or payment data unless the relevant legal, operational, technical, and independent validation requirements have actually been met. This repository does not claim those certifications.
+
+Before any production launch, conduct a security review, dependency and secret scanning, appropriate penetration testing, deployment hardening, backup/restore testing, incident-response planning, and a review of applicable privacy, healthcare, and payment obligations.
 
 ## Supported versions
 
-This project does not yet follow a versioned release/support model (see
-`docs/PROJECT_STATUS.md`). Security fixes are applied to the `main` branch.
+The project does not currently maintain a formal versioned release/support policy. Security fixes are generally developed on `main`; no specific response SLA or support window is promised. See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for release status.

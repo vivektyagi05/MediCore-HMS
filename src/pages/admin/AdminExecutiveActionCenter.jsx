@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useRequestLifecycle } from "../../hooks/useRequestLifecycle";
+import { useSyncRefresh } from "../../hooks/useSyncRefresh";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 import { RefreshCcw, HelpCircle, Radio, PauseCircle, PlayCircle, Clock } from "lucide-react";
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -44,7 +47,10 @@ function AdminExecutiveActionCenter() {
   const [pauseState, setPauseState] = useState(null);
   const [toast, setToast] = useState("");
 
+  const { begin, isInFlight } = useRequestLifecycle();
+
   const load = async () => {
+    const request = begin();
     setError("");
     try {
       const [ac, dc, rc, tl] = await Promise.all([
@@ -53,25 +59,27 @@ function AdminExecutiveActionCenter() {
         adminApi.getExecutiveRecommendations(),
         adminApi.getExecutiveTimeline({ limit: 25 }),
       ]);
+      if (!request.isCurrent()) return;
       setActionCenter(ac.data);
       setDecisions(dc.data);
       setRecommendations(rc.data);
       setTimeline(tl.data);
     } catch (loadError) {
+      if (!request.isCurrent()) return;
       setError(getApiErrorMessage(loadError));
     } finally {
-      setIsLoading(false);
+      if (request.isCurrent()) setIsLoading(false);
+      request.finish();
     }
   };
 
   useEffect(() => {
     load();
-  }, [dashboardSyncTick]);
-
-  useEffect(() => {
-    const interval = window.setInterval(load, 20000);
-    return () => window.clearInterval(interval);
   }, []);
+  useSyncRefresh(load, dashboardSyncTick);
+
+  // 20s poll: skipped while a load is still running, paused while the tab is hidden.
+  useVisiblePolling(load, 20000, { isBusy: isInFlight });
 
   const showToast = (msg) => {
     setToast(msg);
@@ -283,7 +291,7 @@ function AdminExecutiveActionCenter() {
         <form className="space-y-3" onSubmit={handleBroadcastSubmit}>
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-600">Title</label>
-            <input
+            <input aria-label="Title"
               required
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               value={broadcastForm.title}
@@ -292,7 +300,7 @@ function AdminExecutiveActionCenter() {
           </div>
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-600">Message</label>
-            <textarea
+            <textarea aria-label="Message"
               required
               rows={4}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { financeApi } from "../../api/financeApi";
 import { getApiErrorMessage } from "../../api/axios";
 import { useAuth } from "../../context/AuthContext";
@@ -7,6 +7,7 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Modal from "../ui/Modal";
 
+import { parseMoney } from "../../utils/moneyInput";
 const loadRazorpayScript = () =>
   new Promise((resolve) => {
     if (window.Razorpay) {
@@ -41,15 +42,23 @@ function WalletRechargeModal({ isOpen, onClose, onSuccess }) {
   const [amount, setAmount] = useState("1000");
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
+  const [touched, setTouched] = useState(false);
+  // Same limits the server enforces (INR 1 .. INR 100,000, 2 decimals): catch a bad amount before opening checkout.
+  const parsed = parseMoney(amount, { min: 1, max: 100000, label: "Amount" });
+
+  // A reopened modal starts clean (it used to keep the previous attempt's amount and warning).
+  useEffect(() => { if (isOpen) { setAmount("1000"); setStatusMessage(null); setTouched(false); setIsLoading(false); } }, [isOpen]);
 
   const recharge = async () => {
+    setTouched(true);
+    if (parsed.error || isLoading) return; // also blocks a double click while checkout is being prepared
     setIsLoading(true);
     setStatusMessage(null);
     try {
       const loaded = await loadRazorpayScript();
       if (!loaded) throw new Error("Unable to load Razorpay checkout");
 
-      const response = await financeApi.createWalletRechargeOrder({ amount: Number(amount) });
+      const response = await financeApi.createWalletRechargeOrder({ amount: parsed.value });
       const { order, razorpayKeyId } = response.data;
 
       const checkout = new window.Razorpay({
@@ -124,19 +133,26 @@ function WalletRechargeModal({ isOpen, onClose, onSuccess }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title="Recharge Wallet" onClose={onClose}>
+    <Modal isOpen={isOpen} title="Recharge Wallet" onClose={isLoading ? undefined : onClose}>
       <div className="space-y-4">
         <Input
-          label="Amount"
+          label="Amount (₹)"
+          name="recharge-amount"
           min="1"
+          max="100000"
+          step="0.01"
           type="number"
+          inputMode="decimal"
           value={amount}
+          disabled={isLoading}
+          error={touched || amount !== "1000" ? parsed.error : ""}
+          helperText="Between ₹1 and ₹1,00,000"
           onChange={(event) => setAmount(event.target.value)}
         />
         {statusMessage && (
           <p className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">{statusMessage}</p>
         )}
-        <Button className="w-full" onClick={recharge} isLoading={isLoading} disabled={Number(amount) < 1}>
+        <Button className="w-full" onClick={recharge} isLoading={isLoading} disabled={Boolean(parsed.error)}>
           Continue to Razorpay
         </Button>
       </div>

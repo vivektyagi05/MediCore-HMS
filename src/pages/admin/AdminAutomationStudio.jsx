@@ -194,14 +194,14 @@ function FlowsList({ flows, loading, error, onRetry, pagination, onPageChange, o
         <div className="flex items-center gap-2">
           <div className="relative">
             <SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
+            <input aria-label="Search automations"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search automations..."
               className="rounded-xl border border-slate-200 bg-white/70 py-2 pl-9 pr-4 text-sm outline-none focus:border-blue-600"
             />
           </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm outline-none">
+          <select aria-label="Status Filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm outline-none">
             <option value="">All statuses</option>
             <option value="draft">Draft</option>
             <option value="published">Published</option>
@@ -288,17 +288,17 @@ const OPERATORS = ["equals", "not_equals", "contains", "starts_with", "ends_with
 function ConditionRuleRow({ rule, onChange, onRemove }) {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white/60 p-2">
-      <input className="w-36 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" placeholder="field (e.g. amount)" value={rule.field || ""} onChange={(e) => onChange({ ...rule, field: e.target.value })} />
-      <select className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={rule.operator || "equals"} onChange={(e) => onChange({ ...rule, operator: e.target.value })}>
+      <input aria-label="Condition field" className="w-36 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" placeholder="field (e.g. amount)" value={rule.field || ""} onChange={(e) => onChange({ ...rule, field: e.target.value })} />
+      <select aria-label="Operator" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={rule.operator || "equals"} onChange={(e) => onChange({ ...rule, operator: e.target.value })}>
         {OPERATORS.map((op) => <option key={op} value={op}>{op}</option>)}
       </select>
       {!["empty", "not_empty"].includes(rule.operator) && (
-        <input className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" placeholder="value" value={rule.value ?? ""} onChange={(e) => onChange({ ...rule, value: e.target.value })} />
+        <input aria-label="Condition value" className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" placeholder="value" value={rule.value ?? ""} onChange={(e) => onChange({ ...rule, value: e.target.value })} />
       )}
       {rule.operator === "between" && (
-        <input className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" placeholder="to value" value={rule.valueTo ?? ""} onChange={(e) => onChange({ ...rule, valueTo: e.target.value })} />
+        <input aria-label="Condition upper value" className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" placeholder="to value" value={rule.valueTo ?? ""} onChange={(e) => onChange({ ...rule, valueTo: e.target.value })} />
       )}
-      <button onClick={onRemove} className="ml-auto text-slate-400 hover:text-rose-600"><Trash2 size={15} /></button>
+      <button aria-label="Delete" title="Delete" onClick={onRemove} className="ml-auto text-slate-400 hover:text-rose-600"><Trash2 size={15} /></button>
     </div>
   );
 }
@@ -312,14 +312,14 @@ function ActionStepCard({ step, index, total, actionDefs, onChange, onRemove, on
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">{index + 1}</span>
-          <select className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold" value={step.type} onChange={(e) => onChange({ ...step, type: e.target.value, config: {} })}>
+          <select aria-label="Type" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-semibold" value={step.type} onChange={(e) => onChange({ ...step, type: e.target.value, config: {} })}>
             {actionDefs.map((a) => <option key={a.type} value={a.type}>{a.label}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-1">
-          <button disabled={index === 0} onClick={() => onMove(-1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-30"><ArrowUpCircle size={16} /></button>
-          <button disabled={index === total - 1} onClick={() => onMove(1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-30"><ArrowDownCircle size={16} /></button>
-          <button onClick={onRemove} className="text-slate-400 hover:text-rose-600"><Trash2 size={15} /></button>
+          <button type="button" aria-label="Move up" title="Move up" disabled={index === 0} onClick={() => onMove(-1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-30"><ArrowUpCircle size={16} /></button>
+          <button type="button" aria-label="Move down" title="Move down" disabled={index === total - 1} onClick={() => onMove(1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-30"><ArrowDownCircle size={16} /></button>
+          <button aria-label="Delete" title="Delete" onClick={onRemove} className="text-slate-400 hover:text-rose-600"><Trash2 size={15} /></button>
         </div>
       </div>
       {def && <p className="mt-1 text-xs text-slate-500">{def.description}</p>}
@@ -575,7 +575,7 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
           </Card>
 
           <Card title="1. Trigger">
-            <select className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={draft.triggerType} onChange={(e) => setDraft({ ...draft, triggerType: e.target.value })}>
+            <select aria-label="Trigger Type" className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={draft.triggerType} onChange={(e) => setDraft({ ...draft, triggerType: e.target.value })}>
               <option value="">Select a real trigger...</option>
               {triggers.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
             </select>
@@ -586,7 +586,7 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
             title="2. Conditions"
             action={
               <div className="flex items-center gap-2">
-                <select className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={draft.conditionLogic} onChange={(e) => setDraft({ ...draft, conditionLogic: e.target.value })}>
+                <select aria-label="Condition Logic" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={draft.conditionLogic} onChange={(e) => setDraft({ ...draft, conditionLogic: e.target.value })}>
                   <option value="AND">Match ALL (AND)</option>
                   <option value="OR">Match ANY (OR)</option>
                 </select>
@@ -608,7 +608,7 @@ function Builder({ flowId, triggers, actionDefs, onSaved, onClosed, toast }) {
           <Card
             title="3. Actions"
             action={
-              <select className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" onChange={(e) => { if (e.target.value) { setDraft({ ...draft, actions: [...draft.actions, newActionStep(e.target.value)] }); e.target.value = ""; } }}>
+              <select aria-label="Add action" className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm" onChange={(e) => { if (e.target.value) { setDraft({ ...draft, actions: [...draft.actions, newActionStep(e.target.value)] }); e.target.value = ""; } }}>
                 <option value="">+ Add action...</option>
                 {actionDefs.map((a) => <option key={a.type} value={a.type}>{a.label}</option>)}
               </select>

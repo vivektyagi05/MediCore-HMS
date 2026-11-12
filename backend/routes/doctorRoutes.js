@@ -20,6 +20,7 @@ import {
  togglePinReview,
 }
 from "../controllers/doctor/doctorReviewController.js";
+import { createMyRefundReview, listMyRefundReviews } from "../controllers/refundReviewController.js";
 const router = Router();
 
 import {
@@ -198,6 +199,10 @@ router.get(
 // P23 — Withdrawal domain endpoints. Balance is server-calculated
 // (Section 23 Step 3) via the same canonical computeDoctorWithdrawableBalance
 // the admin workspace and requestWithdrawal itself both use.
+// Phase 03: doctor requests an admin REVIEW of a refund that reduced an earning (no refund execution).
+router.post("/refund-reviews", protect, authorizeRoles(ROLES.DOCTOR), requireApprovedDoctor, createMyRefundReview);
+router.get("/refund-reviews", protect, authorizeRoles(ROLES.DOCTOR), requireApprovedDoctor, listMyRefundReviews);
+
 router.get(
   "/withdrawals/balance",
   protect,

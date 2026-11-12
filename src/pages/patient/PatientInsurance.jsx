@@ -16,6 +16,9 @@ import EmptyState from "../../components/shared/EmptyState";
 import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
 
+import { useConfirm } from "../../hooks/useConfirm";
+import { validateClaim, validateInsurancePolicy } from "../../utils/patientFormValidation";
+import { validateUpload } from "../../utils/fileValidation";
 const initial = { provider: "", policyNumber: "", policyHolder: "", validTill: "", coverageAmount: "", familyMemberId: "", file: null };
 
 function daysUntil(date) {
@@ -23,6 +26,7 @@ function daysUntil(date) {
 }
 
 function PatientInsurance() {
+  const { confirm, confirmDialog } = useConfirm();
   const [params] = useSearchParams();
   const [overview, setOverview] = useState(null);
   const [policies, setPolicies] = useState([]);
@@ -33,6 +37,11 @@ function PatientInsurance() {
   const [detail, setDetail] = useState(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [claimAmount, setClaimAmount] = useState("");
+  const [claimTouched, setClaimTouched] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [fileError, setFileError] = useState("");
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [claimNotes, setClaimNotes] = useState("");
   const toast = useToast();
   const { t } = useI18n();
@@ -57,8 +66,19 @@ function PatientInsurance() {
 
   useEffect(() => { load(); }, [params.toString()]);
 
+  const errors = validateInsurancePolicy(form);
+  const onPickFile = (input) => {
+    const file = input.files?.[0] || null;
+    const problem = validateUpload(file);
+    if (problem) { setFileError(problem); input.value = ""; setForm((f) => ({ ...f, file: null })); return; }
+    setFileError("");
+    setForm((f) => ({ ...f, file }));
+  };
   const submit = async (event) => {
     event.preventDefault();
+    if (isSaving) return;
+    setAttempted(true);
+    if (Object.keys(errors).length) return;
     const formData = new FormData();
     Object.entries(form).forEach(([key, value]) => {
       if (key === "file" && value) formData.append("document", value);
@@ -69,6 +89,8 @@ function PatientInsurance() {
       await patientWorkflowApi.createInsurance(formData);
       toast.success("Insurance saved");
       setForm(initial);
+      setAttempted(false);
+      setFileInputKey((k) => k + 1);
       await load();
     } catch (error) {
       toast.error(getApiErrorMessage(error));
@@ -78,7 +100,7 @@ function PatientInsurance() {
   };
 
   const removePolicy = async (policy) => {
-    if (!window.confirm(`Delete the ${policy.provider} policy?`)) return;
+    if (!(await confirm({ title: "Delete this policy?", description: `The ${policy.provider} policy will be removed from your account.`, confirmLabel: "Delete policy" }))) return;
     try {
       await patientWorkflowApi.deleteInsurance(policy._id);
       toast.success("Policy deleted");
@@ -91,6 +113,7 @@ function PatientInsurance() {
 
   const openDetail = async (policy) => {
     setIsDetailLoading(true);
+    setClaimTouched(false);
     setClaimAmount("");
     setClaimNotes("");
     try {
@@ -103,41 +126,52 @@ function PatientInsurance() {
     }
   };
 
+  const claimErrors = detail ? validateClaim({ claimAmount, claimNotes }, { remainingAmount: Number(detail.utilization.remainingAmount) || 0 }) : {};
   const submitClaim = async (event) => {
     event.preventDefault();
-    if (!claimAmount) return;
+    if (isClaiming) return; // a double click used to submit the claim twice
+    setClaimTouched(true);
+    if (Object.keys(claimErrors).length) return;
+    setIsClaiming(true);
     try {
-      await patientWorkflowApi.submitInsuranceClaim(detail.policy._id, { claimAmount, claimNotes });
+      await patientWorkflowApi.submitInsuranceClaim(detail.policy._id, { claimAmount: Number(claimAmount), claimNotes: claimNotes.trim() });
       toast.success("Claim submitted");
       setDetail(null);
       await load();
     } catch (error) {
       toast.error(getApiErrorMessage(error));
+    } finally {
+      setIsClaiming(false);
     }
   };
 
   if (isLoading) return <Loader label="Loading insurance" />;
 
   return (
+    <>
     <div className="space-y-6">
       <div><p className="text-sm font-black uppercase tracking-[0.18em] text-blue-600">Digital Health Ecosystem</p><h1 className="mt-2 text-3xl font-black text-slate-950">Insurance Center</h1></div>
       <HealthEcosystemNav overview={overview} active="insurance" />
       <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <Card title={t("patient.insurance.add")}>
-          <form className="grid gap-4" onSubmit={submit}>
-            <Input label={t("patient.insurance.provider")} value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} required />
-            <Input label={t("patient.insurance.policy")} value={form.policyNumber} onChange={(e) => setForm({ ...form, policyNumber: e.target.value })} required />
-            <Input label={t("patient.insurance.holder")} value={form.policyHolder} onChange={(e) => setForm({ ...form, policyHolder: e.target.value })} required />
-            <Input label="Valid till" type="date" value={form.validTill} onChange={(e) => setForm({ ...form, validTill: e.target.value })} required />
-            <Input label="Coverage amount" type="number" value={form.coverageAmount} onChange={(e) => setForm({ ...form, coverageAmount: e.target.value })} />
+          <form className="grid gap-4" onSubmit={submit} noValidate>
+            <Input label={t("patient.insurance.provider")} name="provider" maxLength={120} error={attempted ? errors.provider : ""} value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} required />
+            <Input label={t("patient.insurance.policy")} name="policyNumber" maxLength={120} error={attempted ? errors.policyNumber : ""} value={form.policyNumber} onChange={(e) => setForm({ ...form, policyNumber: e.target.value })} required />
+            <Input label={t("patient.insurance.holder")} name="policyHolder" maxLength={100} error={attempted ? errors.policyHolder : ""} value={form.policyHolder} onChange={(e) => setForm({ ...form, policyHolder: e.target.value })} required />
+            <Input label="Valid till" name="validTill" type="date" min={new Date().toISOString().slice(0, 10)} error={attempted ? errors.validTill : ""} value={form.validTill} onChange={(e) => setForm({ ...form, validTill: e.target.value })} required />
+            <Input label="Coverage amount" name="coverageAmount" type="number" inputMode="decimal" min={0} step="0.01" error={attempted ? errors.coverageAmount : ""} value={form.coverageAmount} onChange={(e) => setForm({ ...form, coverageAmount: e.target.value })} />
             <div>
               <span className="mb-2 block text-sm font-semibold text-slate-700">Covers</span>
-              <select className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={form.familyMemberId} onChange={(e) => setForm({ ...form, familyMemberId: e.target.value })}>
+              <select aria-label="Covers" className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={form.familyMemberId} onChange={(e) => setForm({ ...form, familyMemberId: e.target.value })}>
                 <option value="">Myself</option>
                 {family.map((member) => <option key={member._id} value={member._id}>{member.name} ({member.relation})</option>)}
               </select>
             </div>
-            <input type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => setForm({ ...form, file: e.target.files[0] })} className="rounded-xl bg-white/70 p-3 text-sm" />
+            <div>
+              {/* key remounts the (uncontrolled) file input after a save: it used to keep showing the old file name while state was empty */}
+              <input key={fileInputKey} aria-label="Policy document (PDF, PNG or JPG, up to 8 MB)" type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => onPickFile(e.target)} className="w-full rounded-xl bg-white/70 p-3 text-sm" />
+              {fileError && <p role="alert" className="mt-1.5 text-sm font-semibold text-rose-600">{fileError}</p>}
+            </div>
             <Button type="submit" isLoading={isSaving}>Save Policy</Button>
           </form>
         </Card>
@@ -150,7 +184,7 @@ function PatientInsurance() {
                   <Card key={policy._id}>
                     <div className="flex items-start justify-between gap-3">
                       <ShieldCheck className="text-blue-600" size={28} />
-                      <button onClick={() => removePolicy(policy)} className="rounded-lg p-2 text-slate-400 hover:text-red-600"><Trash2 size={16} /></button>
+                      <button aria-label="Delete" title="Delete" onClick={() => removePolicy(policy)} className="rounded-lg p-2 text-slate-400 hover:text-red-600"><Trash2 size={16} /></button>
                     </div>
                     <p className="mt-4 text-xl font-black text-slate-950">{policy.provider}</p>
                     <p className="mt-1 text-sm font-semibold text-slate-500">{policy.policyNumber}</p>
@@ -220,10 +254,10 @@ function PatientInsurance() {
 
             <div className="rounded-xl border border-slate-200 bg-white/50 p-4">
               <p className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-500"><FileCheck size={14} /> Submit a claim</p>
-              <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end" onSubmit={submitClaim}>
-                <Input label="Claim amount" type="number" value={claimAmount} onChange={(e) => setClaimAmount(e.target.value)} />
-                <Input label="Notes" value={claimNotes} onChange={(e) => setClaimNotes(e.target.value)} />
-                <Button type="submit" disabled={!claimAmount}>Submit</Button>
+              <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end" onSubmit={submitClaim} noValidate>
+                <Input label="Claim amount" name="claimAmount" type="number" inputMode="decimal" min={0.01} step="0.01" max={detail.utilization.remainingAmount || undefined} error={claimTouched ? claimErrors.claimAmount : ""} value={claimAmount} onChange={(e) => setClaimAmount(e.target.value)} />
+                <Input label="Notes" name="claimNotes" maxLength={300} error={claimTouched ? claimErrors.claimNotes : ""} value={claimNotes} onChange={(e) => setClaimNotes(e.target.value)} />
+                <Button type="submit" isLoading={isClaiming} disabled={!claimAmount}>Submit</Button>
               </form>
             </div>
 
@@ -233,6 +267,8 @@ function PatientInsurance() {
         )}
       </AdminModal>
     </div>
+    {confirmDialog}
+    </>
   );
 }
 

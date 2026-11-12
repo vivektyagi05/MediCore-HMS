@@ -1,25 +1,31 @@
-# Project status
+# Project Status
 
-**Status: Active development.** This is a documentation assessment of the supplied repository snapshot, not a release certification.
+> **Status: rebuilt during the documentation audit from the repository snapshot.** This page separates what the code contains from what has been verified. **Nothing was run** (no tests, lint, build, server or seeder), so there is no claim that the system works, passes tests, or is production-ready. The previous status page (which cited 90/94 backend tests, "no frontend test suite" and P23 as the latest phase) is out of date.
 
-## What this status means
+## Snapshot size (file counts)
+| Area | Count |
+|---|---|
+| Backend controllers / models / route files / service files | 60 / 56 / 52 / 60 |
+| Mounted API registrations (static extraction) | 568 ([API routes](references/api-routes.md)) |
+| Database migrations (numbered) | 13 |
+| Frontend pages (`.jsx`) / components / API client modules | 110 / 124 / 32 |
+| Backend top-level test files / Mongo-backed test files / frontend vitest files | 221 / 5 / 21 |
 
-The repository contains a React/Vite frontend, a Node.js/Express backend, MongoDB/Mongoose persistence, tests, migration scripts, deployment files, and documentation for clinical and financial workflows. Source references can support the existence of components, routes, models, or scripts; they do not prove that complete workflows behave correctly in production.
+Counts are files, not test cases; see the [testing guide](testing/testing-guide.md).
 
-The package manifests use version `1.0.0`, but the supplied documentation does not establish a maintained release/tagging process. Do not interpret that package version as a release maturity statement.
+## Implemented (code present, not runtime-verified)
+All areas in the [feature matrix](FEATURES.md): public discovery and CMS, auth with email verification, appointment booking and payment, wallet, refunds, invoices, doctor and patient workspaces, extensive admin tooling, Socket.IO realtime, AI assistance (Gemini or template provider), master data (LGD import), privacy/consent, multi-language UI. Operational structure: separate **release**, **web** and **worker** roles with an in-process scheduler using lease/fencing locks ([scheduler](SCHEDULER-ARCHITECTURE.md), [deployment](deployment/deployment-guide.md)). A dedicated load-test dataset tool exists ([load testing](testing/load-testing.md)); it is separate from the bootstrap `backend/seed.js`.
 
-## Test-result conflicts
+## Partially implemented / limited
+- Insurance (UI and model present; depth not audited).
+- Realtime and rate limiting are single-instance designs ([R-01](REMAINING_RISKS.md)).
+- No load-test *runner* exists; only the dataset generator.
 
-Historical documents disagree about test results. Some status/risk documents record **90 passed / 4 failed**, while other phase/progress documents report **185/185** and **190/190**. These counts have not been reconciled to a single exact commit and environment in this documentation-only pass.
+## Remaining
+See [Remaining risks](REMAINING_RISKS.md): AI free-text privacy, incomplete `.env.example`, frontend tests outside CI, unexplained wheel files, live-integration verification.
 
-**Current test result: Unverified.** No tests were run for this documentation task. Do not present any of the historical counts as the current result without a new run against the exact commit being released.
+## Unverified in this audit
+Test, lint and build outcomes; CI history; Razorpay, Brevo, Gemini and storage behaviour; any deployment; the data-volume totals in the load-test plan; dependency advisories.
 
-## Production and integration status
-
-Production readiness is **not verified** by this review. Live MongoDB behavior, real Razorpay sandbox flows, browser-level workflows, deployed service health, persistence across redeploys, and CI execution require environment-specific evidence.
-
-The repository includes deployment and financial integration configuration. Its presence does not establish that credentials are configured, external services are available, or end-to-end workflows have succeeded.
-
-## Source of truth
-
-Use this page for current status language, [Remaining Risks](REMAINING_RISKS.md) for open verification gaps, and the [Documentation Audit Report](audits/DOCUMENTATION_AUDIT_REPORT.md) for the file-level documentation decisions. Historical records remain under `history/` and should retain their original dates and claims.
+## Historical achievements
+Phase-by-phase records are preserved, unrewritten, under [history](history/) (changelogs, phase reports, engineering reports) and [audits](audits/historical-audits/). Their completion claims describe the state at their dates and are not evidence of the current state.

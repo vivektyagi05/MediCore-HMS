@@ -11,9 +11,11 @@ import Loader from "../../components/ui/Loader";
 import EmptyState from "../../components/shared/EmptyState";
 import { useToast } from "../../context/ToastContext";
 
+import { useConfirm } from "../../hooks/useConfirm";
 const emptyForm = { slug: "", title: "", content: "", bannerImage: "", isPublished: false };
 
 function AdminCMS() {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -87,7 +89,7 @@ function AdminCMS() {
   };
 
   const removePage = async (page) => {
-    if (!window.confirm(`Delete "${page.title}"? This cannot be undone.`)) return;
+    if (!(await confirm({ title: "Delete this page?", description: `"${page.title}" will be permanently deleted. This cannot be undone.`, confirmLabel: "Delete page" }))) return;
     try {
       await adminApi.deleteCMSPage(page._id);
       toast.success("Page deleted successfully");
@@ -98,6 +100,7 @@ function AdminCMS() {
   };
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -118,7 +121,7 @@ function AdminCMS() {
             onKeyDown={(e) => e.key === "Enter" && loadPages()}
             className="max-w-sm"
           />
-          <select
+          <select aria-label="Status Filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -188,7 +191,7 @@ function AdminCMS() {
           />
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Content</label>
-            <textarea
+            <textarea aria-label="Content"
               className="w-full rounded-xl border border-slate-200 p-3 text-sm"
               rows={6}
               value={form.content}
@@ -219,6 +222,8 @@ function AdminCMS() {
         </div>
       </Modal>
     </div>
+    {confirmDialog}
+    </>
   );
 }
 

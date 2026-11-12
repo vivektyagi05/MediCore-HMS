@@ -13,6 +13,8 @@ import { useToast } from "../../context/ToastContext";
 function validateForm(form, t) {
   const errors = {};
   if (form.newPassword.length < 8) errors.newPassword = t("p15.resetPassword.passwordShort");
+  else if (form.newPassword.length > 128) errors.newPassword = "Password must be at most 128 characters";
+  else if (!/\S/.test(form.newPassword)) errors.newPassword = "Password cannot be only spaces";
   if (form.confirmPassword !== form.newPassword) errors.confirmPassword = t("p15.resetPassword.passwordMismatch");
   return errors;
 }
@@ -102,6 +104,7 @@ function ResetPassword() {
                   label={t("p15.resetPassword.newPasswordLabel")}
                   name="newPassword"
                   type={showPassword ? "text" : "password"}
+                  maxLength={128}
                   autoComplete="new-password"
                   placeholder={t("p15.resetPassword.newPasswordPlaceholder")}
                   value={form.newPassword}
@@ -120,6 +123,7 @@ function ResetPassword() {
                   label={t("p15.resetPassword.confirmPasswordLabel")}
                   name="confirmPassword"
                   type={showConfirmPassword ? "text" : "password"}
+                  maxLength={128}
                   autoComplete="new-password"
                   placeholder={t("p15.resetPassword.confirmPasswordPlaceholder")}
                   value={form.confirmPassword}

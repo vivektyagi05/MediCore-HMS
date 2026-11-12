@@ -642,7 +642,7 @@ function SlaView({ sla, slaInput, setSlaInput, onSetSla, busy }) {
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <label className="text-xs font-bold uppercase text-slate-400">Target duration (ms)</label>
-            <input
+            <input aria-label="SLA target minutes"
               type="number"
               value={slaInput}
               onChange={(e) => setSlaInput(e.target.value)}
@@ -688,9 +688,9 @@ function VersionsView({ versionIntel, compareVersions, setCompareVersions, compa
       </Card>
       <Card title="Compare Two Versions">
         <div className="flex flex-wrap items-end gap-3">
-          <input type="number" placeholder="Version A" value={compareVersions.a} onChange={(e) => setCompareVersions({ ...compareVersions, a: e.target.value })} className="w-32 rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold" />
+          <input aria-label="Version A" type="number" placeholder="Version A" value={compareVersions.a} onChange={(e) => setCompareVersions({ ...compareVersions, a: e.target.value })} className="w-32 rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold" />
           <GitCompare size={16} className="text-slate-400" />
-          <input type="number" placeholder="Version B" value={compareVersions.b} onChange={(e) => setCompareVersions({ ...compareVersions, b: e.target.value })} className="w-32 rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold" />
+          <input aria-label="Version B" type="number" placeholder="Version B" value={compareVersions.b} onChange={(e) => setCompareVersions({ ...compareVersions, b: e.target.value })} className="w-32 rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold" />
           <Button onClick={onCompare} isLoading={busy}>Compare</Button>
         </div>
         {compareResult && (
@@ -749,7 +749,7 @@ function OptimizationTab({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <select aria-label="Status Filter"
             className="rounded-control border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -759,7 +759,7 @@ function OptimizationTab({
               <option key={s} value={s}>{s.replace("_", " ")}</option>
             ))}
           </select>
-          <select
+          <select aria-label="Severity Filter"
             className="rounded-control border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600"
             value={severityFilter}
             onChange={(e) => setSeverityFilter(e.target.value)}

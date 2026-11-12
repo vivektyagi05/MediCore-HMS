@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # PHASE P23 — Payment + Refund 3.0
 
 Status: **BLOCKED (partial close)** — the highest-severity financial-correctness
@@ -228,4 +230,4 @@ re-verified with identical results.
   `backend/models/Payment.js`, `backend/models/RefundRequest.js`,
   `backend/models/DoctorPayout.js`,
   `backend/routes/refundRoutes.js`, `backend/routes/paymentRoutes.js`,
-  `docs/CHANGELOG-PHASE-P23-PAYMENT-REFUND-3.0.md` (this file, rewritten)
+  `docs/history/changelogs/CHANGELOG-PHASE-P23-PAYMENT-REFUND-3.0.md` (this file, rewritten)

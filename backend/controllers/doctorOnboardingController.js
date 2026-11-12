@@ -11,6 +11,7 @@ import User from "../models/User.js";
 import { applyDoctorMasterData, resolveDoctorMasterData } from "../services/masterDataService.js";
 import { canTransitionDoctorVerification, onboardingStatusForUser } from "../services/doctorLifecycleService.js";
 
+import { validateDoctorNumbers } from "../utils/doctorNumbersValidation.js";
 // SECURITY BUGFIX: both submitOnboarding and updateOnboarding used
 // `Object.assign(doctor, req.body)` with NO field whitelist — a classic mass
 // assignment vulnerability. Since Doctor's schema includes verificationStatus,
@@ -150,6 +151,8 @@ export const submitOnboarding = asyncHandler(async (req, res) => {
 
   const submittedAt = new Date();
   const updates = pickOnboardingFields(req.body);
+  const numberErrors = validateDoctorNumbers(updates);
+  if (Object.keys(numberErrors).length) throw new AppError(Object.values(numberErrors)[0], 400, { code: "DOCTOR_NUMBERS_INVALID", fieldErrors: numberErrors });
   const masterData = await resolveDoctorMasterData(updates, { allowLegacyOther: true });
   Object.assign(doctor, updates);
   applyDoctorMasterData(doctor, masterData);
@@ -271,6 +274,8 @@ export const updateOnboarding = asyncHandler(async (req, res) => {
   }
 
   const updates = pickOnboardingFields(req.body);
+  const numberErrors = validateDoctorNumbers(updates);
+  if (Object.keys(numberErrors).length) throw new AppError(Object.values(numberErrors)[0], 400, { code: "DOCTOR_NUMBERS_INVALID", fieldErrors: numberErrors });
   const wasApproved = doctor.verificationStatus === "approved";
   const masterPayload = {
     ...{

@@ -105,7 +105,7 @@ function PrescriptionEditor({
                   <Star size={16} />
                 </Button>
               )}
-              <Button type="button" variant="secondary" onClick={() => setForm({ ...form, medicines: form.medicines.filter((_, i) => i !== index) })}><Trash2 size={16} /></Button>
+              <Button aria-label="Delete" title="Delete" type="button" variant="secondary" onClick={() => setForm({ ...form, medicines: form.medicines.filter((_, i) => i !== index) })}><Trash2 size={16} /></Button>
             </div>
           </div>
         ))}

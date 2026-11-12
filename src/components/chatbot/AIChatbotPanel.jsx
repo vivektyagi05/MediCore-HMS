@@ -58,7 +58,7 @@ function AIChatbotPanel() {
             }}
             placeholder="Ask about bookings, invoices, records..."
           />
-          <Button className="h-12 w-12 px-0" onClick={send} isLoading={isLoading}>
+          <Button aria-label="Send" title="Send" className="h-12 w-12 px-0" onClick={send} isLoading={isLoading}>
             <Send size={17} />
           </Button>
         </div>

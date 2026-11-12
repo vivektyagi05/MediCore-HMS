@@ -467,7 +467,7 @@ function DoctorClinicalWorkspace() {
                             <CheckCircle2 size={14} /> Mark Reviewed
                           </Button>
                         )}
-                        <Button
+                        <Button aria-label="Download" title="Download"
                           variant="secondary"
                           onClick={async () => {
                             const blob = await doctorWorkflowApi.downloadPatientReport(patientId, report._id);
@@ -578,7 +578,7 @@ function DoctorClinicalWorkspace() {
             {/* CENTER — Consultation, the PRIMARY work area. */}
             <div className="space-y-6">
               <Card title="Current Consultation">
-                <select
+                <select aria-label="Active consultation"
                   className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm"
                   value={activeConsultationId}
                   onChange={(e) => setNoteAppointment(e.target.value)}
@@ -605,8 +605,8 @@ function DoctorClinicalWorkspace() {
               <Card title="SOAP / Medical Note">
                 <form className="grid gap-4" onSubmit={saveNote}>
                   <Input label="Symptoms" placeholder="fever, cough" value={noteForm.symptoms} onChange={(e) => setNoteForm({ ...noteForm, symptoms: e.target.value })} />
-                  <textarea className="min-h-28 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Clinical notes" value={noteForm.notes} onChange={(e) => setNoteForm({ ...noteForm, notes: e.target.value })} />
-                  <textarea className="min-h-20 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Recommendations" value={noteForm.recommendations} onChange={(e) => setNoteForm({ ...noteForm, recommendations: e.target.value })} />
+                  <textarea aria-label="Clinical notes" className="min-h-28 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Clinical notes" value={noteForm.notes} onChange={(e) => setNoteForm({ ...noteForm, notes: e.target.value })} />
+                  <textarea aria-label="Recommendations" className="min-h-20 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Recommendations" value={noteForm.recommendations} onChange={(e) => setNoteForm({ ...noteForm, recommendations: e.target.value })} />
                   <Button type="submit" isLoading={isSaving} disabled={!noteForm.appointmentId}>Save Note</Button>
                 </form>
                 {noteForm.appointmentId && (
@@ -725,7 +725,7 @@ function DoctorClinicalWorkspace() {
                     { key: "patientId", header: "Patient", render: (row) => row.patientId?.name },
                     { key: "diagnosis", header: "Diagnosis" },
                     { key: "createdAt", header: "Date", render: (row) => new Date(row.createdAt).toLocaleDateString() },
-                    { key: "actions", header: "PDF", render: (row) => <Button variant="secondary" onClick={() => downloadRx(row._id)}><Download size={16} /></Button> },
+                    { key: "actions", header: "PDF", render: (row) => <Button aria-label="Download" title="Download" variant="secondary" onClick={() => downloadRx(row._id)}><Download size={16} /></Button> },
                   ]}
                   data={prescriptions}
                 />

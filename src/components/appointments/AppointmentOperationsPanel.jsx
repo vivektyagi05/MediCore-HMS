@@ -8,6 +8,7 @@ import { useAppointmentSync } from "../../hooks/useAppointmentSync";
 import { useToast } from "../../context/ToastContext";
 import Button from "../ui/Button";
 
+import { useConfirm } from "../../hooks/useConfirm";
 const REASON_TEXT = {
   CHECKIN_NOT_OPEN: "Check-in opens shortly before your appointment.",
   PAYMENT_REQUIRED: "Complete payment to enable check-in.",
@@ -19,6 +20,7 @@ const REASON_TEXT = {
  * Stays correct across reconnects (refetches) and shows an honest offline banner.
  */
 export default function AppointmentOperationsPanel({ appointmentId, onChanged, onActionsLoaded }) {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +57,7 @@ export default function AppointmentOperationsPanel({ appointmentId, onChanged, o
   const reportDoctor = a.report_doctor_no_show;
 
   return (
+    <>
     <section aria-label="Appointment status" className="space-y-3">
       {!isLive && (
         <div role="status" className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
@@ -69,8 +72,10 @@ export default function AppointmentOperationsPanel({ appointmentId, onChanged, o
       <div className="flex flex-wrap gap-2">
         {checkIn?.allowed && <Button disabled={busy === "checkin"} onClick={() => run("checkin", () => appointmentApi.checkIn(appointmentId), "You're checked in")}><LogIn size={15} />Check in</Button>}
         {!checkIn?.allowed && state.status === "payment_completed" && REASON_TEXT[checkIn?.code] && <p className="text-xs text-slate-500">{REASON_TEXT[checkIn.code]}</p>}
-        {reportDoctor?.allowed && <Button variant="secondary" className="border-red-300 text-red-600" disabled={busy === "docnoshow"} onClick={() => { if (window.confirm("Report that the doctor did not start your consultation? A refund request will be raised.")) run("docnoshow", () => appointmentApi.reportDoctorNoShow(appointmentId), "Reported. A refund request was raised."); }}>Doctor hasn't started</Button>}
+        {reportDoctor?.allowed && <Button variant="secondary" className="border-red-300 text-red-600" disabled={busy === "docnoshow"} onClick={async () => { if (await confirm({ title: "Report that the doctor did not start?", description: "A refund request will be raised for this consultation and reviewed by an administrator.", confirmLabel: "Report", tone: "danger" })) run("docnoshow", () => appointmentApi.reportDoctorNoShow(appointmentId), "Reported. A refund request was raised."); }}>Doctor hasn't started</Button>}
       </div>
     </section>
+    {confirmDialog}
+    </>
   );
 }

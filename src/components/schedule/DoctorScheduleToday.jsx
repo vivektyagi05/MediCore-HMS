@@ -185,7 +185,7 @@ function DoctorScheduleToday({ initialDate } = {}) {
               <ChevronRight size={16} />
             </Button>
           </div>
-          <input
+          <input aria-label="Select date"
             type="date"
             value={dateValue}
             onChange={(e) => setDateValue(e.target.value)}

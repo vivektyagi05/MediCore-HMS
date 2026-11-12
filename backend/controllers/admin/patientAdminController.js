@@ -27,6 +27,13 @@ import { ROLES } from "../../constants/roles.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { userHasPermission } from "../../middleware/adminMiddleware.js";
+import { queryNumber, queryString } from "../../utils/queryParams.js";
+import {
+  buildAttentionPatientCountPipeline,
+  buildUpcomingPatientCountPipeline,
+  countFrom,
+} from "../../services/patientAdminStatsPipelines.js";
+import { writeAdminLogSafe } from "../../utils/adminAudit.js";
 import { downloadFile } from "../../utils/fileDownload.js";
 import { sendStoredPdf } from "../../services/pdfDocumentStore.js";
 import {
@@ -43,6 +50,19 @@ const getPagination = (query) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
   return { page, limit, skip: (page - 1) * limit };
+};
+
+// A-14: every list parameter is read through queryString()/queryNumber(), so a repeated key (?search=a&search=b) is a
+// 400 instead of a TypeError, and ageMin/ageMax can no longer be NaN.
+const PATIENT_QUERY_KEYS = [
+  "status", "gender", "search", "registeredFrom", "registeredTo", "sort",
+  "hasUpcoming", "hasInsurance", "hasOutstanding", "hasFamily", "attention",
+];
+const normalizePatientQuery = (raw) => {
+  const query = Object.fromEntries(PATIENT_QUERY_KEYS.map((key) => [key, queryString(raw, key)]));
+  query.ageMin = queryNumber(raw, "ageMin", { min: 0, max: 150 });
+  query.ageMax = queryNumber(raw, "ageMax", { min: 0, max: 150 });
+  return query;
 };
 
 // Real, DB-level attention/insurance/outstanding/upcoming filters — resolved
@@ -162,26 +182,29 @@ const buildBaseFilter = (query) => {
 
 export const listPatientsAdmin = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filter = buildBaseFilter(req.query);
-  const advancedIds = await resolveAdvancedIdFilters(req.query);
+  const query = normalizePatientQuery(req.query);
+  const filter = buildBaseFilter(query);
+  const advancedIds = await resolveAdvancedIdFilters(query);
 
   if (advancedIds !== null) {
     filter._id = { $in: Array.from(advancedIds).map((id) => new mongoose.Types.ObjectId(id)) };
   }
 
+  // A-08: `_id` tiebreaker (same direction) so skip/limit paging cannot repeat or drop patients that tie on name/createdAt.
   const sortMap = {
-    name: { name: 1 },
-    newest: { createdAt: -1 },
-    oldest: { createdAt: 1 },
+    name: { name: 1, _id: 1 },
+    newest: { createdAt: -1, _id: -1 },
+    oldest: { createdAt: 1, _id: 1 },
   };
-  const sort = sortMap[req.query.sort] || sortMap.newest;
+  const sort = (Object.prototype.hasOwnProperty.call(sortMap, query.sort) && sortMap[query.sort]) || sortMap.newest;
 
   const [patients, total] = await Promise.all([
     User.find(filter).select("-password").sort(sort).skip(skip).limit(limit).lean(),
     User.countDocuments(filter),
   ]);
 
-  const aggregates = await buildPatientAggregates(patients.map((p) => p._id));
+  // The list only needs counts/dates, never the doctor's name, so the doctor -> user populate is skipped here.
+  const aggregates = await buildPatientAggregates(patients.map((p) => p._id), { includeDoctorNames: false });
   const canViewFinance = await userHasPermission(req.user, "manage_payments");
 
   const enriched = patients.map((patient) => {
@@ -242,20 +265,22 @@ export const getPatientStatsAdmin = asyncHandler(async (req, res) => {
     totalPatients,
     activePatients,
     newThisMonth,
-    upcomingIds,
-    attentionSetRaw,
+    upcomingRows,
+    attentionRows,
     missingCriticalInfo,
   ] = await Promise.all([
     User.countDocuments({ role: ROLES.PATIENT }),
     User.countDocuments({ role: ROLES.PATIENT, isActive: true }),
     User.countDocuments({ role: ROLES.PATIENT, createdAt: { $gte: startOfMonth } }),
-    Appointment.find({ date: { $gt: now }, status: { $ne: "cancelled" } }).distinct("patientId"),
-    Promise.all([
-      Payment.find({ status: "failed" }).distinct("userId"),
-      MedicalReport.find({ severity: { $ne: "normal" }, reviewedAt: null }).distinct("userId"),
-      Insurance.find({ validTill: { $lte: new Date(now.getTime() + 30 * ONE_DAY_MS) } }).distinct("userId"),
-      Payment.find({ status: { $in: OPEN_PAYMENT_STATUSES } }).distinct("userId"),
-    ]),
+    // S8: distinct counts are computed by MongoDB; no id lists are transferred to Node.
+    Appointment.aggregate(buildUpcomingPatientCountPipeline(now)),
+    Payment.aggregate(
+      buildAttentionPatientCountPipeline(now, {
+        medicalReportCollection: MedicalReport.collection.name,
+        insuranceCollection: Insurance.collection.name,
+        paymentCollection: Payment.collection.name,
+      }),
+    ),
     User.countDocuments({
       role: ROLES.PATIENT,
       $or: [
@@ -265,8 +290,6 @@ export const getPatientStatsAdmin = asyncHandler(async (req, res) => {
       ],
     }),
   ]);
-
-  const attentionSet = new Set(attentionSetRaw.flat().map((id) => id.toString()));
 
   let outstandingBalanceTotal = null;
   if (canViewFinance) {
@@ -284,8 +307,8 @@ export const getPatientStatsAdmin = asyncHandler(async (req, res) => {
       activePatients,
       inactivePatients: totalPatients - activePatients,
       newPatientsThisMonth: newThisMonth,
-      patientsWithUpcomingAppointment: upcomingIds.length,
-      patientsNeedingAttention: attentionSet.size,
+      patientsWithUpcomingAppointment: countFrom(upcomingRows),
+      patientsNeedingAttention: countFrom(attentionRows),
       patientsWithMissingInfo: missingCriticalInfo,
       outstandingBalanceTotal,
       canViewFinance,
@@ -404,6 +427,15 @@ export const getPatientWorkspaceAdmin = asyncHandler(async (req, res) => {
   });
   timeline.sort((a, b) => new Date(b.at) - new Date(a.at));
 
+  // A-11: record that this admin opened this patient's clinical workspace (ids only, never any clinical content).
+  await writeAdminLogSafe({
+    req,
+    action: "patient.phi_view",
+    resourceType: "Patient",
+    resourceId: patient._id,
+    metadata: { canViewFinance },
+  });
+
   res.status(200).json({
     success: true,
     data: {
@@ -437,6 +469,8 @@ export const getPatientWorkspaceAdmin = asyncHandler(async (req, res) => {
 export const downloadPatientReportAdmin = asyncHandler(async (req, res) => {
   const report = await MedicalReport.findById(req.params.reportId).lean();
   if (!report) throw new AppError("Report not found", 404);
+  // A-11: access record (ids only: no file name/title, which can itself be sensitive). Best-effort, never blocks the download.
+  await writeAdminLogSafe({ req, action: "patient.report_download", resourceType: "MedicalReport", resourceId: report._id, metadata: { patientId: report.userId } });
   downloadFile(res, report.filePath, report.fileName);
 });
 
@@ -444,5 +478,6 @@ export const downloadPatientPrescriptionAdmin = asyncHandler(async (req, res) =>
   const prescription = await Prescription.findById(req.params.prescriptionId).lean();
   if (!prescription) throw new AppError("Prescription not found", 404);
   if (!prescription.pdfStorageKey && !prescription.pdfPath) throw new AppError("No PDF is on file for this prescription", 404);
+  await writeAdminLogSafe({ req, action: "patient.prescription_download", resourceType: "Prescription", resourceId: prescription._id, metadata: { patientId: prescription.patientId } });
   await sendStoredPdf(res, { storageKey: prescription.pdfStorageKey, legacyPath: prescription.pdfPath, legacyCategory: "prescriptions", fileName: `prescription-${prescription._id}.pdf`, notFoundMessage: "No PDF is on file for this prescription" });
 });

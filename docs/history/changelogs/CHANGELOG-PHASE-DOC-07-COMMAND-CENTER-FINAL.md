@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # DOC-07 Final Pass — Command Center Redesign, Consistency Audit, Responsive Pass
 
 ## What changed this session (on top of the previously-verified interim pass)

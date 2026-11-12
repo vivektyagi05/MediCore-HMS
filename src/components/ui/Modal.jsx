@@ -4,9 +4,17 @@ import Button from "./Button";
 
 const SIZE_CLASSES = { md: "max-w-lg", lg: "max-w-3xl", xl: "max-w-5xl" };
 
+const FOCUSABLE = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+
 function Modal({ isOpen, title, children, onClose, size = "md" }) {
   const dialogRef = useRef(null);
   const previousFocus = useRef(null);
+  // Callers almost always pass an inline `onClose`, which is a NEW function on every render. If the effect below
+  // depended on it, every keystroke in a modal form (state change -> re-render) would tear the effect down and re-run
+  // it: focus jumped to the close button and the typed field lost focus after ONE character. Keep the latest handler in
+  // a ref and key the effect on `isOpen` only.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -14,14 +22,18 @@ function Modal({ isOpen, title, children, onClose, size = "md" }) {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const dialog = dialogRef.current;
-    const focusable = dialog?.querySelectorAll("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])");
-    focusable?.[0]?.focus();
+    // Focus once, on open: prefer the first form field over the close button.
+    const first = dialog?.querySelector("[data-autofocus], input:not([disabled]), textarea:not([disabled]), select:not([disabled])") || dialog?.querySelector(FOCUSABLE);
+    first?.focus();
     const onKeyDown = (event) => {
-      if (event.key === "Escape") { event.preventDefault(); onClose?.(); return; }
-      if (event.key !== "Tab" || !focusable?.length) return;
-      const first = focusable[0]; const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      if (event.key === "Escape") { event.preventDefault(); onCloseRef.current?.(); return; }
+      if (event.key !== "Tab") return;
+      // Query at event time: content changes while the modal is open (errors, loaded data, enabled buttons).
+      const focusable = dialogRef.current?.querySelectorAll(FOCUSABLE);
+      if (!focusable?.length) return;
+      const firstEl = focusable[0]; const lastEl = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === firstEl) { event.preventDefault(); lastEl.focus(); }
+      else if (!event.shiftKey && document.activeElement === lastEl) { event.preventDefault(); firstEl.focus(); }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -29,7 +41,7 @@ function Modal({ isOpen, title, children, onClose, size = "md" }) {
       document.removeEventListener("keydown", onKeyDown);
       previousFocus.current?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
   const sizeClass = SIZE_CLASSES[size] || SIZE_CLASSES.md;

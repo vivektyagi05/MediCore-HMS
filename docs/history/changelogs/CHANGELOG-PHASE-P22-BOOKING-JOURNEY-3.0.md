@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # Phase P22 — End-to-End Booking Experience 3.0
 
 ## Scope

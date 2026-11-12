@@ -138,7 +138,7 @@ function AIClinicalCopilotDrawer({ isOpen, onClose, patientId, patientName }) {
           }}
         >
           <Input placeholder="Ask about this patient..." value={question} onChange={(e) => setQuestion(e.target.value)} />
-          <Button type="submit" isLoading={isLoading} disabled={!question.trim()}>
+          <Button aria-label="Send" title="Send" type="submit" isLoading={isLoading} disabled={!question.trim()}>
             <Send size={14} />
           </Button>
         </form>

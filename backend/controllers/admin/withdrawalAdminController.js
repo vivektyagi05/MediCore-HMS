@@ -10,6 +10,7 @@ import { computeDoctorWithdrawableBalance, claimBalance, releaseBalance, postWit
 import { toPaise } from "../../payments/money.js";
 import { clampPagination, buildPaginationMeta } from "../../utils/paginationValidation.js";
 import { writeAdminLog } from "../../utils/adminAudit.js";
+import { logger } from "../../utils/logger.js";
 
 // Admin withdrawal workspace list (Section 28). No arbitrary status
 // dropdown is exposed by this endpoint's shape — the frontend renders
@@ -143,24 +144,30 @@ const applyTransition = async ({ req, res, to, reasonFallback }) => {
     await postWithdrawalLedger({ withdrawal, type: "withdrawal_settlement", direction: "debit", amount: withdrawal.processedAmount, key: "settle" });
   }
 
-  {
-    const doctorForSync = await Doctor.findById(withdrawal.doctorId).select("userId").lean();
-    financeEmitter.invalidate({ userIds: [doctorForSync?.userId], domain: "withdrawal", entityId: withdrawal._id });
-  }
-  if (to === WITHDRAWAL_STATUS.MANUAL_COMPLETED || to === WITHDRAWAL_STATUS.FAILED) {
+  // The transition is committed. Audit first, so a failure in any best-effort
+  // notification below can neither drop the audit row nor turn a committed
+  // state change into a 500 the admin would retry.
+  // writeAdminLog's contract is { req, action, resourceType, resourceId, severity, metadata }.
+  // The previous call passed { actorId, entityType, entityId, details } and no req, which throws
+  // inside writeAdminLog; the old `.catch(() => {})` hid that, so no withdrawal action was ever audited.
+  await writeAdminLog({
+    req,
+    action: `withdrawal.${to}`,
+    resourceType: "Withdrawal",
+    resourceId: String(withdrawal._id),
+    severity: to === WITHDRAWAL_STATUS.MANUAL_COMPLETED || to === WITHDRAWAL_STATUS.FAILED ? "warning" : "info",
+    metadata: { from, to, reason, settlementReference: setFields.settlementReference, doctorId: String(withdrawal.doctorId) },
+  }).catch((error) => logger.warn("withdrawal admin audit write failed", { message: error?.message, withdrawalId: String(withdrawal._id) }));
+
+  try {
     const doctor = await Doctor.findById(withdrawal.doctorId).populate("userId", "name email").lean();
     const user = doctor?.userId;
+    financeEmitter.invalidate({ userIds: [user?._id], domain: "withdrawal", entityId: withdrawal._id });
     if (to === WITHDRAWAL_STATUS.MANUAL_COMPLETED) await financialEmails.withdrawalManuallySettled({ withdrawal, user });
-    else await financialEmails.withdrawalFailed({ withdrawal, user });
+    else if (to === WITHDRAWAL_STATUS.FAILED) await financialEmails.withdrawalFailed({ withdrawal, user });
+  } catch (error) {
+    logger.warn("withdrawal post-commit notification failed", { message: error?.message, withdrawalId: String(withdrawal._id) });
   }
-
-  await writeAdminLog({
-    actorId: req.user._id,
-    action: `withdrawal:${to}`,
-    entityType: "withdrawal",
-    entityId: withdrawal._id,
-    details: { to, reason, settlementReference: setFields.settlementReference },
-  }).catch(() => {});
 
   res.status(200).json({ success: true, data: { withdrawal }, message: `Withdrawal moved to ${to}` });
 };

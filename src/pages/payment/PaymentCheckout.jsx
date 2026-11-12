@@ -18,6 +18,7 @@ import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
 import { classifyVerifyFailure, deriveCheckoutView, pollAuthoritativeStatus } from "./paymentConfirmation";
 
+import { parseMoney } from "../../utils/moneyInput";
 const loadRazorpayScript = () =>
   new Promise((resolve) => {
     if (window.Razorpay) {
@@ -189,8 +190,13 @@ function PaymentCheckout() {
     }
   };
 
+  // Wallet portion: optional, never more than the available balance, plain money (the server re-checks and reserves it).
+  const walletAvailable = Number(wallet?.availableBalance ?? wallet?.balance ?? 0) || 0;
+  const walletParsed = parseMoney(walletAmount, { min: 0, max: walletAvailable, label: "Wallet amount", allowEmpty: true });
+
   const prepareOrder = async () => {
     if (isPreparing) return; // never start a second chargeable order while a request is active
+    if (walletParsed.error) { setError(walletParsed.error); return; }
     setIsPreparing(true);
     setError("");
 
@@ -198,7 +204,7 @@ function PaymentCheckout() {
       const response = await paymentApi.createOrder({
         appointmentId,
         couponCode: couponCode || undefined,
-        walletAmount: Number(walletAmount) || 0,
+        walletAmount: walletParsed.value ?? 0,
         idempotencyKey: getIdempotencyKey(appointmentId),
       });
       setPayment(response.data.payment);
@@ -488,9 +494,14 @@ function PaymentCheckout() {
                   </div>
                   <Input
                     className="mt-4"
+                    name="wallet-amount"
                     min="0"
+                    max={walletAvailable}
+                    step="0.01"
+                    inputMode="decimal"
                     type="number"
                     placeholder="0"
+                    error={walletParsed.error}
                     value={walletAmount}
                     onChange={(event) => {
                       setWalletAmount(event.target.value);
@@ -499,7 +510,7 @@ function PaymentCheckout() {
                     }}
                   />
                 </div>
-                <Button className="w-full" onClick={prepareOrder} isLoading={isPreparing}>
+                <Button className="w-full" onClick={prepareOrder} isLoading={isPreparing} disabled={Boolean(walletParsed.error)}>
                   Prepare Secure Order
                 </Button>
               </div>

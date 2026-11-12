@@ -3,10 +3,11 @@
 // documents. Run:  MONGODB_TEST_URI=mongodb://localhost:27017/hms_fin_test npm run test:mongo
 import assert from "assert";
 import mongoose from "mongoose";
+import { getDisposableMongoTestUri } from "./safety.mjs";
 
-const uri = process.env.MONGODB_TEST_URI;
+const uri = getDisposableMongoTestUri();
 if (!uri) {
-  console.log("SKIP: set MONGODB_TEST_URI to run real-Mongo concurrency tests");
+  console.log("SKIP: set MONGODB_TEST_URI to a verified disposable *_test database to run real-Mongo tests");
   process.exit(0);
 }
 process.env.MONGO_URI ||= uri;
@@ -22,7 +23,7 @@ const { default: Subscription } = await import("../../models/Subscription.js");
 const { couponService } = await import("../../payments/couponService.js");
 const { paymentRetryService } = await import("../../payments/paymentRetryService.js");
 const { subscriptionService } = await import("../../payments/subscriptionService.js");
-await Promise.all([Coupon.init(), Invoice.init(), Subscription.init()]);
+await Promise.all([Coupon.init(), Payment.init(), Invoice.init(), Subscription.init()]);
 
 const oid = () => new mongoose.Types.ObjectId();
 const results = [];
@@ -45,7 +46,18 @@ await check("F-005 coupon: same payment claimed twice is idempotent; release twi
 });
 
 await check("F-006 retry: 10 concurrent claimRetry on one failed payment -> exactly one winner", async () => {
-  const payment = await Payment.create({ appointmentId: oid(), userId: oid(), doctorId: oid(), amount: 100, totalAmount: 100, currency: "INR", razorpayOrderId: `order_test_${oid()}`,status: "failed", paymentState: "failed", idempotencyKey: `k${Date.now()}` });
+  const payment = await Payment.create({
+    appointmentId: oid(),
+    userId: oid(),
+    doctorId: oid(),
+    amount: 100,
+    totalAmount: 100,
+    currency: "INR",
+    status: "failed",
+    paymentState: "failed",
+    razorpayOrderId: `order_retry_${oid().toHexString()}`,
+    idempotencyKey: `k${Date.now()}`,
+  });
   const claims = await Promise.all(Array.from({ length: 10 }, () => paymentRetryService.claimRetry(payment._id)));
   assert.strictEqual(claims.filter(Boolean).length, 1);
 });

@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # CHANGELOG — Phase A5.2: Platform Health Center + Smart Widgets Platform
 
 Builds directly on Phase A5.1 (Executive Dashboard + Mission Control). No

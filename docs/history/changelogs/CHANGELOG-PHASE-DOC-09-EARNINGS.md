@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # PHASE DOC-09 — Doctor Earnings / Financial Control Center
 
 ## 1. Real problem
@@ -156,7 +158,7 @@ Revenue Insights prompt template) via source grep before changing anything.
 - `backend/tests/doctorFinanceHelpers.test.mjs` (new)
 - `src/pages/doctor/DoctorEarnings.jsx` (rewritten)
 - `src/api/doctorApi.js`
-- `docs/CHANGELOG-PHASE-DOC-09-EARNINGS.md` (new, this file)
+- `docs/history/changelogs/CHANGELOG-PHASE-DOC-09-EARNINGS.md` (new, this file)
 
 ## 8. Not implemented + why
 - **Full week/day-bucketed custom range charting** — the new Financial

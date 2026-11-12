@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # Phase A6.2.2 — Smart Assignment Engine (Enterprise AI Workload Intelligence)
 
 Scoped core slice of a much larger 18-step brief, following the same

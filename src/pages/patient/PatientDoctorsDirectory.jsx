@@ -260,11 +260,11 @@ export default function PatientDoctorsDirectory() {
         <div className="mb-6 flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder={t("doctorSearch.searchPlaceholder")}
+            <input aria-label="Search by doctor name" type="text" placeholder={t("doctorSearch.searchPlaceholder")}
               value={nameSearch} onChange={(e) => handleNameChange(e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-9 pr-9 text-sm font-medium text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10" />
             {nameSearch && (
-              <button onClick={() => handleNameChange("")}
+              <button aria-label="Close" title="Close" onClick={() => handleNameChange("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
                 <X size={15} />
               </button>
@@ -285,7 +285,7 @@ export default function PatientDoctorsDirectory() {
             </button>
 
             <div className="relative">
-              <select value={sort} onChange={(e) => updateParam("sort", e.target.value)}
+              <select aria-label="Sort" value={sort} onChange={(e) => updateParam("sort", e.target.value)}
                 className="appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-4 pr-8 text-sm font-semibold text-slate-700 shadow-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10">
                 {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -305,7 +305,7 @@ export default function PatientDoctorsDirectory() {
               <div className="relative ml-auto h-full w-80 overflow-y-auto bg-slate-100 p-4 shadow-2xl">
                 <div className="mb-4 flex items-center justify-between">
                   <span className="font-black text-slate-950">Filters</span>
-                  <button onClick={() => setShowFilters(false)} className="rounded-lg p-2 hover:bg-slate-200">
+                  <button aria-label="Close" title="Close" onClick={() => setShowFilters(false)} className="rounded-lg p-2 hover:bg-slate-200">
                     <X size={18} />
                   </button>
                 </div>
@@ -320,7 +320,7 @@ export default function PatientDoctorsDirectory() {
                 {Object.entries(filters).filter(([, v]) => v).map(([k, v]) => (
                   <span key={k} className="flex items-center gap-1 rounded-xl bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
                     {v}
-                    <button onClick={() => handleFilterChange(k, "")} className="ml-1 hover:text-blue-900"><X size={11} /></button>
+                    <button aria-label="Close" title="Close" onClick={() => handleFilterChange(k, "")} className="ml-1 hover:text-blue-900"><X size={11} /></button>
                   </span>
                 ))}
               </div>

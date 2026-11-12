@@ -7,6 +7,7 @@ import { ROLES } from "../../constants/roles.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { writeAdminLog } from "../../utils/adminAudit.js";
+import { queryNumber, queryString } from "../../utils/queryParams.js";
 
 // PHASE 2-C — Section 24 bugfix: every dataset below queried its full
 // collection with no row cap at all -- for a hospital with a large
@@ -19,33 +20,52 @@ import { writeAdminLog } from "../../utils/adminAudit.js";
 // handing back a partial file that looks complete.
 const EXPORT_ROW_CEILING = 5000;
 
+// A-12: only the fields flatten() reads are fetched (previously whole Appointment/Payment/Doctor documents, and the
+// full Doctor document behind each appointment, were loaded for a 6-column file).
+const EXPORT_FIELDS = "name title email status paymentStatus totalAmount fees createdAt patientId doctorId userId";
+
 const datasets = {
   appointments: async (filter) =>
     Appointment.find(filter)
       .sort({ createdAt: -1 })
       .limit(EXPORT_ROW_CEILING + 1)
+      .select(EXPORT_FIELDS)
       .populate("patientId", "name email")
-      .populate({ path: "doctorId", populate: { path: "userId", select: "name email" } })
+      .populate({ path: "doctorId", select: "userId", populate: { path: "userId", select: "name email" } })
       .lean(),
   payments: async (filter) =>
-    Payment.find(filter).sort({ createdAt: -1 }).limit(EXPORT_ROW_CEILING + 1).populate("userId", "name email").lean(),
-  doctors: async () => Doctor.find().sort({ createdAt: -1 }).limit(EXPORT_ROW_CEILING + 1).populate("userId", "name email").lean(),
+    Payment.find(filter).sort({ createdAt: -1 }).limit(EXPORT_ROW_CEILING + 1).select(EXPORT_FIELDS).populate("userId", "name email").lean(),
+  doctors: async () => Doctor.find().sort({ createdAt: -1 }).limit(EXPORT_ROW_CEILING + 1).select(EXPORT_FIELDS).populate("userId", "name email").lean(),
   patients: async () =>
     User.find({ role: ROLES.PATIENT }).sort({ createdAt: -1 }).limit(EXPORT_ROW_CEILING + 1).select("name email isActive createdAt").lean(),
 };
 
+// A-12: filters are validated (invalid dates, non-numeric amounts, repeated keys -> 400) and keep their previous
+// semantics. NOTE (unchanged behaviour): the `doctors` and `patients` datasets ignore these filters.
 const dateFilter = (query) => {
   const filter = {};
-  if (query.from || query.to) {
+  const toDate = (key) => {
+    const text = queryString(query, key);
+    if (text === undefined) return undefined;
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) throw new AppError(`Query parameter "${key}" must be a valid date`, 400);
+    return date;
+  };
+  const from = toDate("from");
+  const to = toDate("to");
+  if (from || to) {
     filter.createdAt = {};
-    if (query.from) filter.createdAt.$gte = new Date(query.from);
-    if (query.to) filter.createdAt.$lte = new Date(query.to);
+    if (from) filter.createdAt.$gte = from;
+    if (to) filter.createdAt.$lte = to;
   }
-  if (query.status) filter.status = query.status;
-  if (query.minRevenue || query.maxRevenue) {
+  const status = queryString(query, "status");
+  if (status) filter.status = status;
+  const minRevenue = queryNumber(query, "minRevenue");
+  const maxRevenue = queryNumber(query, "maxRevenue");
+  if (minRevenue !== undefined || maxRevenue !== undefined) {
     filter.totalAmount = {};
-    if (query.minRevenue) filter.totalAmount.$gte = Number(query.minRevenue);
-    if (query.maxRevenue) filter.totalAmount.$lte = Number(query.maxRevenue);
+    if (minRevenue !== undefined) filter.totalAmount.$gte = minRevenue;
+    if (maxRevenue !== undefined) filter.totalAmount.$lte = maxRevenue;
   }
   return filter;
 };
@@ -95,8 +115,9 @@ const streamPdf = (res, rows, resource) => {
 };
 
 export const exportData = asyncHandler(async (req, res) => {
-  const { resource, format = "csv" } = req.query;
-  if (!datasets[resource]) throw new AppError("Unsupported export resource", 400);
+  const resource = queryString(req.query, "resource");
+  const format = queryString(req.query, "format") || "csv";
+  if (!resource || !Object.prototype.hasOwnProperty.call(datasets, resource)) throw new AppError("Unsupported export resource", 400);
   if (!["csv", "pdf"].includes(format)) throw new AppError("Unsupported export format", 400);
 
   const data = await datasets[resource](dateFilter(req.query));

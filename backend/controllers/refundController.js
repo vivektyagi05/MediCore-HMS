@@ -1,5 +1,5 @@
 import { financeEmitter } from "../realtime/financeEmitter.js";
-import { financialEmails } from "../services/financialEmails.js";
+import { financialEmails, loadEmailRecipient } from "../services/financialEmails.js";
 import { planOutOfBandRefund } from "../payments/outOfBandRefund.js";
 import { areRefundsEnabled } from "../services/hospitalSettingsService.js";
 import mongoose from "mongoose";
@@ -20,7 +20,7 @@ import { notificationEmitter } from "../realtime/notificationEmitter.js";
 import { writeAdminLog } from "../utils/adminAudit.js";
 import { emitAutomationTrigger } from "../automation-studio/automationEventBus.js";
 import { TRIGGER_TYPES } from "../automation-studio/triggerRegistry.js";
-import { addMoney, toPaise } from "../payments/money.js";
+import { addMoney, toPaise, fromPaise } from "../payments/money.js";
 import { GATEWAY_REFUND_OUTCOME, classifyGatewayRefund, isDefinitiveGatewayRejection } from "../payments/refundGatewayOutcome.js";
 import { applyRefundToDoctorEarning } from "../payments/refundEarningAdjustment.js";
 import { appendPaymentTransition } from "../payments/paymentStateMachine.js";
@@ -137,14 +137,26 @@ const recordRefundNotCompleted = async ({ payment, refundRequest, failureReason,
 // adjustment is keyed per refund, ledger postings have unique keys.
 const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAmount, walletRefundAmount, gatewayRefundAmount, reason, actorId, req }) => {
   const refundKey = refundKeyFor({ refund, refundRequest, paymentId: payment._id });
-  const alreadyCounted = Boolean(refund?.id) && (payment.processedGatewayRefundIds || []).includes(refund.id);
-  const refundedBefore = payment.refundedAmount || 0;
+  // Phase 03: a wallet-only refund has no provider refund id, so its "counted" marker is the
+  // refund request itself (processedRefundKeys). Without it a replay after a crash would add the
+  // same wallet amount to the payment counters a second time.
+  const walletOnlyKey = !refund?.id && refundRequest?._id ? `rrw:${refundRequest._id}` : null;
+  const alreadyCounted = refund?.id
+    ? (payment.processedGatewayRefundIds || []).includes(refund.id)
+    : Boolean(walletOnlyKey) && (payment.processedRefundKeys || []).includes(walletOnlyKey);
+  // Phase 03: on a replay the counters ALREADY include this refund, so the amount refunded
+  // *before* it is the current total minus this refund. Passing the current total made the
+  // earning reversal believe this was the final refund and over-reverse the doctor's share.
+  const refundedBefore = alreadyCounted
+    ? Math.max(0, fromPaise(Math.max(0, toPaise(payment.refundedAmount || 0) - toPaise(refundAmount))))
+    : (payment.refundedAmount || 0);
 
   if (!alreadyCounted) {
     payment.walletRefundedAmount = addMoney(payment.walletRefundedAmount || 0, walletRefundAmount);
     payment.gatewayRefundedAmount = addMoney(payment.gatewayRefundedAmount || 0, gatewayRefundAmount);
     payment.refundedAmount = addMoney(payment.walletRefundedAmount, payment.gatewayRefundedAmount);
     if (refund?.id) payment.processedGatewayRefundIds = Array.from(new Set([...(payment.processedGatewayRefundIds || []), refund.id]));
+    if (walletOnlyKey) payment.processedRefundKeys = Array.from(new Set([...(payment.processedRefundKeys || []), walletOnlyKey]));
   }
   const isFullRefund = toPaise(payment.refundedAmount) >= toPaise(payment.totalAmount);
   payment.refundStatus = isFullRefund ? REFUND_STATUS.FULL : REFUND_STATUS.PARTIAL;
@@ -197,6 +209,12 @@ const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAm
       metadata: { reason, refundRequestId: refundRequest?._id, fundingSource: "gateway" },
     });
   }
+  if (walletRefundAmount > 0 && !wallet) {
+    // Replay after a crash between the wallet credit and the ledger write: the idempotent
+    // credit above matched nothing (already applied) and returned no document, which used to
+    // skip the ledger posting forever. Load the existing wallet and post the (idempotent) entry.
+    wallet = await Wallet.findOne({ userId: payment.userId._id });
+  }
   if (walletRefundAmount > 0 && wallet) {
     await postLedger({
       userId: payment.userId._id, paymentId: payment._id, walletId: wallet._id, type: "wallet_credit", direction: "credit",
@@ -211,7 +229,12 @@ const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAm
     paymentId: payment._id, refundAmount, paymentTotal: payment.totalAmount, refundedBefore,
     refundKey, gatewayRefundId: refund?.id || null, actorId,
   });
-  if (earning.applied && earning.doctorUserId) {
+  if ((earning.applied || earning.replay) && earning.doctorUserId && toPaise(earning.doctorAdjustment || 0) > 0) {
+    // Phase 03: durable email notice, keyed per refund; replays (crash recovery) re-enqueue idempotently.
+    const doctorUser = await loadEmailRecipient(earning.doctorUserId);
+    await financialEmails.doctorEarningAdjusted({
+      refundKey, payoutId: earning.payout?._id, doctorAdjustment: earning.doctorAdjustment, becameLiability: earning.becameLiability, user: doctorUser,
+    });
     await notificationEmitter.emitToUser(earning.doctorUserId, {
       type: "refund",
       title: "Earning adjusted by a refund",
@@ -225,7 +248,7 @@ const finalizeRefundMovement = async ({ payment, refundRequest, refund, refundAm
   // row is deduplicated by eventKey, so if the process dies between these two writes the
   // replay (state still gateway_processing/reconciliation_required) re-enqueues harmlessly
   // instead of the receipt being lost behind an already-processed request.
-  await financialEmails.refundProcessed({ payment, refundId: refund?.id, amount: refundAmount, user: payment.userId });
+  await financialEmails.refundProcessed({ payment, refundId: refund?.id || (refundRequest?._id ? `rr:${refundRequest._id}` : undefined), amount: refundAmount, user: payment.userId });
   if (refundRequest) {
     refundRequest.status = "processed";
     if (refundRequest.refundState !== REFUND_STATES.PROCESSED) {
@@ -459,7 +482,24 @@ export const reconcileRefundRequest = async (refundRequestId, { actorId = null }
       return { settled: true, failed: true };
     }
   }
-  // wallet-only refunds have nothing at the provider to reconcile
+  // Wallet-only refund (no provider leg): nothing exists at the provider, so an interrupted run
+  // (crash after gateway_processing, before finalize) is completed by replaying the SAME
+  // idempotent finalizer. Every effect is keyed, so already-applied effects are skipped.
+  if (!refund && (rr.gatewayRefundAmount || 0) <= 0 && (rr.walletRefundAmount || 0) > 0) {
+    const lockToken = await acquireRefundLock(rr.paymentId);
+    try {
+      const fresh = await RefundRequest.findById(rr._id);
+      if (fresh.refundState === REFUND_STATES.PROCESSED) return { settled: true, replay: true };
+      const pay = await Payment.findById(rr.paymentId).populate("userId", "name email");
+      await finalizeRefundMovement({
+        payment: pay, refundRequest: fresh, refund: null, refundAmount: fresh.amount,
+        walletRefundAmount: fresh.walletRefundAmount || 0, gatewayRefundAmount: 0, reason: fresh.reason, actorId, req: null,
+      });
+      return { settled: true, recovered: true };
+    } finally {
+      await releaseRefundLock(rr.paymentId, lockToken);
+    }
+  }
   if (!refund) throw new AppError("Nothing to reconcile at the provider for this refund", 409);
   return settlePendingGatewayRefund({ refundRequestId: rr._id, refund, source: "reconciliation", actorId });
 };

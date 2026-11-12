@@ -27,8 +27,16 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
   const toast = useToast();
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(""); // shown inside the dialog: a toast vanishes, and the admin needs to read why a money action failed
+  const [touched, setTouched] = useState(false);
 
   if (!refundRequest || !mode) return null;
+
+  // Reason rules (same wording the patient sees later): required and meaningful when rejecting, optional when approving.
+  const trimmedNote = note.trim();
+  const noteProblem = mode === "reject"
+    ? (!trimmedNote ? "A rejection reason is required" : trimmedNote.length < 5 ? `Give a reason of at least 5 characters (now ${trimmedNote.length})` : note.length > 500 ? "Keep the reason to 500 characters or fewer" : "")
+    : mode === "approve" && note.length > 500 ? "Keep the note to 500 characters or fewer" : "";
 
   const currency = payment?.currency || "INR";
   const remainingAfterApproval = payment
@@ -36,11 +44,10 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
     : null;
 
   const handleConfirm = async () => {
-    if (mode === "reject" && !note.trim()) {
-      toast.error("A rejection reason is required");
-      return;
-    }
+    setTouched(true);
+    if (noteProblem || loading) return; // loading: a double click must never send a second money action
     setLoading(true);
+    setError("");
     try {
       let res;
       if (mode === "approve") res = await refundApi.approveRequest(refundRequest._id, note ? { note } : {});
@@ -55,16 +62,16 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
       setNote("");
       onDone?.();
     } catch (err) {
-      toast.error(
-        getApiErrorMessage(err) ||
-          (mode === "approve"
-            ? "Refund could not be processed. No refund was recorded."
-            : mode === "reconcile"
-              ? "The payment provider could not be queried. Try again shortly."
+      const message = getApiErrorMessage(err) ||
+        (mode === "approve"
+          ? "Refund could not be processed. No refund was recorded."
+          : mode === "reconcile"
+            ? "The payment provider could not be queried. Try again shortly."
             : mode === "retry"
               ? "Refund retry failed. No refund was recorded."
-              : "Refund request could not be rejected."),
-      );
+              : "Refund request could not be rejected.");
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -77,8 +84,9 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
     <Modal
       isOpen
       title={title}
-      onClose={() => {
+      onClose={loading ? undefined : () => {
         setNote("");
+        setError("");
         onClose();
       }}
     >
@@ -91,9 +99,14 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
             <p className="mt-1 text-slate-600">
               This will be sent to the payment gateway immediately upon approval.
             </p>
-            {remainingAfterApproval != null && (
+            {remainingAfterApproval != null && remainingAfterApproval >= 0 && (
               <p className="mt-2 text-xs font-semibold text-slate-500">
                 Remaining refundable amount after approval: {formatCurrency(remainingAfterApproval, currency)}
+              </p>
+            )}
+            {remainingAfterApproval != null && remainingAfterApproval < 0 && (
+              <p className="mt-2 text-xs font-semibold text-amber-700" role="status">
+                This amount is more than what is left to refund on the payment we have on screen. The server will refuse it if so; refresh to see the latest figures.
               </p>
             )}
           </div>
@@ -134,14 +147,23 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
         )}
 
         {(mode === "reject" || mode === "approve") && (
-          <Textarea
-            label={mode === "reject" ? "Rejection reason" : "Note (optional)"}
-            required={mode === "reject"}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder={mode === "reject" ? "Explain why this refund is being rejected..." : "Add a note for the audit trail..."}
-          />
+          <div>
+            <Textarea
+              label={mode === "reject" ? "Rejection reason" : "Note (optional)"}
+              name="refund-action-note"
+              required={mode === "reject"}
+              value={note}
+              disabled={loading}
+              error={touched || note ? noteProblem : ""}
+              onChange={(e) => { setNote(e.target.value); setError(""); }}
+              onBlur={() => setTouched(true)}
+              placeholder={mode === "reject" ? "Explain why this refund is being rejected..." : "Add a note for the audit trail..."}
+            />
+            <p className="mt-1 text-right text-xs text-slate-400">{note.length} / 500</p>
+          </div>
         )}
+
+        {error && <p role="alert" className="rounded-control border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</p>}
 
         <div className="flex justify-end gap-3 pt-2">
           <Button
@@ -149,12 +171,13 @@ function RefundActionDialog({ refundRequest, payment, mode, onClose, onDone }) {
             disabled={loading}
             onClick={() => {
               setNote("");
+              setError("");
               onClose();
             }}
           >
             Back
           </Button>
-          <Button variant={mode === "reject" ? "danger" : "success"} isLoading={loading} onClick={handleConfirm}>
+          <Button variant={mode === "reject" ? "danger" : "success"} isLoading={loading} disabled={Boolean(noteProblem) && (touched || Boolean(note))} onClick={handleConfirm}>
             {mode === "approve" ? "Approve Refund" : mode === "reject" ? "Reject Refund" : mode === "reconcile" ? "Check With Provider" : "Retry Refund"}
           </Button>
         </div>

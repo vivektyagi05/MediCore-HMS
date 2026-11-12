@@ -12,6 +12,7 @@ import Input from "../../components/ui/Input";
 import Loader from "../../components/ui/Loader";
 import { useToast } from "../../context/ToastContext";
 
+import { LIFESTYLE_RULES, VITALS_RULES, validateVitals } from "../../utils/vitalsValidation";
 const selectClass = "w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-950 shadow-sm outline-none transition focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-600/10";
 
 function LabeledSelect({ label, value, onChange, options }) {
@@ -87,7 +88,14 @@ function PatientProfile() {
 
   useEffect(() => { load(); }, []);
 
+  const vitalErrors = validateVitals(profile.vitals, profile.lifestyle);
+
   const saveProfile = async () => {
+    if (isSaving) return;
+    if (Object.keys(vitalErrors).length) {
+      toast.error("Please fix the highlighted health values before saving.");
+      return;
+    }
     setIsSaving(true);
     try {
       const payload = {
@@ -216,7 +224,7 @@ function PatientProfile() {
                   <Input label="Name" value={med.name || ""} onChange={(e) => updateMedication(index, "name", e.target.value)} />
                   <Input label="Dosage" value={med.dosage || ""} onChange={(e) => updateMedication(index, "dosage", e.target.value)} />
                   <Input label="Frequency" value={med.frequency || ""} onChange={(e) => updateMedication(index, "frequency", e.target.value)} />
-                  <button type="button" className="mt-8 flex h-10 w-10 items-center justify-center rounded-xl text-red-600 hover:bg-red-50" onClick={() => removeMedication(index)}>
+                  <button aria-label="Delete" title="Delete" type="button" className="mt-8 flex h-10 w-10 items-center justify-center rounded-xl text-red-600 hover:bg-red-50" onClick={() => removeMedication(index)}>
                     <Trash2 size={16} />
                   </button>
                 </div>
@@ -229,11 +237,11 @@ function PatientProfile() {
 
         <Card title="Vitals">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Input label="Height (cm)" type="number" value={profile.vitals.heightCm || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, heightCm: e.target.value } })} />
-            <Input label="Weight (kg)" type="number" value={profile.vitals.weightKg || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, weightKg: e.target.value } })} />
-            <Input label="Blood pressure (systolic)" type="number" value={profile.vitals.bloodPressureSystolic || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, bloodPressureSystolic: e.target.value } })} />
-            <Input label="Blood pressure (diastolic)" type="number" value={profile.vitals.bloodPressureDiastolic || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, bloodPressureDiastolic: e.target.value } })} />
-            <Input label="Resting heart rate" type="number" value={profile.vitals.restingHeartRate || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, restingHeartRate: e.target.value } })} />
+            <Input label="Height (cm)" name="heightCm" type="number" inputMode="decimal" step="0.1" min={VITALS_RULES.heightCm.min} max={VITALS_RULES.heightCm.max} error={vitalErrors.heightCm} value={profile.vitals.heightCm || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, heightCm: e.target.value } })} />
+            <Input label="Weight (kg)" name="weightKg" type="number" inputMode="decimal" step="0.1" min={VITALS_RULES.weightKg.min} max={VITALS_RULES.weightKg.max} error={vitalErrors.weightKg} value={profile.vitals.weightKg || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, weightKg: e.target.value } })} />
+            <Input label="Blood pressure (systolic)" name="bloodPressureSystolic" type="number" inputMode="decimal" step="1" min={VITALS_RULES.bloodPressureSystolic.min} max={VITALS_RULES.bloodPressureSystolic.max} error={vitalErrors.bloodPressureSystolic} value={profile.vitals.bloodPressureSystolic || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, bloodPressureSystolic: e.target.value } })} />
+            <Input label="Blood pressure (diastolic)" name="bloodPressureDiastolic" type="number" inputMode="decimal" step="1" min={VITALS_RULES.bloodPressureDiastolic.min} max={VITALS_RULES.bloodPressureDiastolic.max} error={vitalErrors.bloodPressureDiastolic} value={profile.vitals.bloodPressureDiastolic || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, bloodPressureDiastolic: e.target.value } })} />
+            <Input label="Resting heart rate" name="restingHeartRate" type="number" inputMode="decimal" step="1" min={VITALS_RULES.restingHeartRate.min} max={VITALS_RULES.restingHeartRate.max} error={vitalErrors.restingHeartRate} value={profile.vitals.restingHeartRate || ""} onChange={(e) => setProfile({ ...profile, vitals: { ...profile.vitals, restingHeartRate: e.target.value } })} />
           </div>
           {overview?.bmi?.value ? (
             <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">
@@ -250,7 +258,7 @@ function PatientProfile() {
             <LabeledSelect label="Alcohol consumption" value={profile.lifestyle.alcoholConsumption} onChange={(e) => setProfile({ ...profile, lifestyle: { ...profile.lifestyle, alcoholConsumption: e.target.value } })} options={["none", "occasional", "moderate", "frequent"]} />
             <LabeledSelect label="Exercise frequency" value={profile.lifestyle.exerciseFrequency} onChange={(e) => setProfile({ ...profile, lifestyle: { ...profile.lifestyle, exerciseFrequency: e.target.value } })} options={["sedentary", "light", "moderate", "active"]} />
             <Input label="Diet type" value={profile.lifestyle.dietType || ""} onChange={(e) => setProfile({ ...profile, lifestyle: { ...profile.lifestyle, dietType: e.target.value } })} />
-            <Input label="Average sleep (hours)" type="number" value={profile.lifestyle.sleepHoursAvg || ""} onChange={(e) => setProfile({ ...profile, lifestyle: { ...profile.lifestyle, sleepHoursAvg: e.target.value } })} />
+            <Input label="Average sleep (hours)" name="sleepHoursAvg" type="number" inputMode="decimal" step="0.5" min={LIFESTYLE_RULES.sleepHoursAvg.min} max={LIFESTYLE_RULES.sleepHoursAvg.max} error={vitalErrors.sleepHoursAvg} value={profile.lifestyle.sleepHoursAvg || ""} onChange={(e) => setProfile({ ...profile, lifestyle: { ...profile.lifestyle, sleepHoursAvg: e.target.value } })} />
           </div>
         </Card>
 
@@ -265,7 +273,7 @@ function PatientProfile() {
                   <Input label="Goal" value={goal.title || ""} onChange={(e) => updateGoal(index, "title", e.target.value)} />
                   <Input label="Target date" type="date" value={goal.targetDate || ""} onChange={(e) => updateGoal(index, "targetDate", e.target.value)} />
                   <LabeledSelect label="Status" value={goal.status} onChange={(e) => updateGoal(index, "status", e.target.value)} options={["active", "achieved", "abandoned"]} />
-                  <button type="button" className="mt-8 flex h-10 w-10 items-center justify-center rounded-xl text-red-600 hover:bg-red-50" onClick={() => removeGoal(index)}>
+                  <button aria-label="Delete" title="Delete" type="button" className="mt-8 flex h-10 w-10 items-center justify-center rounded-xl text-red-600 hover:bg-red-50" onClick={() => removeGoal(index)}>
                     <Trash2 size={16} />
                   </button>
                 </div>

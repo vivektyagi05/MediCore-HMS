@@ -148,6 +148,8 @@ const paymentSchema = new mongoose.Schema(
       min: 0,
     },
     processedGatewayRefundIds: { type: [String], default: [] },
+    // Phase 03: idempotency markers for refunds with no provider refund id (wallet-only), `rrw:<refundRequestId>`.
+    processedRefundKeys: { type: [String], default: [] },
     // P23 — funding-source refund tracking (Sections 9/27/28). refundedAmount
     // alone cannot answer "how much of the wallet-funded portion has been
     // refunded vs. the gateway-funded portion" — without this split, a

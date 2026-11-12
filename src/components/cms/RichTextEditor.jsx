@@ -29,7 +29,7 @@ function RichTextEditor({ value, onChange, error }) {
           return <button key={tag} type="button" className="rounded-lg border bg-white px-2.5 py-1.5 text-xs font-bold hover:bg-slate-100" onClick={(e) => wrapSelection(e.currentTarget.closest("div").nextElementSibling, pair[0], pair[1], onChange)}>{label}</button>;
         })}
       </div>
-      <textarea
+      <textarea aria-label="Article content"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={Boolean(error) || undefined}

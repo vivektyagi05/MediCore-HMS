@@ -1,3 +1,5 @@
+> **Scenario document (historical, not re-executed in this audit).**
+
 # HMS Financial Engine Test Scenarios
 
 ## Webhooks

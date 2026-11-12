@@ -1,4 +1,5 @@
 import { enqueueEmail } from "./emailOutboxService.js";
+import User from "../models/User.js";
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = (amount, currency = "INR") => `${esc(currency)} ${Number(amount || 0).toFixed(2)}`;
@@ -8,7 +9,24 @@ const wrap = (name, lines) => `<p>Hello ${esc(name || "there")},</p>${lines.map(
 // dead-letter, eventKey dedupe). Enqueue failure is logged by enqueueEmail and
 // never blocks money movement, but the row is the durable record of intent.
 // A queued row is NOT evidence of delivery: only EmailDelivery.status === "sent" is.
+/** Best-effort recipient lookup (id/name/email only). Never throws: an email is never a precondition for money movement. */
+export const loadEmailRecipient = async (userId) => {
+  try { return await User.findById(userId).select("name email").lean(); } catch { return null; }
+};
+
 export const financialEmails = {
+  // Phase 03: wallet recharge confirmation. Keyed per recharge so a replayed/recovered posting never double-notifies.
+  rechargeCredited: ({ recharge, user }) => enqueueEmail({
+    eventKey: `recharge:credited:${recharge._id}`, to: user?.email, recipientId: user?._id, entityType: "recharge", entityId: recharge._id,
+    subject: "Wallet recharge confirmed",
+    html: wrap(user?.name, [`Your wallet was credited with <strong>${money(recharge.amount, recharge.currency)}</strong>.`, "You can see the balance and history under Wallet in your MediCore account."]),
+  }),
+  // Phase 03: doctor notice when a refund reduces an earning. Amounts only: no patient identity or payment details.
+  doctorEarningAdjusted: ({ refundKey, payoutId, doctorAdjustment, becameLiability, user }) => enqueueEmail({
+    eventKey: `earning:adjusted:${refundKey}`, to: user?.email, recipientId: user?._id, entityType: "doctor_payout", entityId: payoutId,
+    subject: "A refund adjusted one of your earnings",
+    html: wrap(user?.name, [`A refund reduced your earning for a consultation by <strong>${money(doctorAdjustment)}</strong>.`, becameLiability ? "The consultation had already been paid out, so the amount has been deducted from your available balance." : "The consultation had not been paid out yet, so your pending earning was reduced.", "Details are under Earnings in your MediCore account."]),
+  }),
   paymentReceipt: ({ payment, invoice, user }) => enqueueEmail({
     eventKey: `payment:receipt:${payment._id}`, to: user?.email, recipientId: user?._id, entityType: "payment", entityId: payment._id,
     subject: `Payment receipt - ${invoice?.invoiceNumber || "MediCore"}`,

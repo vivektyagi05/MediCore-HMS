@@ -29,6 +29,7 @@ import EmptyState from "../../components/shared/EmptyState";
 import ErrorState from "../../components/shared/ErrorState";
 import SettingsTabs from "../../components/settings/SettingsTabs";
 
+import { useConfirm } from "../../hooks/useConfirm";
 // ─────────────────────────────────────────────────────────────────────────
 // Phase A6.3.3 — Enterprise Process Designer + Process Simulation Engine.
 //
@@ -96,6 +97,7 @@ function emptyDraft() {
 }
 
 function AdminProcessDesigner() {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [registry, setRegistry] = useState(null);
   const [processes, setProcesses] = useState([]);
@@ -348,7 +350,7 @@ function AdminProcessDesigner() {
 
   async function handleDelete() {
     if (!selected) return;
-    if (!window.confirm(`Delete draft "${selected.name}"? This cannot be undone.`)) return;
+    if (!(await confirm({ title: "Delete this draft?", description: `"${selected.name}" will be permanently deleted. This cannot be undone.`, confirmLabel: "Delete draft" }))) return;
     setBusy(true);
     try {
       await processDesignerApi.deleteProcess(selected._id);
@@ -435,6 +437,7 @@ function AdminProcessDesigner() {
   );
 
   return (
+    <>
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
@@ -462,7 +465,7 @@ function AdminProcessDesigner() {
           <div className="mb-4 flex flex-col gap-2">
             <div className="relative">
               <SearchIcon size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
+              <input aria-label="Search processes"
                 value={filters.search}
                 onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
                 onKeyDown={(e) => e.key === "Enter" && refreshLibrary()}
@@ -470,7 +473,7 @@ function AdminProcessDesigner() {
                 className="w-full rounded-xl border border-slate-200 bg-white/70 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-600"
               />
             </div>
-            <select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold">
+            <select aria-label="Status" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-semibold">
               <option value="">All statuses</option>
               {Object.keys(STATUS_TONE).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -561,7 +564,7 @@ function AdminProcessDesigner() {
                     {selected && selected.status === "active" && <Button variant="secondary" onClick={handlePause} isLoading={busy}><PauseCircle size={15} /> Pause</Button>}
                     {selected && selected.status !== "archived" && <Button variant="secondary" onClick={handleArchive} isLoading={busy}><Archive size={15} /> Archive</Button>}
                     {selected && <Button variant="secondary" onClick={handleClone} isLoading={busy}><Copy size={15} /> Clone</Button>}
-                    {selected && selected.status === "draft" && <Button variant="secondary" onClick={handleDelete} isLoading={busy}><Trash2 size={15} /></Button>}
+                    {selected && selected.status === "draft" && <Button aria-label="Delete" title="Delete" variant="secondary" onClick={handleDelete} isLoading={busy}><Trash2 size={15} /></Button>}
                   </div>
                 </div>
               </Card>
@@ -794,6 +797,8 @@ function AdminProcessDesigner() {
         </div>
       </div>
     </div>
+    {confirmDialog}
+    </>
   );
 }
 
@@ -803,12 +808,12 @@ function NodeEditor({ node, registry, onChange, onRemove, disabled }) {
     <div className="rounded-xl border border-slate-200 bg-white/60 p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-black uppercase text-slate-500">{node.type}</span>
-        <input className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-sm" placeholder="Node ID" value={node.id} disabled />
-        {!disabled && <Button variant="secondary" onClick={onRemove}><Trash2 size={13} /></Button>}
+        <input aria-label="Node ID" className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-sm" placeholder="Node ID" value={node.id} disabled />
+        {!disabled && <Button aria-label="Delete" title="Delete" variant="secondary" onClick={onRemove}><Trash2 size={13} /></Button>}
       </div>
 
       {node.type === "trigger" && (
-        <select
+        <select aria-label="Trigger"
           className="mt-2 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
           value={node.config?.triggerType || ""}
           disabled={disabled}
@@ -821,16 +826,16 @@ function NodeEditor({ node, registry, onChange, onRemove, disabled }) {
 
       {(node.type === "condition" || node.type === "decision") && (
         <div className="mt-2 grid grid-cols-3 gap-2">
-          <input className="rounded-lg border border-slate-200 px-2 py-1 text-xs" placeholder="field" disabled={disabled}
+          <input aria-label="Condition field" className="rounded-lg border border-slate-200 px-2 py-1 text-xs" placeholder="field" disabled={disabled}
             value={node.config?.conditionTree?.field || ""}
             onChange={(e) => onChange({ config: { conditionTree: { ...node.config?.conditionTree, field: e.target.value } } })} />
-          <select className="rounded-lg border border-slate-200 px-2 py-1 text-xs" disabled={disabled}
+          <select aria-label="Condition operator" className="rounded-lg border border-slate-200 px-2 py-1 text-xs" disabled={disabled}
             value={node.config?.conditionTree?.operator || ""}
             onChange={(e) => onChange({ config: { conditionTree: { ...node.config?.conditionTree, operator: e.target.value } } })}>
             <option value="">operator</option>
             {["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "empty", "not_empty"].map((op) => <option key={op} value={op}>{op}</option>)}
           </select>
-          <input className="rounded-lg border border-slate-200 px-2 py-1 text-xs" placeholder="value" disabled={disabled}
+          <input aria-label="Condition value" className="rounded-lg border border-slate-200 px-2 py-1 text-xs" placeholder="value" disabled={disabled}
             value={node.config?.conditionTree?.value ?? ""}
             onChange={(e) => onChange({ config: { conditionTree: { ...node.config?.conditionTree, value: e.target.value } } })} />
         </div>
@@ -838,7 +843,7 @@ function NodeEditor({ node, registry, onChange, onRemove, disabled }) {
 
       {["action", "approval", "assignment", "notification", "integration"].includes(node.type) && (
         <div className="mt-2 space-y-2">
-          <select
+          <select aria-label="Action"
             className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
             value={node.config?.actionType || ""}
             disabled={disabled}
@@ -850,7 +855,7 @@ function NodeEditor({ node, registry, onChange, onRemove, disabled }) {
           {node.config?.actionType && (
             <div className="grid grid-cols-2 gap-2">
               {(nodeTypeMeta.options.find((o) => o.type === node.config.actionType)?.configFields || []).map((field) => (
-                <input
+                <input aria-label={field.label}
                   key={field.key}
                   className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
                   placeholder={field.label}
@@ -874,19 +879,19 @@ function NodeEditor({ node, registry, onChange, onRemove, disabled }) {
 function EdgeEditor({ edge, nodes, onChange, onRemove, disabled }) {
   return (
     <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/60 p-2 text-xs">
-      <select className="rounded-lg border border-slate-200 px-2 py-1" value={edge.source} disabled={disabled} onChange={(e) => onChange({ source: e.target.value })}>
+      <select aria-label="Source" className="rounded-lg border border-slate-200 px-2 py-1" value={edge.source} disabled={disabled} onChange={(e) => onChange({ source: e.target.value })}>
         {nodes.map((n) => <option key={n.id} value={n.id}>{n.id} ({n.type})</option>)}
       </select>
       <span>→</span>
-      <select className="rounded-lg border border-slate-200 px-2 py-1" value={edge.target} disabled={disabled} onChange={(e) => onChange({ target: e.target.value })}>
+      <select aria-label="Target" className="rounded-lg border border-slate-200 px-2 py-1" value={edge.target} disabled={disabled} onChange={(e) => onChange({ target: e.target.value })}>
         {nodes.map((n) => <option key={n.id} value={n.id}>{n.id} ({n.type})</option>)}
       </select>
-      <select className="rounded-lg border border-slate-200 px-2 py-1" value={edge.branch || ""} disabled={disabled} onChange={(e) => onChange({ branch: e.target.value || null })}>
+      <select aria-label="Branch" className="rounded-lg border border-slate-200 px-2 py-1" value={edge.branch || ""} disabled={disabled} onChange={(e) => onChange({ branch: e.target.value || null })}>
         <option value="">no branch</option>
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
-      {!disabled && <Button variant="secondary" onClick={onRemove}><Trash2 size={13} /></Button>}
+      {!disabled && <Button aria-label="Delete" title="Delete" variant="secondary" onClick={onRemove}><Trash2 size={13} /></Button>}
     </div>
   );
 }

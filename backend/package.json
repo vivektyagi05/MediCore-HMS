@@ -23,11 +23,16 @@
     "report:unpaid-subscriptions": "node migrations/010_report_unpaid_active_subscriptions.js",
     "start:worker": "node worker.js",
     "migrate:payment-slot": "node migrations/012_payment_active_slot.js",
+    "migrate:prescription-uniqueness": "node migrations/013_prescription_active_uniqueness.js",
     "migrate:indexes": "node migrations/011_ensure_production_indexes.js",
     "verify:indexes": "node migrations/011_ensure_production_indexes.js --dry-run",
     "preflight": "node scripts/preflight.mjs",
     "release": "node scripts/release.mjs",
-    "audit:wallet-precision": "node scripts/audit-wallet-precision.mjs"
+    "audit:wallet-precision": "node scripts/audit-wallet-precision.mjs",
+    "audit:coupon-usage": "node scripts/audit-coupon-usage.mjs",
+    "seed:loadtest": "node scripts/seed-load-test.mjs",
+    "seed:loadtest:verify": "node scripts/seed-load-test.mjs verify",
+    "seed:loadtest:cleanup": "node scripts/seed-load-test.mjs cleanup"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1137.0",
@@ -49,10 +54,10 @@
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.1.0",
-    "nodemon": "^1.14.10",
-    "socket.io-client": "^4.8.3",
+    "nodemon": "^3.1.14",
     "supertest": "^7.2.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.0",
+    "socket.io-client": "^4.8.3"
   },
   "engines": {
     "node": ">=22.12.0"

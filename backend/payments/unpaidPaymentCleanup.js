@@ -7,7 +7,7 @@
 //     touched. A browser timeout is never a reason.
 // A provider capture that still arrives afterwards is preserved by the Phase 01
 // capture path (evidence + reconciliation), never silently dropped.
-import Payment from "../models/Payment.js";
+import Payment, { PAYMENT_STATUS } from "../models/Payment.js";
 import Appointment from "../models/Appointment.js";
 import Coupon from "../models/Coupon.js";
 import { APPOINTMENT_STATUS } from "../constants/appointmentStatus.js";
@@ -66,22 +66,28 @@ export const sweepUnpayablePayments = async ({ now = new Date(), limit = 100 } =
 };
 
 /**
- * Coupon reservations whose Payment row was never created (crash between the
- * atomic coupon claim and Payment.create). The claim is keyed by a payment id
- * generated up front, so "no Payment with that id after the grace period" is
- * proof the order was never started. Anything else is left alone.
+ * Abandoned coupon RESERVATIONS, released only on proof:
+ *   (a) the Payment row was never created (crash between the atomic claim and Payment.create), or
+ *   (b) the Payment is terminally cancelled/expired with no provider evidence (crash between the cancel
+ *       transition and the release: the sweep never revisits a cancelled payment, so without this the
+ *       reservation leaked forever).
+ * Never touched: redeemed entries, legacy entries without a state (no reliable evidence), captured-like
+ * payments, failed (retryable) payments and anything with provider/capture evidence.
  */
 export const recoverOrphanCouponReservations = async ({ now = new Date(), limit = 100 } = {}) => {
   const cutoff = new Date(now.getTime() - COUPON_ORPHAN_GRACE_MS);
-  const coupons = await Coupon.find({ usedBy: { $elemMatch: { usedAt: { $lt: cutoff } } } }).limit(limit).lean();
+  const coupons = await Coupon.find({ usedBy: { $elemMatch: { state: "reserved", usedAt: { $lt: cutoff } } } }).limit(limit).lean();
   const results = [];
   for (const coupon of coupons) {
     for (const entry of coupon.usedBy || []) {
-      if (!entry.paymentId || new Date(entry.usedAt) >= cutoff) continue;
-      const exists = await Payment.findOne({ _id: entry.paymentId }).select("_id").lean();
-      if (exists) continue;
+      if (entry.state !== "reserved" || !entry.paymentId || new Date(entry.usedAt) >= cutoff) continue;
+      const payment = await Payment.findOne({ _id: entry.paymentId }).select("+captureEvidence status gatewayPaymentId reconciliationState").lean();
+      let reason = null;
+      if (!payment) reason = "payment_never_created";
+      else if ([PAYMENT_STATUS.CANCELLED, PAYMENT_STATUS.EXPIRED].includes(payment.status) && !hasProviderEvidence(payment)) reason = `payment_${payment.status}`;
+      if (!reason) continue;
       const { released } = await couponService.release({ couponId: coupon._id, paymentId: entry.paymentId });
-      results.push({ couponId: coupon._id, paymentId: entry.paymentId, released });
+      results.push({ couponId: coupon._id, paymentId: entry.paymentId, released, reason });
     }
   }
   return results;

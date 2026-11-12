@@ -12,6 +12,10 @@ const variants = {
     "border border-slate-300 bg-white text-slate-900 shadow-sm hover:border-slate-400 hover:bg-slate-50 focus-visible:ring-slate-400/25",
   tertiary:
     "bg-transparent text-slate-700 hover:bg-slate-100 focus-visible:ring-slate-400/25",
+  // `ghost` is used by several pages but was never defined, so those Cancel/Back buttons silently fell back to the
+  // primary (blue, filled) style. It is the same quiet style as `tertiary`.
+  ghost:
+    "bg-transparent text-slate-700 hover:bg-slate-100 focus-visible:ring-slate-400/25",
   dark:
     "bg-navy-950 text-white shadow-sm hover:bg-navy-800 focus-visible:ring-navy-900/30",
   danger:

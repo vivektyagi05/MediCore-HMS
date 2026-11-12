@@ -56,7 +56,7 @@ const matchValue = (docVal, cond) => {
       switch (op) {
         case "$in": return arg.some((x) => (Array.isArray(docVal) ? docVal.some((d) => eqv(d, x)) : eqv(docVal, x)));
         case "$nin": return !arg.some((x) => eqv(docVal, x));
-        case "$ne": return !eqv(docVal, arg);
+        case "$ne": return Array.isArray(docVal) ? !docVal.some((d) => eqv(d, arg)) : !eqv(docVal, arg); // Mongo: on an array, none of the elements may equal
         case "$lt": return docVal != null && norm(docVal) < norm(arg);
         case "$lte": return docVal != null && norm(docVal) <= norm(arg);
         case "$gt": return docVal != null && norm(docVal) > norm(arg);
@@ -76,6 +76,11 @@ const matchDoc = (doc, filter = {}) =>
   Object.entries(filter).every(([key, cond]) => {
     if (key === "$and") return cond.every((f) => matchDoc(doc, f));
     if (key === "$or") return cond.some((f) => matchDoc(doc, f));
+    if (key === "$expr") { // Phase 03: only the comparison form the coupon claim uses: { $lt: ["$a", "$b"] }
+      const [[op, [a, b]]] = Object.entries(cond); const val = (x) => (typeof x === "string" && x.startsWith("$") ? getPath(doc, x.slice(1)) : x);
+      if (op === "$lt") return val(a) < val(b);
+      throw new Error(`memoryModels: unsupported $expr operator ${op}`);
+    }
     return matchValue(getPath(doc, key), cond);
   });
 
@@ -102,11 +107,17 @@ const applyUpdate = (doc, update, filter = {}) => {
 
 class Query {
   constructor(exec) { this._exec = exec; this._lean = false; this._sort = null; this._limit = null; }
-  select() { return this; }
+  // Phase 03: honour pure-inclusive projections ("a b c") so tests prove what a query does NOT return.
+  // Exclusion/force-include forms ("-x", "+x") stay no-ops as before.
+  select(spec) {
+    if (typeof spec === "string") { const t = spec.split(/\s+/).filter(Boolean); if (t.length && t.every((x) => !/^[+-]/.test(x))) this._fields = t; }
+    return this;
+  }
   populate() { return this; }
   lean() { this._lean = true; return this; }
   sort(s) { this._sort = s; return this; }
   limit(n) { this._limit = n; return this; }
+  skip(n) { this._skip = n; return this; } // Phase 03: paged finders
   then(res, rej) { return this._exec(this).then(res, rej); }
   catch(rej) { return this.then(undefined, rej); }
 }
@@ -127,7 +138,13 @@ export const installMemoryModels = (specs) => {
         if (clash) throw fail11000(Object.fromEntries(u.fields.map((f) => [f, 1])));
       }
     };
-    const out = (obj, q) => (obj == null ? null : q._lean ? clone(obj) : model.hydrate(clone(obj)));
+    const project = (obj, q) => {
+      if (!q._fields) return obj;
+      const kept = { _id: obj._id };
+      for (const f of q._fields) { const top = f.split(".")[0]; if (obj[top] !== undefined) kept[top] = obj[top]; }
+      return kept;
+    };
+    const out = (obj, q) => (obj == null ? null : q._lean ? clone(project(obj, q)) : model.hydrate(clone(project(obj, q))));
     const sorted = (rows, q) => {
       if (!q._sort) return rows;
       const [[field, dir]] = Object.entries(q._sort);
@@ -154,6 +171,7 @@ export const installMemoryModels = (specs) => {
     patch("find", (filter = {}) => new Query(async (q) => {
       await tick();
       let rows = sorted(all().filter((o) => matchDoc(o, filter)), q);
+      if (q._skip) rows = rows.slice(q._skip);
       if (q._limit) rows = rows.slice(0, q._limit);
       return rows.map((o) => out(o, q));
     }));

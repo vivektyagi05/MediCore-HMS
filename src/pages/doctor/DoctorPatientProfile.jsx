@@ -427,7 +427,7 @@ function DoctorPatientProfile() {
                       {rx.followUpDate && <p className="mt-1 text-xs font-bold text-amber-700">Follow-up: {formatDate(rx.followUpDate)}</p>}
                     </div>
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => doctorWorkflowApi.downloadPrescription(rx._id)}>
+                  <Button aria-label="Download" title="Download" size="sm" variant="secondary" onClick={() => doctorWorkflowApi.downloadPrescription(rx._id)}>
                     <Download size={14} />
                   </Button>
                 </div>
@@ -457,7 +457,7 @@ function DoctorPatientProfile() {
                       <p className="text-xs text-slate-500">{report.category} · {formatDate(report.reportDate)}</p>
                     </div>
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => downloadReport(report._id, report.fileName)}>
+                  <Button aria-label="Download" title="Download" size="sm" variant="secondary" onClick={() => downloadReport(report._id, report.fileName)}>
                     <Download size={14} />
                   </Button>
                 </div>

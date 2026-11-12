@@ -253,7 +253,7 @@ function PatientAppointments() {
           </div>
           <div className="relative">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
+            <input aria-label="Search doctor"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search doctor..."
@@ -456,7 +456,7 @@ function PatientAppointments() {
             <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Rating</label>
             <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" onClick={() => setReviewForm({ ...reviewForm, rating: n })}>
+                <button aria-label="Rate" title="Rate" key={n} type="button" onClick={() => setReviewForm({ ...reviewForm, rating: n })}>
                   <Star size={26} className={n <= reviewForm.rating ? "fill-amber-400 text-amber-400" : "text-slate-300"} />
                 </button>
               ))}
@@ -464,7 +464,7 @@ function PatientAppointments() {
           </div>
           <div>
             <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Comment</label>
-            <textarea
+            <textarea aria-label="Share your experience"
               value={reviewForm.comment}
               onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
               rows={4}

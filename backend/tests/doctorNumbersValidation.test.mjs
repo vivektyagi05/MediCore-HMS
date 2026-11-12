@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import * as S from "../utils/doctorNumbersValidation.js";
+import * as C from "../../src/utils/doctorNumbersValidation.js";
+const now = new Date("2026-10-17T00:00:00Z"); const v = (o) => S.validateDoctorNumbers(o, { now }); let n = 0; const ok = (m) => { n += 1; console.log("PASS:", m); };
+assert.deepEqual(v({}), {}); assert.deepEqual(v({ experience: 12, fees: 500, graduationYear: 2010 }), {}); assert.deepEqual(v({ experience: "0", fees: "0", graduationYear: "" }), {}); assert.deepEqual(v({ fees: "499.50" }), {}); ok("valid values (numbers and numeric strings), 0 allowed, absent keys ignored");
+for (const bad of ["abc", "", " ", "-1", "1.5", "71", "1e1", NaN, null, 71, -3]) assert.ok(v({ experience: bad }).experience, `experience ${bad}`); assert.deepEqual(v({ experience: 70 }), {});
+for (const bad of ["abc", "", "-5", "1e3", "12.345", "100001", NaN, null, -1]) assert.ok(v({ fees: bad }).fees, `fees ${bad}`); assert.deepEqual(v({ fees: 100000 }), {}); ok("NaN, empty, negative, exponent, >2dp and absurd values are rejected (the old check let 'abc' and '' through)");
+for (const bad of ["abc", "1939", "2027", "20100", "99", "1.5e3"]) assert.ok(v({ graduationYear: bad }).graduationYear, `year ${bad}`); assert.deepEqual(v({ graduationYear: 2026 }), {}); assert.deepEqual(v({ graduationYear: 1940 }), {}); assert.deepEqual(v({ graduationYear: null }), {}); ok("graduation year: 1940..current year only");
+for (const c of [{}, { experience: "abc", fees: "-1", graduationYear: "3000" }, { experience: 5, fees: 100.5, graduationYear: 2000 }]) assert.deepEqual(C.validateDoctorNumbers(c, { now }), S.validateDoctorNumbers(c, { now })); ok("client and server agree");
+console.log(`\n${n} doctor number groups passed`);

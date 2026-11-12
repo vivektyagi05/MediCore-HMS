@@ -34,6 +34,7 @@ import { useToast } from "../../context/ToastContext";
 import { downloadAppointmentICS } from "../../utils/icsGenerator";
 import { normalizeDoctorConsultationModes } from "../../utils/consultationMode.js";
 
+import { validateUpload } from "../../utils/fileValidation";
 const STEP_LABELS = [
   "Consultation",
   "Date & Time",
@@ -997,6 +998,7 @@ function StepMedicalHistory({ form, update, selectedFamilyMember }) {
 }
 
 function StepReports({ reports, form, toggleReport, reportUpload, setReportUpload, uploadNewReport, isUploadingReport }) {
+  const toast = useToast();
   return (
     <div>
       <StepHeading icon={FileText} title="Attach relevant reports" help="Optional, but sharing recent reports helps the doctor prepare before you arrive." />
@@ -1031,10 +1033,15 @@ function StepReports({ reports, form, toggleReport, reportUpload, setReportUploa
           <Input placeholder="Title" value={reportUpload.title} onChange={(e) => setReportUpload((p) => ({ ...p, title: e.target.value }))} />
           <Input placeholder="Category (e.g. Blood Test)" value={reportUpload.category} onChange={(e) => setReportUpload((p) => ({ ...p, category: e.target.value }))} />
           <Input type="date" value={reportUpload.reportDate} onChange={(e) => setReportUpload((p) => ({ ...p, reportDate: e.target.value }))} />
-          <input
+          <input aria-label="Report file to attach (PDF, PNG or JPG)"
             type="file"
             accept=".pdf,.png,.jpg,.jpeg"
-            onChange={(e) => setReportUpload((p) => ({ ...p, file: e.target.files?.[0] || null }))}
+            onChange={(e) => {
+              const picked = e.target.files?.[0] || null;
+              const problem = validateUpload(picked);
+              if (problem) { toast.error(problem); e.target.value = ""; setReportUpload((p) => ({ ...p, file: null })); return; }
+              setReportUpload((p) => ({ ...p, file: picked }));
+            }}
             className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm"
           />
         </div>

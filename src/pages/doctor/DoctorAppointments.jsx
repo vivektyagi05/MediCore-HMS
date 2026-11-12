@@ -340,7 +340,7 @@ function DoctorAppointments() {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="relative">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
+            <input aria-label="Search appointments"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder={t("ui.searchPatient")}
@@ -348,7 +348,7 @@ function DoctorAppointments() {
             />
           </div>
 
-          <select
+          <select aria-label="Status Filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="rounded-control border border-slate-300 p-3 text-sm outline-none focus:border-royal-600"

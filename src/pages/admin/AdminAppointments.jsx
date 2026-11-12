@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { readAdminFilterState } from "../../utils/adminQueryFilters.js";
 import { adminApi } from "../../api/adminApi";
 import { appointmentApi } from "../../api/appointmentApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -91,6 +92,21 @@ function AdminAppointments() {
       // rather than showing a fabricated number.
     }
   };
+
+  // Keep controlled filter inputs aligned with URL state, including browser
+  // back/forward navigation and cross-page entity links.
+  useEffect(() => {
+    setFilters(
+      readAdminFilterState(searchParams, [
+        "search",
+        "status",
+        "paymentStatus",
+        "consultationMode",
+        "quickDate",
+        "attention",
+      ]),
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     loadAppointments();

@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRequestLifecycle } from "../../hooks/useRequestLifecycle";
+import { useSyncRefresh } from "../../hooks/useSyncRefresh";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 import { RefreshCcw, Search, Pin, LayoutGrid, Table2 } from "lucide-react";
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -100,7 +103,10 @@ function AdminOperationsCenter() {
   // rendered (Rule #17: never load/render an unbounded list).
   const [page, setPage] = useState(1);
 
+  const { begin, isInFlight } = useRequestLifecycle();
+
   const load = async (targetPage, targetSearch) => {
+    const request = begin();
     setIsLoading(true);
     setError("");
     try {
@@ -112,11 +118,15 @@ function AdminOperationsCenter() {
         page: targetPage,
         pageSize: PAGE_SIZE,
       });
+      // Latest request wins: a slower response for an older filter/page must not overwrite the newer list.
+      if (!request.isCurrent()) return;
       setData(response.data);
     } catch (loadError) {
+      if (!request.isCurrent()) return;
       setError(getApiErrorMessage(loadError));
     } finally {
-      setIsLoading(false);
+      if (request.isCurrent()) setIsLoading(false);
+      request.finish();
     }
   };
 
@@ -176,21 +186,27 @@ function AdminOperationsCenter() {
     return () => window.clearTimeout(timeout);
   }, [search]);
 
-  // Any filter change invalidates the current page — go back to page 1.
+  // The single source of truth for fetching: fires on mount, any committed filter change, and any page change.
+  // A filter change invalidates the current page, so when the user is past page 1 the effect resets the page and
+  // returns WITHOUT fetching; the page change re-runs it and issues the one request (page 1, new filters). Resetting
+  // the page in a separate effect used to fire load(oldPage, newFilter) and then load(1, newFilter).
+  const filterKey = `${priority}|${type}|${status}|${debouncedSearch}`;
+  const lastFilterKey = useRef(filterKey);
   useEffect(() => {
-    setPage(1);
-  }, [priority, type, status, debouncedSearch]);
-
-  // The single source of truth for fetching: fires on realtime sync ticks,
-  // any committed filter change, and any page change.
-  useEffect(() => {
+    if (lastFilterKey.current !== filterKey) {
+      lastFilterKey.current = filterKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
     load(page, debouncedSearch);
-  }, [dashboardSyncTick, priority, type, status, debouncedSearch, page]);
+  }, [filterKey, page]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => load(page, debouncedSearch), 20000);
-    return () => window.clearInterval(interval);
-  }, [priority, type, status, debouncedSearch, page]);
+  // Realtime ticks refresh the current view (deferred while the tab is hidden); the 20s poll skips itself while a
+  // load is still running and pauses while the tab is hidden. Both read the latest page/filters on every call.
+  useSyncRefresh(() => load(page, debouncedSearch), dashboardSyncTick);
+  useVisiblePolling(() => load(page, debouncedSearch), 20000, { isBusy: isInFlight });
 
   const items = data?.items || [];
   const pagination = data?.pagination;

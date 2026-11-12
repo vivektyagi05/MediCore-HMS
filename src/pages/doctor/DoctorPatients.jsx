@@ -255,7 +255,7 @@ function DoctorPatients() {
       <Card title={t("ui.searchPatients")}>
         <div className="relative">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
+          <input aria-label="Search patients"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder={t("ui.searchByNameEmail")}
@@ -276,7 +276,7 @@ function DoctorPatients() {
             </button>
           ))}
 
-          <select
+          <select aria-label="Sort By"
             value={sortBy}
             onChange={(e) => changeSort(e.target.value)}
             className="ml-auto rounded-control border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 outline-none"

@@ -198,7 +198,7 @@ function DoctorSmartInbox() {
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <div className="flex flex-1 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2">
                 <Search size={16} className="text-slate-400" />
-                <input
+                <input aria-label="Search title, message, or category"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                   onKeyDown={(event) => event.key === "Enter" && runSearch()}
@@ -206,7 +206,7 @@ function DoctorSmartInbox() {
                   className="w-full bg-transparent text-sm font-semibold text-slate-800 outline-none placeholder:text-slate-400"
                 />
               </div>
-              <select
+              <select aria-label="Category Filter"
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"

@@ -17,13 +17,15 @@ import mongoose from "mongoose";
 import { connectDB } from "../config/db.js";
 import { buildInventory, criticalSpecs, lintInventory, loadAllModels } from "./lib/indexInventory.js";
 import { ensureIndexes } from "./lib/indexMigration.js";
-import { acquireMigrationLock, finishMigration } from "./lib/migrationState.js";
-
-
+import { acquireMigrationLock, DEFAULT_MIGRATION_LEASE_MS, finishMigration, renewMigrationLock } from "./lib/migrationState.js";
 
 export const MIGRATION_ID = "011_ensure_production_indexes";
 
-export const run = async ({ argv = process.argv.slice(2), db, out = console } = {}) => {
+export const run = async ({
+  argv = process.argv.slice(2), db, out = console,
+  leaseMs = DEFAULT_MIGRATION_LEASE_MS,
+  heartbeatMs = Math.max(1, Math.floor(leaseMs / 3)),
+} = {}) => {
   const dryRun = argv.includes("--dry-run") || argv.includes("--verify-only");
   const asJson = argv.includes("--json");
 
@@ -38,7 +40,7 @@ export const run = async ({ argv = process.argv.slice(2), db, out = console } = 
 
   let token = null;
   if (!dryRun) {
-    const lock = await acquireMigrationLock(handle, MIGRATION_ID);
+    const lock = await acquireMigrationLock(handle, MIGRATION_ID, { leaseMs });
     if (!lock) {
       out.error(`${MIGRATION_ID}: another runner holds the migration lock; not running.`);
       return 4;
@@ -47,15 +49,54 @@ export const run = async ({ argv = process.argv.slice(2), db, out = console } = 
   }
 
   let report;
+  let heartbeatTimer = null;
+  let heartbeatInFlight = null;
+  let heartbeatError = null;
+  const assertLease = async () => {
+    if (heartbeatInFlight) await heartbeatInFlight;
+    if (heartbeatError) throw heartbeatError;
+  };
+  if (token) {
+    if (!Number.isFinite(heartbeatMs) || heartbeatMs <= 0 || heartbeatMs >= leaseMs) {
+      await finishMigration(handle, MIGRATION_ID, token, { status: "failed", summary: { error: "heartbeatMs must be positive and shorter than leaseMs" } });
+      throw new TypeError("heartbeatMs must be positive and shorter than leaseMs");
+    }
+    heartbeatTimer = setInterval(() => {
+      if (heartbeatInFlight || heartbeatError) return;
+      heartbeatInFlight = renewMigrationLock(handle, MIGRATION_ID, token, { leaseMs })
+        .then((renewed) => {
+          if (!renewed) throw new Error("Migration lease was lost; refusing further index work");
+        })
+        .catch((error) => { heartbeatError = error; })
+        .finally(() => { heartbeatInFlight = null; });
+    }, heartbeatMs);
+    heartbeatTimer.unref?.();
+  }
   try {
-    report = await ensureIndexes(handle, specs, { dryRun, log: (m) => out.log(`011: ${m}`) });
+    report = await ensureIndexes(handle, specs, { dryRun, assertLease, log: (m) => out.log(`011: ${m}`) });
+    await assertLease();
   } catch (error) {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (heartbeatInFlight) await heartbeatInFlight;
     if (token) await finishMigration(handle, MIGRATION_ID, token, { status: "failed", summary: { error: String(error?.message).slice(0, 300) } });
     throw error;
   }
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (heartbeatInFlight) await heartbeatInFlight;
+  if (heartbeatError) {
+    if (token) await finishMigration(handle, MIGRATION_ID, token, { status: "failed", summary: { error: String(heartbeatError.message).slice(0, 300) } });
+    throw heartbeatError;
+  }
 
   if (token) {
-    await finishMigration(handle, MIGRATION_ID, token, { status: report.ok ? "completed" : "blocked", summary: { ...report.summary, critical: criticalSpecs(specs).length } });
+    const finished = await finishMigration(handle, MIGRATION_ID, token, {
+      status: report.ok ? "completed" : "blocked",
+      summary: { ...report.summary, critical: criticalSpecs(specs).length, legacySparseIndexes: report.legacy.length },
+    });
+    if (!finished) {
+      out.error(`${MIGRATION_ID}: migration lock ownership was lost before state finalization.`);
+      return 4;
+    }
   }
 
   if (asJson) {

@@ -121,6 +121,14 @@ updateOnboarding(payload) {
         );
     },
 
+    // Phase 03: ask an admin to REVIEW a refund that reduced an earning. Never executes a refund.
+    requestRefundReview(body) {
+      return apiClient.post("/doctors/refund-reviews", body).then((res) => res.data);
+    },
+    getRefundReviews(params = {}) {
+      return apiClient.get("/doctors/refund-reviews", { params }).then((res) => res.data);
+    },
+
     getEarnings() {
     return apiClient
       .get(

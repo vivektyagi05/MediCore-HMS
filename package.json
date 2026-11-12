@@ -16,28 +16,35 @@
     "migrate:consultation-mode": "npm --prefix backend run migrate:consultation-mode",
     "migrate:content-lifecycle": "npm --prefix backend run migrate:content-lifecycle",
     "audit:integrity": "npm --prefix backend run audit:integrity",
-    "smoke:production": "node scripts/production-smoke.mjs"
+    "smoke:production": "node scripts/production-smoke.mjs",
+    "test:frontend": "vitest run"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "axios": "^1.16.1",
+    "dompurify": "^3.4.17",
     "framer-motion": "^12.39.0",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.31.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.18.2",
     "socket.io-client": "^4.8.3",
-    "vite": "^8.2.1",
-    "leaflet": "^1.9.4",
-    "react-leaflet": "^5.0.0"
+    "vite": "^8.2.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.4",
-    "globals": "^17.11.0"
+    "globals": "^17.11.0",
+    "jsdom": "^30.1.3",
+    "vitest": "^5.0.5"
   },
   "engines": {
     "node": ">=22.12.0"

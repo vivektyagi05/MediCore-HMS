@@ -114,7 +114,7 @@ function ConversationPanel({ userId, height = "60vh", typingLabel = "Typing" }) 
       ) : (
         <div className="border-t border-slate-200 p-4">
           <div className="flex items-end gap-2">
-            <input ref={fileInput} type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={onFile} data-testid="chat-file-input" />
+            <input aria-label="Attach a file" ref={fileInput} type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={onFile} data-testid="chat-file-input" />
             <Button variant="secondary" className="h-12 w-12 px-0" onClick={() => fileInput.current?.click()} aria-label="Attach an image or PDF">
               <Paperclip size={18} />
             </Button>

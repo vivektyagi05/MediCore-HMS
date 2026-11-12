@@ -1,6 +1,6 @@
 // Phase 01 REAL-MongoDB evidence: unique indexes, compare-and-set transitions,
 // retry-claim and webhook-dedupe races, migration 012. Skipped unless
-// MONGODB_TEST_URI points at a DISPOSABLE database whose name contains "test"
+// MONGODB_TEST_URI points at a DISPOSABLE database whose name is 'test' or ends in '_test'/'-test'
 // (it is DROPPED at start):
 //   MONGODB_TEST_URI=mongodb://localhost:27017/hms_phase01_test npm run test:mongo
 //
@@ -10,10 +10,13 @@
 // against a real server. Race tests loop to give real interleavings a chance.
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
+import { getDisposableMongoTestUri } from "./safety.mjs";
 
-const uri = process.env.MONGODB_TEST_URI;
-if (!uri) { console.log("SKIP: set MONGODB_TEST_URI to run Phase 01 real-Mongo tests"); process.exit(0); }
-if (!/test/i.test(new URL(uri).pathname)) { console.error("REFUSING: database name in MONGODB_TEST_URI must contain 'test' (it is dropped)"); process.exit(1); }
+const uri = getDisposableMongoTestUri();
+if (!uri) {
+  console.log("SKIP: set MONGODB_TEST_URI to a verified disposable *_test database to run real-Mongo tests");
+  process.exit(0);
+}
 process.env.MONGO_URI ||= uri;
 process.env.JWT_SECRET ||= "test_secret_for_ci_only_not_real_do_not_use";
 process.env.NODE_ENV ||= "test";

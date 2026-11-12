@@ -90,10 +90,10 @@ export default function DoctorVerificationCenter() {
       {(data.expired.length > 0 || data.expiringSoon.length > 0) && (
         <div className="glass-card space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-5">
           <p className="flex items-center gap-2 text-sm font-black text-amber-800"><AlertTriangle size={15} /> Document Expiry Alerts</p>
-          {data.expired.map((doc) => (
+          {(data.expired ?? []).map((doc) => (
             <p key={doc._id} className="text-sm text-rose-700">⚠ {doc.title} expired on {new Date(doc.expiryDate).toLocaleDateString()}</p>
           ))}
-          {data.expiringSoon.map((doc) => (
+          {(data.expiringSoon ?? []).map((doc) => (
             <p key={doc._id} className="text-sm text-amber-700">{doc.title} expires on {new Date(doc.expiryDate).toLocaleDateString()}</p>
           ))}
         </div>
@@ -102,7 +102,7 @@ export default function DoctorVerificationCenter() {
       <div className="glass-card rounded-2xl p-6">
         <p className="mb-4 text-xs font-black uppercase tracking-wider text-slate-400">Required Documents</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          {data.requiredDocuments.map((doc) => {
+          {(data.requiredDocuments ?? []).map((doc) => {
             const meta = DOC_STATUS_META[doc.status] || DOC_STATUS_META.not_uploaded;
             const Icon = meta.icon;
             return (
@@ -122,7 +122,7 @@ export default function DoctorVerificationCenter() {
         <div className="glass-card rounded-2xl p-6">
           <p className="mb-4 text-xs font-black uppercase tracking-wider text-slate-400">Verification Timeline</p>
           <div className="space-y-3 border-l-2 border-slate-200 pl-4">
-            {data.timeline.map((entry, i) => (
+            {(data.timeline ?? []).map((entry, i) => (
               <div key={i} className="relative">
                 <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-blue-600" />
                 <p className="text-sm font-bold capitalize text-slate-800">{entry.status}</p>

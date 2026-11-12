@@ -38,8 +38,16 @@ const getRequestKey = (url, config = {}) => {
   return `${token}:${url}:${stableSerialize(config.params)}`;
 };
 
+// Uploads and long reports legitimately take longer than the 15 s default: an 8 MB file on a slow mobile connection (or the
+// reconciliation report, which runs many finders) used to fail with "request timed out" while still succeeding server-side,
+// inviting a duplicate retry. Callers can still set their own `timeout`.
+const LONG_REQUEST_TIMEOUT_MS = 90000;
+
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem("hms_token");
+  if (typeof FormData !== "undefined" && config.data instanceof FormData && config.timeout === 15000) {
+    config.timeout = LONG_REQUEST_TIMEOUT_MS;
+  }
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -51,7 +59,12 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Authentication endpoints answer 401 for "wrong password": that is a form error, not an expired session, so it must
+    // not log anyone out, clear caches or show "session expired".
+    const isAuthAttempt = /\/auth\/(login|register|verify|forgot|reset|otp)/.test(String(error.config?.url || ""));
+    if (error.response?.status === 401 && !isAuthAttempt) {
+      // Only a real session (a token existed) is "expired": leave a one-time note for the login screen to explain it.
+      if (localStorage.getItem("hms_token")) sessionStorage.setItem("hms_session_expired", "1");
       localStorage.removeItem("hms_token");
       localStorage.removeItem("hms_user");
       pendingGets.clear();

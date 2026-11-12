@@ -250,7 +250,7 @@ function ExecutionExplorerTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <select
+        <select aria-label="Source"
           className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
           value={filters.source}
           onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value }))}
@@ -258,7 +258,7 @@ function ExecutionExplorerTab() {
           <option value="flow">Automation Flow Runs</option>
           <option value="cron">Background Job Runs</option>
         </select>
-        <select
+        <select aria-label="Status"
           className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
           value={filters.status}
           onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
@@ -277,18 +277,18 @@ function ExecutionExplorerTab() {
               load(1);
             }}
           >
-            <input
+            <input aria-label="Search by flow name"
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
               placeholder="Search by flow name…"
               value={filters.search}
               onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
             />
-            <Button type="submit" variant="secondary">
+            <Button aria-label="Search" title="Search" type="submit" variant="secondary">
               <Search size={16} />
             </Button>
           </form>
         )}
-        <Button variant="secondary" onClick={() => load(pagination.page)}>
+        <Button aria-label="Refresh" title="Refresh" variant="secondary" onClick={() => load(pagination.page)}>
           <RefreshCcw size={16} />
         </Button>
       </div>
@@ -584,7 +584,7 @@ function FailuresTab() {
         <Card title="Failures by Trigger">
           {data.byTriggerType.length ? (
             <ul className="space-y-2 text-sm">
-              {data.byTriggerType.map((t) => (
+              {(data.byTriggerType ?? []).map((t) => (
                 <li key={t.triggerType} className="flex justify-between">
                   <span className="text-slate-700">{t.triggerLabel}</span>
                   <span className="font-black text-rose-700">{t.count}</span>
@@ -598,7 +598,7 @@ function FailuresTab() {
         <Card title="Failures by Action Type">
           {data.byActionType.length ? (
             <ul className="space-y-2 text-sm">
-              {data.byActionType.map((a) => (
+              {(data.byActionType ?? []).map((a) => (
                 <li key={a.actionType} className="flex justify-between">
                   <span className="text-slate-700">{a.actionType}</span>
                   <span className="font-black text-rose-700">{a.count}</span>
@@ -703,7 +703,7 @@ function RetryQueueTab() {
           <p className="text-sm text-slate-500">No payment has exhausted its retry attempts right now.</p>
         ) : (
           <div className="space-y-2">
-            {data.deadLetter.map((p) => (
+            {(data.deadLetter ?? []).map((p) => (
               <div key={p._id} className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm">
                 <div>
                   <p className="font-semibold text-slate-800">{fmtCurrency(p.amount)}</p>
@@ -725,7 +725,7 @@ function RetryQueueTab() {
           <p className="text-sm text-slate-500">No payment is currently scheduled for retry.</p>
         ) : (
           <ul className="space-y-2 text-sm">
-            {data.inRetryWindow.map((p) => (
+            {(data.inRetryWindow ?? []).map((p) => (
               <li key={p._id} className="flex justify-between rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <span className="font-semibold text-slate-800">{fmtCurrency(p.amount)}</span>
                 <span className="text-slate-600">

@@ -16,6 +16,7 @@ const isDup = (e) => e?.code === 11000;
 
 /** @returns {Promise<{token:string}|null>} null when another live runner holds it */
 export async function acquireMigrationLock(db, id, { leaseMs = DEFAULT_MIGRATION_LEASE_MS, now = () => new Date() } = {}) {
+  if (!Number.isFinite(leaseMs) || leaseMs <= 0) throw new TypeError("leaseMs must be a positive number");
   const coll = db.collection(MIGRATION_STATE_COLLECTION);
   const token = randomUUID();
   const startedAt = now();
@@ -26,19 +27,44 @@ export async function acquireMigrationLock(db, id, { leaseMs = DEFAULT_MIGRATION
   } catch (error) {
     if (!isDup(error)) throw error;
   }
+  const observedAt = now();
   const current = await coll.findOne({ _id: id });
   if (!current) return acquireMigrationLock(db, id, { leaseMs, now }); // deleted between calls
-  const live = current.status === "running" && current.leaseExpiresAt && new Date(current.leaseExpiresAt).getTime() > now().getTime();
+  const live = current.status === "running" && current.leaseExpiresAt && new Date(current.leaseExpiresAt).getTime() > observedAt.getTime();
   if (live) return null;
-  const taken = await coll.updateOne({ _id: id, ownerToken: current.ownerToken, status: current.status }, { $set: running });
+  const takeoverFilter = { _id: id, status: current.status };
+  if (Object.prototype.hasOwnProperty.call(current, "ownerToken")) takeoverFilter.ownerToken = current.ownerToken;
+  else takeoverFilter.ownerToken = { $exists: false };
+  // Compare the exact lease value in the atomic takeover itself. If a
+  // heartbeat changes leaseExpiresAt between findOne() and updateOne(), this
+  // compare-and-set fails rather than stealing the renewed lease.
+  if (current.status === "running") {
+    takeoverFilter.leaseExpiresAt = Object.prototype.hasOwnProperty.call(current, "leaseExpiresAt")
+      ? current.leaseExpiresAt
+      : { $exists: false };
+  }
+  const taken = await coll.updateOne(takeoverFilter, { $set: running });
   return taken.matchedCount === 1 ? { token } : null;
 }
 
 /** Fenced: only the current owner of a still-running record can finish it. */
-export async function finishMigration(db, id, token, { status, summary = null }) {
+export async function renewMigrationLock(db, id, token, { leaseMs = DEFAULT_MIGRATION_LEASE_MS, now = () => new Date() } = {}) {
+  if (!Number.isFinite(leaseMs) || leaseMs <= 0) throw new TypeError("leaseMs must be a positive number");
+  const current = now();
   const result = await db.collection(MIGRATION_STATE_COLLECTION).updateOne(
-    { _id: id, ownerToken: token, status: "running" },
-    { $set: { status, finishedAt: new Date(), summary } },
+    { _id: id, ownerToken: token, status: "running", leaseExpiresAt: { $gt: current } },
+    { $set: { heartbeatAt: current, leaseExpiresAt: new Date(current.getTime() + leaseMs) } },
+  );
+  return result.matchedCount === 1;
+}
+
+export async function finishMigration(db, id, token, { status, summary = null }) {
+  if (!["completed", "blocked", "failed"].includes(status)) {
+    throw new TypeError(`Invalid terminal migration status: ${status}`);
+  }
+  const result = await db.collection(MIGRATION_STATE_COLLECTION).updateOne(
+    { _id: id, ownerToken: token, status: "running", leaseExpiresAt: { $gt: new Date() } },
+    { $set: { status, finishedAt: new Date(), leaseExpiresAt: null, summary } },
   );
   return result.matchedCount === 1;
 }

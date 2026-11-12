@@ -1,6 +1,8 @@
 import HospitalSetting from "../../models/HospitalSetting.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { writeAdminLog } from "../../utils/adminAudit.js";
+import { AppError } from "../../middleware/errorMiddleware.js";
+import { validateSettingsUpdate, normaliseSettingsUpdate } from "../../utils/settingsValidation.js";
 
 const defaultSettings = {
   singletonKey: "global",
@@ -46,9 +48,13 @@ export const updateSettings = asyncHandler(async (req, res) => {
     return acc;
   }, {});
 
+  // The client mirrors these rules, but a client is never the authority: reject bad values with per-field messages.
+  const fieldErrors = validateSettingsUpdate(updates);
+  if (Object.keys(fieldErrors).length) throw new AppError("Some settings are invalid", 400, { code: "SETTINGS_INVALID", fieldErrors });
+
   const settings = await HospitalSetting.findOneAndUpdate(
     { singletonKey: "global" },
-    { ...updates, updatedBy: req.user._id },
+    { ...normaliseSettingsUpdate(updates), updatedBy: req.user._id },
     { upsert: true, returnDocument: "after", runValidators: true },
   );
 

@@ -162,6 +162,7 @@ lazy(
 const InvoicePreview = lazy(() => import("../pages/invoice/InvoicePreview"));
 const InvoiceHistory = lazy(() => import("../pages/finance/InvoiceHistory"));
 const SubscriptionBilling = lazy(() => import("../pages/finance/SubscriptionBilling"));
+const NotFound = lazy(() => import("../pages/public/NotFound"));
 const AdminFinanceDashboard = lazy(() => import("../pages/payment/AdminFinanceDashboard"));
 const PaymentCheckout = lazy(() => import("../pages/payment/PaymentCheckout"));
 const WalletDashboard = lazy(() => import("../pages/payment/WalletDashboard"));
@@ -446,7 +447,7 @@ function AppRoutes() {
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
       </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

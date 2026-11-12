@@ -40,9 +40,9 @@ assert.match(onboarding, /applyDoctorMasterData/);
 assert.match(practice, /resolveDoctorMasterData/);
 assert.match(practice, /normalizeClinicMasterData/);
 assert.match(publicController, /listMasterData/);
-assert.match(adminController, /req\.query\.state/);
-assert.match(adminController, /req\.query\.district/);
-assert.match(adminController, /req\.query\.city/);
+assert.match(adminController, /q\.state/);
+assert.match(adminController, /q\.district/);
+assert.match(adminController, /q\.city/);
 assert.match(migration, /bootstrapMasterDataFromDoctors/);
 
 console.log("Phase-3 master-data contract: PASS");

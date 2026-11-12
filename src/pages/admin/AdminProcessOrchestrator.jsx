@@ -100,14 +100,14 @@ function RegistryTab({ tick, onSelectProcess }) {
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
+            <input aria-label="Search processes"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search processes…"
               className="w-full rounded-xl border border-slate-200 py-2 pl-8 pr-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500"
             />
           </div>
-          <select
+          <select aria-label="Category"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700"
@@ -387,7 +387,7 @@ function ImpactTraceTab({ selectedProcessId }) {
       <Card title="Cross-System Event Trace">
         <p className="mb-3 text-sm text-slate-500">Enter a real record id (appointment, refund, insurance claim, payment, doctor, or user id) to trace every automation run, notification, AI draft, and workflow lifecycle event associated with it.</p>
         <div className="flex gap-2">
-          <input
+          <input aria-label="Source id"
             value={sourceId}
             onChange={(e) => setSourceId(e.target.value)}
             placeholder="Source id…"

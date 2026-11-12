@@ -48,6 +48,14 @@ const prescriptionSchema = new mongoose.Schema(
 );
 
 prescriptionSchema.index({ patientId: 1, createdAt: -1 });
+// D-02: at most ONE active prescription per appointment. createPrescription's findOne-then-create check is a
+// race on a double-submit; this partial unique index makes the database the authority (E11000 -> 409 via the
+// error middleware). "void" rows are excluded so a voided prescription never blocks a re-issue.
+// autoIndex is OFF in production: build it with `npm run migrate:prescription-uniqueness` (migration 013).
+prescriptionSchema.index(
+  { appointmentId: 1 },
+  { unique: true, name: "uniq_prescription_active_appointment", partialFilterExpression: { status: "active" } },
+);
 prescriptionSchema.index({ diagnosis: "text", notes: "text" });
 
 const Prescription = mongoose.model("Prescription", prescriptionSchema);

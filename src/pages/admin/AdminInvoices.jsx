@@ -1,6 +1,7 @@
 import { Download, Eye, FileText, IndianRupee } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { readAdminFilterState } from "../../utils/adminQueryFilters.js";
 import { invoiceApi } from "../../api/invoiceApi";
 import { getApiErrorMessage } from "../../api/axios";
 import AdminModal from "../../components/admin/AdminModal";
@@ -76,6 +77,18 @@ function AdminInvoices() {
       if (!summary) toast.error(getApiErrorMessage(error) || "Invoice summary is unavailable.");
     }
   };
+
+  // Keep controlled filter inputs aligned with URL state, including browser
+  // back/forward navigation and cross-page entity links.
+  useEffect(() => {
+    setFilters(
+      readAdminFilterState(searchParams, [
+        "search",
+        "status",
+        "billingType",
+      ]),
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     loadInvoices();
@@ -156,7 +169,7 @@ function AdminInvoices() {
           <Button variant="secondary" size="sm" onClick={() => setDetailId(row._id)}>
             <Eye size={14} /> View
           </Button>
-          <Button variant="tertiary" size="sm" onClick={() => download(row)} disabled={!(row.hasPdf ?? row.pdfPath)}>
+          <Button aria-label="Download" title="Download" variant="tertiary" size="sm" onClick={() => download(row)} disabled={!(row.hasPdf ?? row.pdfPath)}>
             <Download size={14} />
           </Button>
         </div>

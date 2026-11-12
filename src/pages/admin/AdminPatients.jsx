@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { readAdminFilterState } from "../../utils/adminQueryFilters.js";
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
 import AdminModal from "../../components/admin/AdminModal";
@@ -95,6 +96,23 @@ function AdminPatients() {
       // showing a fabricated number.
     }
   };
+
+  // Keep controlled filter inputs aligned with URL state, including browser
+  // back/forward navigation and cross-page entity links.
+  useEffect(() => {
+    setFilters(
+      readAdminFilterState(searchParams, [
+        "search",
+        "status",
+        "gender",
+        "attention",
+        "hasUpcoming",
+        "hasOutstanding",
+        "hasInsurance",
+        "hasFamily",
+      ]),
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     loadPatients();

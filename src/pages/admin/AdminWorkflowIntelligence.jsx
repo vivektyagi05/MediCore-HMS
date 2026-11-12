@@ -381,7 +381,7 @@ function HealingTab({ tick }) {
           Every action below is on a fixed allowlist mapped to a real, pre-existing mechanism — nothing executes until an admin explicitly approves it.
         </p>
         <div className="flex flex-wrap items-center gap-3">
-          <select
+          <select aria-label="Action"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             value={selectedAction}
             onChange={(e) => setSelectedAction(e.target.value)}

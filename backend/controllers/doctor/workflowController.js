@@ -242,13 +242,24 @@ export const createPrescription = asyncHandler(async (req, res) => {
     followUpDate,
   });
 
-  prescription.pdfStorageKey =
-    await createPrescriptionPdf(
-      prescription,
-      appointment
-    );
+  // D-03: the row exists from here on. If rendering/storing the PDF or the follow-up save fails, nothing has
+  // been issued yet (no history link, no notification), so remove the half-created row. Without this the
+  // doctor got a 500, the orphan stayed "active", and every retry was refused with 409 "already exists"
+  // while no PDF could ever be produced for it.
+  try {
+    prescription.pdfStorageKey =
+      await createPrescriptionPdf(
+        prescription,
+        appointment
+      );
 
-  await prescription.save();
+    await prescription.save();
+  } catch (error) {
+    await Prescription.deleteOne({ _id: prescription._id }).catch((cleanupError) =>
+      logger.error("prescription rollback after PDF failure failed", { prescriptionId: String(prescription._id), message: cleanupError?.message }));
+    logger.warn("prescription creation rolled back: PDF generation/storage failed", { prescriptionId: String(prescription._id), message: error?.message });
+    throw error;
+  }
 
   await upsertHistoryLink({
     doctorId: doctor._id,
@@ -332,12 +343,24 @@ export const pickPrescriptionEditableFields = (body) => {
 
 export const updatePrescription = asyncHandler(async (req, res) => {
   const doctor = await getDoctorProfile(req.user._id);
-  const prescription = await Prescription.findOneAndUpdate(
-    { _id: req.params.id, doctorId: doctor._id },
-    pickPrescriptionEditableFields(req.body),
-    { returnDocument: "after", runValidators: true },
-  );
+  const prescription = await Prescription.findOne({ _id: req.params.id, doctorId: doctor._id });
   if (!prescription) throw new AppError("Prescription not found", 404);
+
+  const edits = pickPrescriptionEditableFields(req.body);
+  if (Object.keys(edits).length === 0) {
+    return res.status(200).json({ success: true, data: { prescription }, message: "Prescription updated successfully" });
+  }
+
+  // D-04: the stored PDF is what the patient and admin download, but this handler used to edit diagnosis /
+  // medicines / notes and leave the old PDF in place, so the issued document silently disagreed with the
+  // record. Validate the merged record, render the new PDF from it, and only then persist both together: a
+  // render/storage failure now leaves the record and its PDF unchanged and the edit can simply be retried.
+  prescription.set(edits);
+  await prescription.validate();
+  const appointment = await ensureAppointmentOwned(doctor._id, prescription.appointmentId);
+  prescription.pdfStorageKey = await createPrescriptionPdf(prescription, appointment);
+  await prescription.save();
+
   res.status(200).json({ success: true, data: { prescription }, message: "Prescription updated successfully" });
 });
 
@@ -502,7 +525,15 @@ export const updateSchedule = asyncHandler(async (req, res) => {
     throw new AppError(err.message, err.statusCode || 400);
   }
   doctor.availability = availability;
-  if (req.body.blockedDates) doctor.blockedDates = req.body.blockedDates.map((item) => ({ ...item, date: normalizeDate(item.date) }));
+  if (req.body.blockedDates !== undefined) {
+    const blocked = req.body.blockedDates;
+    if (!Array.isArray(blocked) || blocked.length > 366) throw new AppError("blockedDates must be a list of at most 366 dates", 400);
+    for (const item of blocked) {
+      if (!item || Number.isNaN(Date.parse(item.date))) throw new AppError("Every blocked date needs a valid date", 400);
+      if (item.reason !== undefined && (typeof item.reason !== "string" || item.reason.length > 200)) throw new AppError("A blocked-date reason must be 200 characters or fewer", 400);
+    }
+    doctor.blockedDates = blocked.map((item) => ({ ...item, date: normalizeDate(item.date) }));
+  }
   await doctor.save();
   try { clinicalEmitter.scheduleUpdated(doctor._id); } catch (error) { logger.warn("clinicalEmitter.scheduleUpdated failed", { message: error?.message }); }
   // Schedule-change impact: appointments now outside the valid schedule are

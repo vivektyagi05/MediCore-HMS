@@ -7,13 +7,15 @@ const typeOf = (v) => (v === null ? "null" : v && v._isObjectId ? "objectId" : A
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const matchesCond = (doc, filter) => {
-  if (filter.$or) return filter.$or.some((f) => matchesCond(doc, f));
-  return Object.entries(filter).every(([field, cond]) => {
+  if (filter.$or && !filter.$or.some((f) => matchesCond(doc, f))) return false;
+  return Object.entries(filter).filter(([field]) => field !== "$or").every(([field, cond]) => {
     const present = Object.prototype.hasOwnProperty.call(doc, field);
     const value = doc[field];
     if (cond && typeof cond === "object" && !cond._isObjectId && !Array.isArray(cond)) {
       if ("$exists" in cond) return present === cond.$exists;
       if ("$type" in cond) return present && typeOf(value) === cond.$type;
+      if ("$gt" in cond) return present && new Date(value).getTime() > new Date(cond.$gt).getTime();
+      if ("$lte" in cond) return present && new Date(value).getTime() <= new Date(cond.$lte).getTime();
     }
     if (cond === null) return !present || value === null;
     return eq(value, cond);
@@ -59,7 +61,16 @@ export function createFakeDb({ failCreateFor = [] } = {}) {
             const e = new Error(`An existing index has the same name as the requested index: ${options.name}`); e.code = 86; e.codeName = "IndexKeySpecsConflict"; throw e;
           }
           if (options.unique && uniqueViolations(c, key, options)) { const e = new Error("E11000 duplicate key error building index"); e.code = 11000; throw e; }
-          c.indexes.push({ v: 2, key, name: options.name, ...options });
+          const isTextIndex = Object.values(key || {}).includes("text");
+          // MongoDB listIndexes() exposes text indexes using its internal
+          // _fts/_ftsx key plus a weights document, not the schema's original
+          // { field: "text" } key. Mirror that server representation so the
+          // migration's post-create verification tests the real contract.
+          const storedKey = isTextIndex ? { _fts: "text", _ftsx: 1 } : key;
+          const storedOptions = isTextIndex
+            ? { ...options, weights: options.weights || Object.fromEntries(Object.keys(key).filter((field) => key[field] === "text").map((field) => [field, 1])) }
+            : options;
+          c.indexes.push({ v: 2, key: storedKey, name: options.name, ...storedOptions });
           return options.name;
         },
         aggregate(pipeline) {
@@ -89,9 +100,13 @@ export function createFakeDb({ failCreateFor = [] } = {}) {
           if (c.docs.some((d) => d._id === doc._id)) { const e = new Error("E11000 duplicate key"); e.code = 11000; throw e; }
           c.exists = true; c.docs.push({ ...doc }); return { insertedId: doc._id };
         },
-        async findOne(filter) { return c.docs.find((d) => matchesCond(d, filter)) || null; },
+        
+        async findOne(filter) {
+          const doc = c.docs.find((d) => matchesCond(d, filter));
+          return doc ? { ...doc } : null;
+        },
         async updateOne(filter, update) {
-          const doc = c.docs.find((d) => Object.entries(filter).every(([k, v]) => eq(d[k], v)));
+          const doc = c.docs.find((d) => matchesCond(d, filter));
           if (!doc) return { matchedCount: 0 };
           Object.assign(doc, update.$set || {}); return { matchedCount: 1 };
         },

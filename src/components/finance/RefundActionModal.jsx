@@ -9,6 +9,7 @@ import Input from "../ui/Input";
 import Select from "../ui/Select";
 import { useToast } from "../../context/ToastContext";
 
+import { parseMoney } from "../../utils/moneyInput";
 const formatMoney = (value, currency = "INR") =>
   `${currency === "INR" ? "\u20b9" : `${currency} `}${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
@@ -85,16 +86,20 @@ function RefundTrackerView({ requestId }) {
 
 // P23 Section 10 Case A — eligible cancellation refund request.
 function EligibleRefundForm({ payment, eligibility, onSubmitted, onClose }) {
-  const [amount, setAmount] = useState(eligibility.maximumRefundAmount);
+  const [amount, setAmount] = useState(String(eligibility.maximumRefundAmount ?? ""));
   const [reasonCode, setReasonCode] = useState("patient_cancellation");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
 
+  // The server decides the real maximum; this only stops an obviously wrong amount (empty, 0, NaN, more than eligible) from being sent.
+  const parsed = parseMoney(amount, { min: 0.01, max: Number(eligibility.maximumRefundAmount) || 0, label: "Refund amount", currency: "₹" });
+
   const submit = async () => {
+    if (submitting || parsed.error) return; // duplicate-click guard (the button is also disabled)
     setSubmitting(true);
     try {
-      await refundApi.createRequest(payment._id, { amount, reasonCode, description });
+      await refundApi.createRequest(payment._id, { amount: parsed.value, reasonCode, description: description.trim() });
       toast.success("Refund request submitted.");
       onSubmitted();
     } catch (error) {
@@ -111,11 +116,16 @@ function EligibleRefundForm({ payment, eligibility, onSubmitted, onClose }) {
       </p>
       <Input
         label="Refund amount"
+        name="refund-amount"
         type="number"
+        inputMode="decimal"
+        step="0.01"
         max={eligibility.maximumRefundAmount}
-        min={0}
+        min={0.01}
         value={amount}
-        onChange={(e) => setAmount(Number(e.target.value))}
+        disabled={submitting}
+        error={parsed.error}
+        onChange={(e) => setAmount(e.target.value)}
       />
       <Select label="Reason" value={reasonCode} onChange={(e) => setReasonCode(e.target.value)}>
         {CANCELLATION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -125,13 +135,15 @@ function EligibleRefundForm({ payment, eligibility, onSubmitted, onClose }) {
         <textarea
           className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-950 shadow-sm outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10"
           rows={3}
+          maxLength={500}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+        <span className="mt-1 block text-right text-xs text-slate-400">{description.length} / 500</span>
       </label>
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button isLoading={submitting} onClick={submit}>Submit refund request</Button>
+        <Button variant="ghost" onClick={onClose} disabled={submitting}>Cancel</Button>
+        <Button isLoading={submitting} disabled={Boolean(parsed.error)} onClick={submit}>Submit refund request</Button>
       </div>
     </div>
   );
@@ -180,7 +192,7 @@ function ReportProblemWizard({ payment, onSubmitted, onClose }) {
       {wizardStep === 2 && (
         <>
           <p className="text-sm font-bold text-slate-700">Describe the problem</p>
-          <textarea
+          <textarea aria-label="Tell us what happened, with as much detail as you can."
             className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm text-slate-950 shadow-sm outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10"
             rows={4}
             value={description}

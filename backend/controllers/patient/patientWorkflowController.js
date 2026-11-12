@@ -355,6 +355,8 @@ export const getFamilyMemberWorkspace = asyncHandler(async (req, res) => {
 export const createFamilyMember = asyncHandler(async (req, res) => {
   const required = ["name", "relation", "age", "gender"];
   if (required.some((key) => req.body[key] === undefined || req.body[key] === "")) throw new AppError("Name, relation, age, and gender are required", 400);
+  const familyErrors = validateFamilyMember(req.body);
+  if (Object.keys(familyErrors).length) failValidation("Some family member details are invalid", "FAMILY_INVALID", familyErrors);
   const familyMember = await FamilyMember.create({ ...pickFamilyMemberFields(req.body), userId: req.user._id });
   res.status(201).json({ success: true, data: { familyMember }, message: "Family member added successfully" });
 });
@@ -385,6 +387,8 @@ export const listInsurance = asyncHandler(async (req, res) => {
 export const createInsurance = asyncHandler(async (req, res) => {
   if (!req.body.provider || !req.body.policyNumber || !req.body.policyHolder || !req.body.validTill) throw new AppError("Insurance provider, policy number, holder, and validity are required", 400);
   assertValidUploadOrDelete(req.file);
+  const policyErrors = validateInsurancePolicy(req.body);
+  if (Object.keys(policyErrors).length) failValidation(Object.values(policyErrors)[0], "INSURANCE_INVALID", policyErrors);
   if (req.body.familyMemberId) await assertOwnedFamilyMember(req, req.body.familyMemberId);
   const existingPolicy =
   await Insurance.findOne({
@@ -445,10 +449,15 @@ export const deleteInsurance = asyncHandler(async (req, res) => {
 export const submitInsuranceClaim = asyncHandler(async (req, res) => {
   const policy = await assertOwnedInsurance(req, req.params.id);
   if (!req.body.claimAmount) throw new AppError("Claim amount is required", 400);
+  // A second submit (double click, retry, two tabs) must not overwrite or duplicate a claim that is already being processed.
+  if (CLAIM_IN_PROGRESS.includes(policy.claimStatus)) throw new AppError("A claim for this policy is already in progress", 409, { code: "CLAIM_IN_PROGRESS" });
+  const { remainingAmount } = await buildInsuranceUtilization(policy, req.user._id);
+  const claimErrors = validateClaim(req.body, { remainingAmount });
+  if (Object.keys(claimErrors).length) failValidation(Object.values(claimErrors)[0], "CLAIM_INVALID", claimErrors);
   policy.claimStatus = "submitted";
   policy.claimAmount = Number(req.body.claimAmount);
-  policy.claimNotes = req.body.claimNotes || "";
-  policy.claimHistory.push({ status: "submitted", note: req.body.claimNotes || "", at: new Date() });
+  policy.claimNotes = (req.body.claimNotes || "").trim();
+  policy.claimHistory.push({ status: "submitted", note: (req.body.claimNotes || "").trim(), at: new Date() });
   await policy.save();
   // Phase A6.2.3 — Automation Studio real trigger.
   await emitAutomationTrigger(TRIGGER_TYPES.INSURANCE_SUBMITTED, {
@@ -485,6 +494,11 @@ export const getInsuranceUtilization = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data, message: "Insurance utilization fetched successfully" });
 });
 import { recalculateAndPersistDoctorRating } from "../../services/reviewRatingService.js";
+import { validateVitals } from "../../utils/vitalsValidation.js";
+
+// One place that turns field-level validation results into a 400 the UI can map onto its inputs.
+const failValidation = (message, code, fieldErrors) => { throw new AppError(message, 400, { code, fieldErrors }); };
+import { validateFamilyMember, validateInsurancePolicy, validateClaim, CLAIM_IN_PROGRESS } from "../../utils/patientFormValidation.js";
 export const listReviews = asyncHandler(async (req, res) => {
   const reviews = await Review.find(ownership(req)).populate({ path: "doctorId", populate: { path: "userId", select: "name" } }).sort({ createdAt: -1 }).lean();
   res.status(200).json({ success: true, data: { reviews }, message: "Reviews fetched successfully" });
@@ -678,6 +692,10 @@ export const getProfileCompletion = asyncHandler(async (req, res) => {
 });
 
 export const updatePatientProfile = asyncHandler(async (req, res) => {
+  const incoming = req.body?.patientProfile;
+  if (incoming !== undefined && (incoming === null || typeof incoming !== "object" || Array.isArray(incoming))) throw new AppError("patientProfile must be an object", 400);
+  const vitalErrors = validateVitals(incoming?.vitals, incoming?.lifestyle);
+  if (Object.keys(vitalErrors).length) failValidation("Some health values are out of range", "VITALS_INVALID", vitalErrors);
   const user = await User.findByIdAndUpdate(req.user._id, { patientProfile: req.body.patientProfile }, { returnDocument: "after", runValidators: true }).select("-password");
   res.status(200).json({ success: true, data: { user }, message: "Profile updated successfully" });
 });

@@ -33,6 +33,13 @@ function Login() {
   const location = useLocation();
   const passwordId = useId();
   const { t } = useI18n();
+  // One-time note when the axios layer ended a real session (expired/revoked token). Read once and cleared, so a refresh
+  // or a later visit does not repeat it.
+  const [sessionExpired] = useState(() => {
+    const expired = sessionStorage.getItem("hms_session_expired") === "1";
+    if (expired) sessionStorage.removeItem("hms_session_expired");
+    return expired;
+  });
 
   const redirectTo = (() => {
     const params = new URLSearchParams(location.search);
@@ -99,6 +106,8 @@ function Login() {
           <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">{t("p14.login.title")}</h2>
           <p className="mt-3 text-base leading-7 text-slate-600">{t("p14.login.subtitle")}</p>
         </div>
+
+        {sessionExpired && <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-900" role="status">Your session has ended. Please sign in again to continue. Anything you had not saved was not submitted.</div>}
 
         {bookingIntent && <div className="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold leading-6 text-sky-900" role="status">{t("p14.login.bookingNote")}</div>}
 

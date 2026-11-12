@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # CHANGELOG — PHASE UI-13 FINAL + UI-14 ADMIN PLATFORM ADMINISTRATION WORKSPACE
 
 ## 1. UI-13 remaining gap audit

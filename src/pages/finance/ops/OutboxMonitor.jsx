@@ -6,11 +6,10 @@ import EmptyState from "../../../components/shared/EmptyState";
 import ErrorState from "../../../components/shared/ErrorState";
 import Button from "../../../components/ui/Button";
 import Card from "../../../components/ui/Card";
-import Modal from "../../../components/ui/Modal";
+import ReasonDialog from "../../../components/ui/ReasonDialog";
 import Loader from "../../../components/ui/Loader";
 import MetricCard from "../../../components/ui/MetricCard";
 import StatusBadge from "../../../components/ui/StatusBadge";
-import Textarea from "../../../components/ui/Textarea";
 import { useToast } from "../../../context/ToastContext";
 
 // Durable financial-event (email outbox) health. "queued" is not "delivered": only `sent`
@@ -22,9 +21,6 @@ function OutboxMonitor() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [target, setTarget] = useState(null);
-  const [reason, setReason] = useState("");
-  const [reasonError, setReasonError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -39,27 +35,24 @@ function OutboxMonitor() {
   }, [page]);
   useEffect(() => { load(); }, [load]);
 
-  const confirm = async () => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
+  // The dialog owns the reason text and its validation (5-300, like the server). A rejection (e.g. 409 "no longer
+  // exhausted") is shown INSIDE the dialog with the typed text kept; we refresh the list so the row reflects reality.
+  const requeue = async ({ reason }) => {
     try {
-      await adminApi.requeueFinanceOutboxEvent(target._id, reason.trim());
-      toast.success("Event re-queued. It is delivered only when the provider accepts it.");
-      setTarget(null);
-      setReason("");
+      await adminApi.requeueFinanceOutboxEvent(target._id, reason);
     } catch (error) {
-      toast.error(getApiErrorMessage(error));
-      setTarget(null);
-    } finally {
-      setIsSubmitting(false);
       await load();
+      throw new Error(getApiErrorMessage(error), { cause: error });
     }
+    toast.success("Event re-queued. It is delivered only when the provider accepts it.");
+    setTarget(null);
+    await load();
   };
-  const open = (row) => {
-    setTarget(row);
-    setReason("");
-    setReasonError("");
-  };
+
+  // Re-queuing the last row of the last page leaves the current page empty even though earlier pages still have rows.
+  useEffect(() => {
+    if (data && data.failed.length === 0 && page > 1) setPage((p) => Math.max(p - 1, 1));
+  }, [data, page]);
 
   if (isLoading && !data) return <Loader label="Loading delivery health" />;
   if (loadError) return <ErrorState description={loadError} onRetry={load} />;
@@ -91,7 +84,7 @@ function OutboxMonitor() {
                 </div>
                 <div className="flex items-center gap-2">
                   <StatusBadge tone="danger">exhausted</StatusBadge>
-                  <Button size="sm" variant="secondary" onClick={() => open(row)}>Re-queue</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setTarget(row)}>Re-queue</Button>
                 </div>
               </div>
             ))}
@@ -106,24 +99,15 @@ function OutboxMonitor() {
         </Card>
       )}
 
-      <Modal isOpen={Boolean(target)} title="Re-queue this event?" onClose={() => !isSubmitting && setTarget(null)}>
-        <p className="mb-4 text-sm leading-6 text-slate-600">
-          The email is sent again with a fresh retry budget. This moves no money and is recorded in the audit log.
-        </p>
-        <Textarea label="Reason (required)" name="outbox-reason" required rows={3} value={reason} error={reasonError} onChange={(e) => { setReason(e.target.value); setReasonError(""); }} />
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" onClick={() => setTarget(null)} disabled={isSubmitting}>Cancel</Button>
-          <Button
-            isLoading={isSubmitting}
-            onClick={() => {
-              if (reason.trim().length < 5) { setReasonError("Enter a reason of at least 5 characters."); return; }
-              confirm();
-            }}
-          >
-            Re-queue
-          </Button>
-        </div>
-      </Modal>
+      <ReasonDialog
+        isOpen={Boolean(target)}
+        title="Re-queue this event?"
+        description="The email is sent again with a fresh retry budget. This moves no money and is recorded in the audit log."
+        fields={[{ name: "reason", label: "Reason", min: 5, max: 300, multiline: true }]}
+        confirmLabel="Re-queue"
+        onClose={() => setTarget(null)}
+        onSubmit={requeue}
+      />
     </div>
   );
 }

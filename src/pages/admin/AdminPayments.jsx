@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { readAdminFilterState } from "../../utils/adminQueryFilters.js";
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
 import AdminModal from "../../components/admin/AdminModal";
@@ -26,6 +27,7 @@ import { useRealtime } from "../../context/RealtimeContext";
 import { useToast } from "../../context/ToastContext";
 import { paymentTxStatusLabel, paymentTxStatusTone } from "../../utils/paymentTransactionStatusDisplay";
 
+import { useLatestRequest } from "../../hooks/useLatestRequest";
 const formatCurrency = (amount) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(
     amount || 0,
@@ -56,17 +58,20 @@ function AdminPayments() {
     [searchParams],
   );
 
+  const beginList = useLatestRequest();
   const loadPayments = async () => {
+    const isCurrent = beginList(); // a slower earlier response must not overwrite a newer filter's list
     setIsLoading(true);
     setLoadError("");
     try {
       const response = await adminApi.getPaymentsAdmin({ ...query, limit: 100 });
+      if (!isCurrent()) return;
       setPayments(response.data.payments || []);
       setPagination(response.data.pagination || null);
     } catch (error) {
-      setLoadError(getApiErrorMessage(error));
+      if (isCurrent()) setLoadError(getApiErrorMessage(error));
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
   };
 
@@ -81,6 +86,19 @@ function AdminPayments() {
       if (!summary) toast.error(getApiErrorMessage(error) || "Payment summary is unavailable.");
     }
   };
+
+  // Keep controlled filter inputs aligned with URL state, including browser
+  // back/forward navigation and cross-page entity links.
+  useEffect(() => {
+    setFilters(
+      readAdminFilterState(searchParams, [
+        "search",
+        "status",
+        "refundStatus",
+        "attention",
+      ]),
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     loadPayments();

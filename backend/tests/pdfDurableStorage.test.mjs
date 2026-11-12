@@ -10,9 +10,9 @@ import path from "node:path";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "hms-storage-"));
 process.env.STORAGE_LOCAL_ROOT = root;
-// Set explicitly before importing config/env.js: dotenv does not override an
-// existing process.env value, while a .env file may otherwise restore a path.
-process.env.INVOICE_STORAGE_DIR = path.join(root, "invoices");
+// Legacy INVOICE_STORAGE_DIR is intentionally ignored; new invoice files must
+// follow the selected StorageService driver and its configured root.
+process.env.INVOICE_STORAGE_DIR = path.join(root, "legacy-invoice-override-must-not-be-used");
 
 const { env } = await import("../config/env.js");
 const { storageService } = await import("../storage/storageService.js");
@@ -24,11 +24,12 @@ const { downloadInvoice } = await import("../controllers/invoiceController.js");
 
 console.log("pdfDurableStorage.test.mjs");
 
-// ── the path bug: default invoice dir is under the storage root, not cwd ──
-assert.equal(env.invoiceStorageDir, path.join(root, "invoices"));
-assert.ok(path.isAbsolute(env.invoiceStorageDir));
-assert.ok(!env.invoiceStorageDir.startsWith(path.resolve(process.cwd(), "storage")), "must not resolve against process.cwd()");
-console.log("PASS: effective invoice directory resolves under STORAGE_LOCAL_ROOT (the volume), never process.cwd()");
+// ── invoice storage has one source of truth: StorageService ───────────────
+assert.equal(storageService.driverName(), "local");
+assert.equal(env.storage.localRoot, root);
+assert.equal(Object.hasOwn(env, "invoiceStorageDir"), false, "the obsolete INVOICE_STORAGE_DIR setting must not imply a second invoice storage path");
+assert.equal(fs.existsSync(path.join(root, "legacy-invoice-override-must-not-be-used")), false);
+console.log("PASS: invoice storage follows STORAGE_DRIVER/STORAGE_LOCAL_ROOT; legacy INVOICE_STORAGE_DIR cannot split invoice writes from downloads");
 
 // ── rendering + durable write ─────────────────────────────────────────────
 const pdf = await renderPdfBuffer((doc) => doc.text("hello"));

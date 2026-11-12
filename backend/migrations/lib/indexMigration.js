@@ -35,13 +35,30 @@ async function listIndexesSafe(db, collection) {
 
 const keyOf = (index) => stableStringify(index.key || {});
 
+function isCompatibleTextIndex(spec, existing) {
+  const key = existing.key || {};
+  const isText = Object.values(key).includes("text") || key._fts === "text";
+  if (!isText) return false;
+  const expectedFields = Object.keys(spec.key).filter((field) => spec.key[field] === "text").sort();
+  const expectedWeights = spec.options.weights || Object.fromEntries(expectedFields.map((field) => [field, 1]));
+  const actualWeights = existing.weights || {};
+  if (stableStringify(expectedWeights) !== stableStringify(actualWeights)) return false;
+  if ((existing.default_language || "english") !== (spec.options.default_language || "english")) return false;
+  if ((existing.language_override || "language") !== (spec.options.language_override || "language")) return false;
+  if (stableStringify(existing.collation || null) !== stableStringify(spec.options.collation || null)) return false;
+  return true;
+}
+
 /** Compare a declared spec against what the server has. */
 export function classifyAgainst(spec, existing) {
   const wanted = stableStringify(spec.options);
   const sameName = existing.find((i) => i.name === spec.name);
   if (sameName) {
     const have = stableStringify(normalizeOptions(sameName, { isText: spec.text }));
-    if (spec.text || (keyOf(sameName) === stableStringify(spec.key) && have === wanted)) return { state: "present", index: sameName };
+    const sameDefinition = spec.text
+      ? isCompatibleTextIndex(spec, sameName)
+      : keyOf(sameName) === stableStringify(spec.key) && have === wanted;
+    if (sameDefinition) return { state: "present", index: sameName };
     return {
       state: "conflict",
       index: sameName,
@@ -52,7 +69,27 @@ export function classifyAgainst(spec, existing) {
     const sameKey = existing.filter((i) => keyOf(i) === stableStringify(spec.key));
     const equivalent = sameKey.find((i) => stableStringify(normalizeOptions(i)) === wanted);
     if (equivalent) return { state: "present", index: equivalent, note: `satisfied by equivalent index ${equivalent.name}` };
-    if (sameKey.length) return { state: "missing", legacy: sameKey.map((i) => i.name), note: `same key already indexed as ${sameKey.map((i) => i.name).join(", ")} with different options; creating additively` };
+    if (sameKey.length) {
+      const legacySparseReplacement = spec.unique && spec.options.partialFilterExpression
+        && sameKey.every((i) => i.unique && i.sparse && !i.partialFilterExpression);
+      if (legacySparseReplacement) {
+        return { state: "missing", legacy: sameKey.map((i) => i.name), note: `creating additively beside legacy sparse index ${sameKey.map((i) => i.name).join(", ")}; old index remains until an operator-reviewed removal` };
+      }
+      // MongoDB permits a partial unique index to coexist with an ordinary
+      // non-unique index on the same key pattern. This is required for the
+      // correctness constraints below while preserving the legacy/query
+      // index. Do not generalize this exception to arbitrary option clashes.
+      const additivePartialUnique = spec.unique && Boolean(spec.options.partialFilterExpression)
+        && sameKey.every((i) => !i.unique && !i.sparse && !i.partialFilterExpression);
+      if (additivePartialUnique) {
+        return { state: "missing", note: `creating partial unique index additively beside ordinary non-unique index ${sameKey.map((i) => i.name).join(", ")}; existing index is retained` };
+      }
+      return {
+        state: "conflict",
+        index: sameKey[0],
+        reason: `same key ${stableStringify(spec.key)} already exists with incompatible options (${sameKey.map((i) => i.name).join(", ")}); refusing an ambiguous second definition`,
+      };
+    }
   }
   return { state: "missing" };
 }
@@ -69,7 +106,9 @@ export async function findDuplicates(db, spec, { sampleLimit = 20 } = {}) {
     { $match: { count: { $gt: 1 } } },
     { $limit: sampleLimit },
   );
-  const rows = await db.collection(spec.collection).aggregate(pipeline, { allowDiskUse: true }).toArray();
+  const aggregateOptions = { allowDiskUse: true };
+  if (spec.options.collation) aggregateOptions.collation = spec.options.collation;
+  const rows = await db.collection(spec.collection).aggregate(pipeline, aggregateOptions).toArray();
   return {
     groups: rows.length,
     samples: rows.map((r) => ({ key: r._id, count: r.count, ids: r.ids.slice(0, 10).map(String) })),
@@ -109,7 +148,7 @@ export async function scanLegacySparse(db, specs) {
  * Ensure (or, with dryRun, plan) every spec.
  * @returns {{ok:boolean, exitCode:number, summary:object, results:Array, legacy:Array}}
  */
-export async function ensureIndexes(db, specs, { dryRun = false, log = () => {} } = {}) {
+export async function ensureIndexes(db, specs, { dryRun = false, log = () => {}, assertLease = async () => {} } = {}) {
   const results = [];
   const byCollection = new Map();
   for (const s of specs) (byCollection.get(s.collection) || byCollection.set(s.collection, []).get(s.collection)).push(s);
@@ -117,6 +156,7 @@ export async function ensureIndexes(db, specs, { dryRun = false, log = () => {} 
   for (const [collection, list] of byCollection) {
     let existing = await listIndexesSafe(db, collection);
     for (const spec of list) {
+      await assertLease();
       const base = { collection, name: spec.name, key: spec.key, unique: spec.unique, invariant: spec.invariant };
       const verdict = classifyAgainst(spec, existing);
 
@@ -133,7 +173,9 @@ export async function ensureIndexes(db, specs, { dryRun = false, log = () => {} 
       if (dryRun) { results.push({ ...base, status: STATUS.WOULD_CREATE, note: verdict.note }); continue; }
 
       try {
+        await assertLease();
         await db.collection(collection).createIndex(spec.key, { ...spec.options, name: spec.name });
+        await assertLease();
       } catch (error) {
         results.push({ ...base, status: STATUS.FAILED, error: `${error?.codeName || error?.code || "error"}: ${error?.message}` });
         continue;
@@ -150,7 +192,7 @@ export async function ensureIndexes(db, specs, { dryRun = false, log = () => {} 
   summary.total = results.length;
   const blocking = results.filter((r) => [STATUS.BLOCKED_DUPLICATES, STATUS.CONFLICT, STATUS.FAILED, STATUS.UNVERIFIED].includes(r.status));
   const pendingInDryRun = dryRun ? count(STATUS.WOULD_CREATE) : 0;
-  const legacy = await scanLegacySparse(db, specs).catch(() => []);
+  const legacy = await scanLegacySparse(db, specs);
   const ok = blocking.length === 0;
   return { ok, exitCode: ok ? (pendingInDryRun ? 3 : 0) : 2, summary, results, legacy, dryRun };
 }

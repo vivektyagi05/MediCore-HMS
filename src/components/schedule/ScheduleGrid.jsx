@@ -1,7 +1,12 @@
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import { validateDayConfig } from "../../utils/scheduleValidation";
 
 const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+// Keep an emptied number box empty ("" is flagged as invalid) instead of storing 0: the old code stored 0 and the box
+// immediately re-displayed the default (30), so the number could not be cleared and retyped.
+const numberOrBlank = (raw) => (raw === "" ? "" : Number(raw));
 
 const toMinutes = (hhmm) => {
   if (!hhmm) return null;
@@ -73,6 +78,7 @@ function ScheduleGrid({ availability, setAvailability }) {
         const config = getDay(day);
         const enabled = Boolean(config);
         const slots = previewSlots(config);
+        const problems = enabled ? validateDayConfig(config) : [];
         return (
           <div key={day} className="rounded-2xl bg-white/60 p-4 shadow-lg">
             <div className="flex items-center justify-between">
@@ -106,16 +112,20 @@ function ScheduleGrid({ availability, setAvailability }) {
                   type="number"
                   min={5}
                   max={240}
-                  value={config.slotDurationMinutes || 30}
-                  onChange={(e) => updateDay(day, { slotDurationMinutes: Number(e.target.value) })}
+                  value={config.slotDurationMinutes ?? ""}
+                  step={1}
+                  error={problems.find((x) => /duration/.test(x))}
+                  onChange={(e) => updateDay(day, { slotDurationMinutes: numberOrBlank(e.target.value) })}
                 />
                 <Input
                   label="Buffer between appointments (min)"
                   type="number"
                   min={0}
                   max={120}
-                  value={config.bufferMinutes || 0}
-                  onChange={(e) => updateDay(day, { bufferMinutes: Number(e.target.value) })}
+                  value={config.bufferMinutes ?? ""}
+                  step={1}
+                  error={problems.find((x) => /Buffer/.test(x))}
+                  onChange={(e) => updateDay(day, { bufferMinutes: numberOrBlank(e.target.value) })}
                 />
                 <Input
                   label="Break start"
@@ -138,10 +148,18 @@ function ScheduleGrid({ availability, setAvailability }) {
                   type="number"
                   min={0}
                   max={20}
-                  value={config.emergencySlotsPerDay || 0}
-                  onChange={(e) => updateDay(day, { emergencySlotsPerDay: Number(e.target.value) })}
+                  value={config.emergencySlotsPerDay ?? ""}
+                  step={1}
+                  error={problems.find((x) => /Emergency/.test(x))}
+                  onChange={(e) => updateDay(day, { emergencySlotsPerDay: numberOrBlank(e.target.value) })}
                 />
 
+                {/* duration / buffer / emergency problems are shown on their own fields; this list is for time and break problems */}
+                {problems.filter((p) => !/duration|Buffer|Emergency/.test(p)).length > 0 && (
+                  <ul role="alert" className="md:col-span-2 list-disc space-y-1 rounded-xl border border-rose-200 bg-rose-50 p-3 pl-7 text-xs font-semibold text-rose-700">
+                    {problems.filter((p) => !/duration|Buffer|Emergency/.test(p)).map((problem) => <li key={problem}>{problem}</li>)}
+                  </ul>
+                )}
                 <div className="md:col-span-2">
                   <p className="mb-2 text-xs font-bold uppercase text-slate-500">
                     Preview — {slots.length} slot{slots.length === 1 ? "" : "s"} will be generated

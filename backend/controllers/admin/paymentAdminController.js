@@ -23,12 +23,14 @@
 // data IS the entire subject matter here — there is no non-financial
 // "restricted view" of a Payments workspace worth building.
 import mongoose from "mongoose";
+import { readOptionalObjectIdQuery } from "../../utils/queryObjectId.js";
 import Payment, { PAYMENT_STATUS, REFUND_STATUS } from "../../models/Payment.js";
 import RefundRequest from "../../models/RefundRequest.js";
 import Invoice from "../../models/Invoice.js";
 import Appointment from "../../models/Appointment.js";
 import User from "../../models/User.js";
 import Doctor from "../../models/Doctor.js";
+import { buildPaymentEvidence } from "../../services/finance/paymentEvidence.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 
@@ -115,6 +117,9 @@ const resolveSearchFilter = async (term) => {
 
 const buildListFilter = async (query, pendingRefundPaymentIds) => {
   const filter = {};
+  const doctorId = readOptionalObjectIdQuery(query, "doctorId", "doctor", (value) => mongoose.Types.ObjectId.isValid(value));
+  const patientId = readOptionalObjectIdQuery(query, "patientId", "patient", (value) => mongoose.Types.ObjectId.isValid(value));
+  const appointmentId = readOptionalObjectIdQuery(query, "appointmentId", "appointment", (value) => mongoose.Types.ObjectId.isValid(value));
 
   if (query.status) {
     filter.status = { $in: String(query.status).split(",").map((s) => s.trim()).filter(Boolean) };
@@ -122,11 +127,9 @@ const buildListFilter = async (query, pendingRefundPaymentIds) => {
   if (query.refundStatus) {
     filter.refundStatus = { $in: String(query.refundStatus).split(",").map((s) => s.trim()).filter(Boolean) };
   }
-  if (query.doctorId && mongoose.Types.ObjectId.isValid(query.doctorId)) filter.doctorId = query.doctorId;
-  if (query.patientId && mongoose.Types.ObjectId.isValid(query.patientId)) filter.userId = query.patientId;
-  if (query.appointmentId && mongoose.Types.ObjectId.isValid(query.appointmentId)) {
-    filter.appointmentId = query.appointmentId;
-  }
+  if (doctorId) filter.doctorId = doctorId;
+  if (patientId) filter.userId = patientId;
+  if (appointmentId) filter.appointmentId = appointmentId;
   if (query.from || query.to) {
     filter.createdAt = {};
     if (query.from && !Number.isNaN(Date.parse(query.from))) filter.createdAt.$gte = new Date(query.from);
@@ -307,9 +310,11 @@ export const getPaymentDetailAdmin = asyncHandler(async (req, res) => {
     })
     .populate("appointmentId", "date timeSlot status paymentStatus consultationMode")
     .populate("invoiceId")
+    .select("+captureEvidence")
     .lean();
 
   if (!payment) throw new AppError("Payment not found", 404);
+  const evidence = await buildPaymentEvidence(payment);
 
   const [refundRequests, appointmentDoc] = await Promise.all([
     RefundRequest.find({ paymentId: payment._id })
@@ -393,6 +398,7 @@ export const getPaymentDetailAdmin = asyncHandler(async (req, res) => {
       needsAttention,
       attentionReasons,
       timeline,
+      evidence,
     },
     message: "Payment detail fetched successfully",
   });

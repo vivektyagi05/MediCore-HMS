@@ -106,7 +106,7 @@ function AdminNotifications() {
 
       <Card>
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <select
+          <select aria-label="Type Filter"
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm"

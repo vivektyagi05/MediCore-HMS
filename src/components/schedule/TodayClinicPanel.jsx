@@ -67,7 +67,7 @@ export default function TodayClinicPanel() {
 
       {data.alerts.length > 0 && (
         <ul className="space-y-1">
-          {data.alerts.map((a) => <li key={a.code} className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900"><AlertTriangle size={14} />{(ALERT_TEXT[a.code] || (() => a.code))(a)}</li>)}
+          {(data.alerts ?? []).map((a) => <li key={a.code} className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900"><AlertTriangle size={14} />{(ALERT_TEXT[a.code] || (() => a.code))(a)}</li>)}
         </ul>
       )}
 
@@ -98,7 +98,7 @@ export default function TodayClinicPanel() {
 
         <Card title={`Waiting room (${data.queue.length})`}>
           {data.queue.length === 0 ? <p className="text-sm text-slate-500">Nobody is checked in.</p> : (
-            <ol className="space-y-2">{data.queue.map((q) => (
+            <ol className="space-y-2">{(data.queue ?? []).map((q) => (
               <li key={q.appointmentId} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2 text-sm">
                 <span><span className="font-black">{q.position}.</span> {q.patientName} <span className="text-xs text-slate-500">· {q.timeSlot} · waiting {q.waitingMinutes ?? 0} min</span></span>
                 {q.visitState === "checked_in"
@@ -111,7 +111,7 @@ export default function TodayClinicPanel() {
 
       {data.needsResolution.length > 0 && (
         <Card title={`Needs resolution (${data.needsResolution.length})`}>
-          <ul className="space-y-2">{data.needsResolution.map((n) => (
+          <ul className="space-y-2">{(data.needsResolution ?? []).map((n) => (
             <li key={n.appointmentId} className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm">
               <span><span className="font-bold">{n.patientName}</span> · {new Date(n.date).toLocaleDateString()} · {n.timeSlot}</span>
               <Button variant="secondary" onClick={() => setResolveItem(n)}>Resolve</Button>
@@ -121,7 +121,7 @@ export default function TodayClinicPanel() {
 
       {data.impactedAppointments?.length > 0 && (
         <Card title={`Calendar changes affect ${data.impactedAppointments.length} appointment(s)`}>
-          <ul className="space-y-1 text-sm">{data.impactedAppointments.map((n) => (
+          <ul className="space-y-1 text-sm">{(data.impactedAppointments ?? []).map((n) => (
             <li key={n.appointmentId} className="flex items-center gap-2"><Clock3 size={13} className="text-amber-600" /><span className="font-bold">{n.patientName}</span> · {new Date(n.date).toLocaleDateString()} · {n.timeSlot} <span className="text-xs text-slate-500">— {n.reason}</span></li>))}</ul>
           <p className="mt-2 text-xs text-slate-500">Reschedule or cancel these from Appointments. Patients have been notified.</p>
         </Card>

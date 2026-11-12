@@ -212,7 +212,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
       <div className="space-y-5">
         <div>
           <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">{t("doctorSearch.filters.specialization")}</label>
-          <select value={filters.specialization} onChange={(e) => onChange("specialization", e.target.value)}
+          <select aria-label="Specialization" value={filters.specialization} onChange={(e) => onChange("specialization", e.target.value)}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10">
             <option value="">All</option>
             {meta.specializations.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -221,7 +221,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
 
         <div>
           <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">{t("doctorSearch.filters.city")}</label>
-          <select value={filters.city} onChange={(e) => onChange("city", e.target.value)}
+          <select aria-label="City" value={filters.city} onChange={(e) => onChange("city", e.target.value)}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10">
             <option value="">All cities</option>
             {meta.cities.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -230,7 +230,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
 
         <div>
           <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">{t("doctorSearch.filters.state")}</label>
-          <select value={filters.state} onChange={(e) => onChange("state", e.target.value)}
+          <select aria-label="State" value={filters.state} onChange={(e) => onChange("state", e.target.value)}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10">
             <option value="">All states</option>
             {meta.states.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -239,7 +239,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
 
         <div>
           <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">{t("doctorSearch.filters.hospital")}</label>
-          <input type="text" value={filters.hospital} onChange={(e) => onChange("hospital", e.target.value)}
+          <input aria-label="Hospital" type="text" value={filters.hospital} onChange={(e) => onChange("hospital", e.target.value)}
             placeholder={t("doctorSearch.filters.hospitalPlaceholder")}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10" />
         </div>
@@ -262,7 +262,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
           <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">
             Min Experience: {filters.minExp ? `${filters.minExp} yrs` : "Any"}
           </label>
-          <input type="range" min="0" max="30" step="1"
+          <input aria-label="Min Exp" type="range" min="0" max="30" step="1"
             value={filters.minExp || 0}
             onChange={(e) => onChange("minExp", e.target.value === "0" ? "" : e.target.value)}
             className="w-full accent-blue-600" />
@@ -273,7 +273,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
 
         <div>
           <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">Max Fees: {filters.maxFees ? `₹${filters.maxFees}` : "Any"}</label>
-          <input type="range" min="100" max="5000" step="100"
+          <input aria-label="Max Fees" type="range" min="100" max="5000" step="100"
             value={filters.maxFees || 5000}
             onChange={(e) => onChange("maxFees", e.target.value === "5000" ? "" : e.target.value)}
             className="w-full accent-blue-600" />
@@ -285,7 +285,7 @@ export function FilterPanel({ meta, filters, onChange, onReset, hasActive }) {
         {meta.languages?.length > 0 && (
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">{t("doctorSearch.filters.language")}</label>
-            <select value={filters.language} onChange={(e) => onChange("language", e.target.value)}
+            <select aria-label="Language" value={filters.language} onChange={(e) => onChange("language", e.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10">
               <option value="">All languages</option>
               {meta.languages.map((l) => <option key={l} value={l}>{l}</option>)}

@@ -35,6 +35,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 import Review from "../../models/Review.js";
 import Doctor from "../../models/Doctor.js";
+import User from "../../models/User.js";
 import Service from "../../models/Service.js";
 import CMSPage from "../../models/CMSPage.js";
 import { buildExecutiveDashboardData, buildSmartAlerts } from "../../controllers/admin/missionControlAdminController.js";
@@ -43,9 +44,8 @@ import { _internal as operationsInternal } from "../../controllers/admin/operati
 import { detectConflicts } from "../../workflow/assignment/assignmentEngine.js";
 import { buildFlowHealthRanking, buildCronHealthRanking, buildLiveCounters } from "../../monitoring/monitoringAggregates.js";
 import { buildFinanceOverview, buildFinancialHealth, buildFinanceAttentionQueue } from "../finance/financeAggregates.js";
-import { computeReviewAttentionItems, buildReviewSummary } from "../reviewAdminAggregates.js";
+import { buildDoctorAttentionPipeline, buildReviewSummaryFromTotals, buildReviewSummaryPipeline } from "../reviewAdminAggregates.js";
 import { buildGovernanceOverview } from "../../process-governance/governanceAggregates.js";
-import { groupReviewAttentionByDoctor } from "./commandCenterHelpers.js";
 
 const { buildUnifiedQueue } = operationsInternal;
 
@@ -125,22 +125,22 @@ async function buildWorkflowHealth(queueCounts) {
 // Reuses UI-8's review summary + the deterministic review attention engine
 // as-is; the only new work is the doctor grouping documented above.
 async function buildReputationSnapshot() {
-  const reviews = await Review.find({ adminDeleted: { $ne: true } })
-    .select("rating doctorReply isPinned doctorId")
-    .populate({ path: "doctorId", select: "userId", populate: { path: "userId", select: "name" } })
-    .lean();
-
-  const summary = buildReviewSummary(reviews);
-  const attentionItems = computeReviewAttentionItems(reviews);
-  const reviewsById = new Map(reviews.map((r) => [String(r._id), r]));
-  const doctorsNeedingAttention = groupReviewAttentionByDoctor(attentionItems, reviewsById).slice(0, 10);
+  // A-03a: two database aggregations (KPI totals + top-10 doctors needing attention) instead of loading every review with
+  // a two-level populate. Same rules as buildReviewSummary()/computeReviewAttentionItems(), see reviewAdminAggregates.js.
+  const [[totals], doctorsNeedingAttention] = await Promise.all([
+    Review.aggregate(buildReviewSummaryPipeline()),
+    Review.aggregate(
+      buildDoctorAttentionPipeline({ limit: 10, doctorCollection: Doctor.collection.name, userCollection: User.collection.name }),
+    ),
+  ]);
+  const summary = buildReviewSummaryFromTotals(totals);
 
   return {
     averageRating: summary.averageRating,
     totalReviews: summary.totalReviews,
     negativeCount: summary.negativeCount,
     unrepliedCount: summary.unrepliedCount,
-    doctorsNeedingAttention,
+    doctorsNeedingAttention: doctorsNeedingAttention.map((row) => ({ ...row, doctorId: String(row.doctorId) })),
   };
 }
 

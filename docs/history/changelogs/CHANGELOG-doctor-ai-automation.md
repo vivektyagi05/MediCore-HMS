@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # MediCore HMS — Phase D5: Doctor AI Automation & Smart Practice Platform (Core Slice)
 
 Delivers the highest-value, fully-verified slice of the D5 mission across a

@@ -117,17 +117,6 @@ export const env = Object.freeze({
     email: process.env.HOSPITAL_EMAIL || "billing@hmspro.example",
     phone: process.env.HOSPITAL_PHONE || "",
   },
-  // N-007: legacy/diagnostic only. New invoices are written through
-  // storageService (category "invoices"), so they follow STORAGE_DRIVER and
-  // STORAGE_LOCAL_ROOT. This resolves under the storage root (never against
-  // process.cwd(), which is /app in the container while the volume is mounted
-  // at /app/backend/storage) so any remaining reader sees the real location.
-  invoiceStorageDir: process.env.INVOICE_STORAGE_DIR
-    ? path.resolve(process.env.INVOICE_STORAGE_DIR)
-    : path.resolve(
-      process.env.STORAGE_LOCAL_ROOT ? path.resolve(process.env.STORAGE_LOCAL_ROOT) : path.resolve(__dirname, "../storage"),
-      "invoices",
-    ),
   // N-002: which duties this process owns (see productionGuards.js).
   serviceRole: resolveServiceRole(process.env),
   schedulerEnabled: shouldRunScheduler(process.env),

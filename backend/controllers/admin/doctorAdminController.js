@@ -29,6 +29,8 @@ import { buildDoctorRevenueIntelligence } from "../doctor/doctorEarningsControll
 import { buildDoctorReviewIntelligence } from "../doctor/doctorReviewController.js";
 import { buildDoctorReputationIntelligence } from "../publicController.js";
 import { buildDoctorProfilePhotoUrl } from "../../services/doctorPublicSerializer.js";
+import { queryNumber, queryString } from "../../utils/queryParams.js";
+import { buildDoctorCountPipeline, buildDoctorListPipeline, resolveDoctorListSort } from "../../services/adminDoctorListPipeline.js";
 import { MASTER_KINDS, resolveCanonicalFilterValue, validateCanonicalLocationFilters } from "../../services/masterDataService.js";
 
 const getPagination = (query) => {
@@ -65,109 +67,51 @@ export const getEligibleDoctorUsersAdmin = asyncHandler(async (_req, res) => {
 // two collections.
 export const listDoctorsAdmin = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
+  // Every string filter is read through queryString(): a repeated key (?city=a&city=b) is a 400, not a TypeError/500.
+  const q = Object.fromEntries(
+    [
+      "verificationStatus", "specializationMasterId", "specialization", "stateMasterId", "state", "districtMasterId", "district",
+      "cityMasterId", "city", "consultationMode", "status", "sort", "search",
+    ].map((key) => [key, queryString(req.query, key)]),
+  );
+  const minRating = queryNumber(req.query, "minRating", { min: 0, max: 5 });
   const match = {};
 
-  if (req.query.verificationStatus) match.verificationStatus = req.query.verificationStatus;
+  if (q.verificationStatus) match.verificationStatus = q.verificationStatus;
 
-  if (req.query.specializationMasterId) {
-    const specialization = await resolveCanonicalFilterValue(req.query.specializationMasterId, MASTER_KINDS.SPECIALIZATION, "specialization");
+  if (q.specializationMasterId) {
+    const specialization = await resolveCanonicalFilterValue(q.specializationMasterId, MASTER_KINDS.SPECIALIZATION, "specialization");
     match.specializationMasterId = specialization._id;
-  } else if (req.query.specialization && mongoose.Types.ObjectId.isValid(req.query.specialization)) {
-    const specialization = await resolveCanonicalFilterValue(req.query.specialization, MASTER_KINDS.SPECIALIZATION, "specialization");
+  } else if (q.specialization && mongoose.Types.ObjectId.isValid(q.specialization)) {
+    const specialization = await resolveCanonicalFilterValue(q.specialization, MASTER_KINDS.SPECIALIZATION, "specialization");
     match.specializationMasterId = specialization._id;
-  } else if (req.query.specialization) {
-    match.specialization = containsRegex(req.query.specialization);
+  } else if (q.specialization) {
+    match.specialization = containsRegex(q.specialization);
   }
 
   const canonicalLocation = await validateCanonicalLocationFilters({
-    state: req.query.stateMasterId || (req.query.state && mongoose.Types.ObjectId.isValid(req.query.state) ? req.query.state : undefined),
-    district: req.query.districtMasterId || (req.query.district && mongoose.Types.ObjectId.isValid(req.query.district) ? req.query.district : undefined),
-    city: req.query.cityMasterId || (req.query.city && mongoose.Types.ObjectId.isValid(req.query.city) ? req.query.city : undefined),
+    state: q.stateMasterId || (q.state && mongoose.Types.ObjectId.isValid(q.state) ? q.state : undefined),
+    district: q.districtMasterId || (q.district && mongoose.Types.ObjectId.isValid(q.district) ? q.district : undefined),
+    city: q.cityMasterId || (q.city && mongoose.Types.ObjectId.isValid(q.city) ? q.city : undefined),
   });
   if (canonicalLocation.state) match.stateMasterId = canonicalLocation.state._id;
   if (canonicalLocation.district) match.districtMasterId = canonicalLocation.district._id;
   if (canonicalLocation.city) match.cityMasterId = canonicalLocation.city._id;
 
-  if (req.query.state && !mongoose.Types.ObjectId.isValid(req.query.state) && !req.query.stateMasterId) match.state = containsRegex(req.query.state);
-  if (req.query.district && !mongoose.Types.ObjectId.isValid(req.query.district) && !req.query.districtMasterId) match.district = containsRegex(req.query.district);
-  if (req.query.city && !mongoose.Types.ObjectId.isValid(req.query.city) && !req.query.cityMasterId) match.city = containsRegex(req.query.city);
-  if (req.query.consultationMode) match.consultationMode = req.query.consultationMode;
-  if (req.query.status === "active") match.isActive = true;
-  if (req.query.status === "inactive") match.isActive = false;
-  if (req.query.minRating) match.rating = { $gte: Number(req.query.minRating) };
+  if (q.state && !mongoose.Types.ObjectId.isValid(q.state) && !q.stateMasterId) match.state = containsRegex(q.state);
+  if (q.district && !mongoose.Types.ObjectId.isValid(q.district) && !q.districtMasterId) match.district = containsRegex(q.district);
+  if (q.city && !mongoose.Types.ObjectId.isValid(q.city) && !q.cityMasterId) match.city = containsRegex(q.city);
+  if (q.consultationMode) match.consultationMode = q.consultationMode;
+  if (q.status === "active") match.isActive = true;
+  if (q.status === "inactive") match.isActive = false;
+  if (minRating !== undefined) match.rating = { $gte: minRating };
 
-  const sortMap = {
-    name_asc: { "user.name": 1 },
-    newest: { createdAt: -1 },
-    rating: { rating: -1 },
-    experience: { experience: -1 },
-    activity: { appointmentCount: -1 },
-  };
-  const sortBy = sortMap[req.query.sort] || { createdAt: -1 };
-
-  const pipeline = [
-    { $match: match },
-    {
-      $lookup: {
-        from: "users",
-        localField: "userId",
-        foreignField: "_id",
-        as: "user",
-      },
-    },
-    { $unwind: "$user" },
-  ];
-
-  if (req.query.search) {
-    const term = containsRegex(req.query.search);
-    pipeline.push({ $match: { $or: [{ "user.name": term }, { "user.email": term }] } });
-  }
-
-  pipeline.push(
-    {
-      $lookup: {
-        from: "appointments",
-        let: { doctorId: "$_id" },
-        pipeline: [
-          { $match: { $expr: { $eq: ["$doctorId", "$$doctorId"] } } },
-          { $count: "count" },
-        ],
-        as: "appointmentStats",
-      },
-    },
-    {
-      $addFields: {
-        appointmentCount: { $ifNull: [{ $arrayElemAt: ["$appointmentStats.count", 0] }, 0] },
-        pendingDocumentsCount: {
-          $size: {
-            $filter: {
-              input: { $ifNull: ["$documents", []] },
-              cond: { $eq: ["$$this.status", "pending"] },
-            },
-          },
-        },
-      },
-    },
-    { $project: { appointmentStats: 0, "user.password": 0 } },
-    { $sort: sortBy },
-    { $skip: skip },
-    { $limit: limit },
-  );
-
-  const countPipeline = [{ $match: match }];
-  if (req.query.search) {
-    const term = containsRegex(req.query.search);
-    countPipeline.push(
-      { $lookup: { from: "users", localField: "userId", foreignField: "_id", as: "user" } },
-      { $unwind: "$user" },
-      { $match: { $or: [{ "user.name": term }, { "user.email": term }] } },
-    );
-  }
-  countPipeline.push({ $count: "total" });
+  const { sortKey } = resolveDoctorListSort(q.sort);
+  const searchTerm = q.search ? containsRegex(q.search) : undefined;
 
   const [doctors, countResult] = await Promise.all([
-    Doctor.aggregate(pipeline),
-    Doctor.aggregate(countPipeline),
+    Doctor.aggregate(buildDoctorListPipeline({ match, searchTerm, sortKey, skip, limit })),
+    Doctor.aggregate(buildDoctorCountPipeline({ match, searchTerm })),
   ]);
 
   const total = countResult[0]?.total || 0;

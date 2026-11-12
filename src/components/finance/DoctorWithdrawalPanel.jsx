@@ -14,6 +14,7 @@ import Skeleton from "../shared/Skeleton";
 import EmptyState from "../shared/EmptyState";
 import ErrorState from "../shared/ErrorState";
 
+import { parseMoney } from "../../utils/moneyInput";
 function money(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
@@ -106,21 +107,14 @@ function DoctorWithdrawalPanel() {
   };
 
   const goToReview = () => {
-    const requestedAmount = Number(amount);
-    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
-      setFormError("Enter a valid amount.");
+    const available = Number(balance?.withdrawableBalance) || 0;
+    const parsedAmount = parseMoney(amount, { min: Math.max(Number(balance?.minAmount) || 0, 0.01), max: available, label: "Amount" });
+    if (parsedAmount.error) {
+      setFormError(available <= 0 ? "You have no withdrawable balance right now." : parsedAmount.error);
       return;
     }
-    if (balance && requestedAmount > balance.withdrawableBalance) {
-      setFormError(`You can withdraw up to ${money(balance.withdrawableBalance)}.`);
-      return;
-    }
-    if (balance?.minAmount && requestedAmount < balance.minAmount) {
-      setFormError(`Minimum withdrawal amount is ${money(balance.minAmount)}.`);
-      return;
-    }
-    if (!destinationLabel.trim()) {
-      setFormError("Enter a payout destination (e.g. bank account ending 1234).");
+    if (destinationLabel.trim().length < 4 || destinationLabel.trim().length > 120) {
+      setFormError("Enter a payout destination of 4-120 characters (e.g. bank account ending 1234).");
       return;
     }
     setFormError("");
@@ -200,18 +194,21 @@ function DoctorWithdrawalPanel() {
               type="number"
               min="0"
               step="0.01"
+              inputMode="decimal"
+              max={balance?.withdrawableBalance}
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => { setAmount(e.target.value); setFormError(""); }}
               placeholder="Enter amount"
             />
             <Input
               label="Payout destination"
               name="destinationLabel"
               value={destinationLabel}
-              onChange={(e) => setDestinationLabel(e.target.value)}
+              maxLength={120}
+              onChange={(e) => { setDestinationLabel(e.target.value); setFormError(""); }}
               placeholder="e.g. HDFC Bank account ending 4417"
             />
-            {formError && <p className="text-sm font-semibold text-rose-600">{formError}</p>}
+            {formError && <p role="alert" className="text-sm font-semibold text-rose-600">{formError}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
               <Button onClick={goToReview}>Review</Button>

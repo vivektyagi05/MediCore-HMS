@@ -12,6 +12,7 @@ import MetricCard from "../ui/MetricCard";
 import StatusBadge from "../ui/StatusBadge";
 import Tabs from "../ui/Tabs";
 import RefundActionDialog from "./RefundActionDialog";
+import PaymentEvidencePanel from "./PaymentEvidencePanel";
 import { useToast } from "../../context/ToastContext";
 import {
   paymentTxStatusLabel,
@@ -122,6 +123,7 @@ function PaymentDetailWorkspace({ paymentId, onChanged, onViewPatient, onViewApp
     { id: "transaction", label: "Transaction" },
     { id: "refunds", label: "Refunds", badge: refundRequests.length },
     { id: "invoice", label: "Invoice" },
+    { id: "evidence", label: "Evidence" },
     { id: "timeline", label: "Timeline" },
   ];
 
@@ -337,6 +339,8 @@ function PaymentDetailWorkspace({ paymentId, onChanged, onViewPatient, onViewApp
           )}
         </div>
       )}
+
+      {activeTab === "evidence" && <PaymentEvidencePanel evidence={detail.evidence} />}
 
       {activeTab === "timeline" && (
         <ul className="space-y-3">

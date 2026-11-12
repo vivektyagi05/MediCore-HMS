@@ -1,4 +1,5 @@
 import AdminActivityLog from "../models/AdminActivityLog.js";
+import { logger } from "./logger.js";
 
 export const writeAdminLog = async ({
   req,
@@ -29,3 +30,15 @@ export const writeAdminLog = async ({
 // an admin's own action, not attributed to a person who didn't do it.
 export const writeSystemLog = async ({ action, resourceType, resourceId, severity = "info", metadata = {} }) =>
   AdminActivityLog.create({ action, resourceType, resourceId, severity, metadata, ip: "automation-studio" });
+
+// Same record as writeAdminLog(), but a failure to write the audit entry is logged and swallowed. Use it where the audit
+// trail is best-effort and must never block or fail the user-visible action (read/download access records).
+export const writeAdminLogSafe = async (args) => {
+  try {
+    await writeAdminLog(args);
+    return true;
+  } catch (error) {
+    logger.warn("Admin audit log write failed", { action: args?.action, resourceType: args?.resourceType, message: error?.message });
+    return false;
+  }
+};

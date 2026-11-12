@@ -1,12 +1,14 @@
 import { AlertTriangle, Clock3, Eye, IndianRupee, RotateCcw, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { readAdminFilterState } from "../../utils/adminQueryFilters.js";
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
 import AdminModal from "../../components/admin/AdminModal";
 import AdminTable from "../../components/admin/AdminTable";
 import FilterBar from "../../components/admin/FilterBar";
 import RefundDetailWorkspace from "../../components/admin/RefundDetailWorkspace";
+import DoctorRefundReviews from "../../components/admin/DoctorRefundReviews";
 import ErrorState from "../../components/shared/ErrorState";
 import Button from "../../components/ui/Button";
 import Card from "../../components/ui/Card";
@@ -18,6 +20,7 @@ import { useRealtime } from "../../context/RealtimeContext";
 import { useToast } from "../../context/ToastContext";
 import { refundRequestStatusLabel, refundRequestStatusTone } from "../../utils/paymentTransactionStatusDisplay";
 
+import { useLatestRequest } from "../../hooks/useLatestRequest";
 const formatCurrency = (amount, currency = "INR") =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: currency || "INR", maximumFractionDigits: 0 }).format(
     amount || 0,
@@ -47,17 +50,20 @@ function AdminRefunds() {
     [searchParams],
   );
 
+  const beginList = useLatestRequest();
   const loadRefunds = async () => {
+    const isCurrent = beginList(); // a slower earlier response must not overwrite a newer filter's list
     setIsLoading(true);
     setLoadError("");
     try {
       const response = await adminApi.getRefundsAdmin({ ...query, limit: 50 });
+      if (!isCurrent()) return;
       setRefunds(response.data.refundRequests || []);
       setPagination(response.data.pagination || null);
     } catch (error) {
-      setLoadError(getApiErrorMessage(error));
+      if (isCurrent()) setLoadError(getApiErrorMessage(error));
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
   };
 
@@ -71,6 +77,18 @@ function AdminRefunds() {
       if (!summary) toast.error(getApiErrorMessage(error) || "Refund summary is unavailable.");
     }
   };
+
+  // Keep controlled filter inputs aligned with URL state, including browser
+  // back/forward navigation and cross-page entity links.
+  useEffect(() => {
+    setFilters(
+      readAdminFilterState(searchParams, [
+        "search",
+        "status",
+        "attention",
+      ]),
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     loadRefunds();
@@ -261,6 +279,8 @@ function AdminRefunds() {
               />
             </Card>
           )}
+
+          <DoctorRefundReviews onViewPayment={(paymentId) => navigate(`/admin/payments?search=${encodeURIComponent(paymentId)}`)} />
 
           {pagination && pagination.total > pagination.limit && (
             <p className="text-center text-xs font-semibold text-slate-500">

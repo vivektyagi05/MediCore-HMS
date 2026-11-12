@@ -35,8 +35,25 @@ import { validateProcessGraph } from "../../process-designer/graphValidator.js";
 import { walkProcessGraph, buildProcessContext } from "../../process-designer/graphWalker.js";
 import AutomationRunLog from "../../models/AutomationRunLog.js";
 
-function rangeDaysFromQuery(req, fallback = 30) {
-  return req.query.rangeDays ? Number(req.query.rangeDays) : fallback;
+// A-14: previously `Number(req.query.rangeDays)` -- NaN produced an Invalid Date (500) and a huge value an effectively
+// unbounded scan. Same clamp as monitoringController.parseRangeDays: non-numeric/<=0 -> fallback, capped at 90 days.
+export function rangeDaysFromQuery(req, fallback = 30) {
+  const raw = req.query.rangeDays;
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(Math.floor(n) || fallback, 90);
+}
+
+// `version` / `versionA` / `versionB` must be positive integers; anything else is a 400 instead of a Mongoose CastError (500).
+export function versionFromQuery(req, name = "version", { required = false } = {}) {
+  const raw = req.query[name];
+  if (raw === undefined || raw === "") {
+    if (required) throw new AppError(`${name} query param is required.`, 400);
+    return null;
+  }
+  const n = typeof raw === "string" ? Number(raw) : NaN;
+  if (!Number.isInteger(n) || n < 1) throw new AppError(`${name} must be a positive integer.`, 400);
+  return n;
 }
 
 async function assertKeyExists(key) {
@@ -62,7 +79,7 @@ export const getCrossProcessOverview = asyncHandler(async (req, res) => {
 export const getProcessPerformance = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const data = await buildProcessPerformance({ key, version, rangeDays: rangeDaysFromQuery(req) });
   res.json({ success: true, data });
 });
@@ -70,7 +87,7 @@ export const getProcessPerformance = asyncHandler(async (req, res) => {
 export const getProcessHealth = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const data = await buildProcessHealthScore({ key, version, rangeDays: rangeDaysFromQuery(req) });
   res.json({ success: true, data });
 });
@@ -78,7 +95,7 @@ export const getProcessHealth = asyncHandler(async (req, res) => {
 export const getProcessTrend = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const period = req.query.period || "7d";
   const data = await buildTrendSeries({ key, version, period });
   res.json({ success: true, data });
@@ -89,7 +106,7 @@ export const getProcessTrend = asyncHandler(async (req, res) => {
 export const getProcessBottlenecks = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const data = await buildBottleneckAnalysis({ key, version, rangeDays: rangeDaysFromQuery(req) });
   res.json({ success: true, data });
 });
@@ -99,7 +116,7 @@ export const getProcessBottlenecks = asyncHandler(async (req, res) => {
 export const getProcessFailures = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const data = await buildFailureIntelligence({ key, version, rangeDays: rangeDaysFromQuery(req) });
   res.json({ success: true, data });
 });
@@ -107,7 +124,7 @@ export const getProcessFailures = asyncHandler(async (req, res) => {
 export const getProcessSla = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const data = await buildSlaIntelligence({ key, version, rangeDays: rangeDaysFromQuery(req) });
   res.json({ success: true, data });
 });
@@ -138,9 +155,8 @@ export const getVersionIntelligence = asyncHandler(async (req, res) => {
 export const getVersionComparison = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const versionA = Number(req.query.versionA);
-  const versionB = Number(req.query.versionB);
-  if (!versionA || !versionB) throw new AppError("versionA and versionB query params are required.", 400);
+  const versionA = versionFromQuery(req, "versionA", { required: true });
+  const versionB = versionFromQuery(req, "versionB", { required: true });
   const data = await buildVersionComparison({ key, versionA, versionB, rangeDays: rangeDaysFromQuery(req, 90) });
   res.json({ success: true, data });
 });
@@ -298,7 +314,7 @@ export const markImplemented = asyncHandler(async (req, res) => {
 export const explainAnalytics = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const rangeDays = rangeDaysFromQuery(req);
   const [perf, health] = await Promise.all([
     buildProcessPerformance({ key, version, rangeDays }),
@@ -311,7 +327,7 @@ export const explainAnalytics = asyncHandler(async (req, res) => {
 export const explainBottlenecks = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const version = req.query.version ? Number(req.query.version) : null;
+  const version = versionFromQuery(req);
   const data = await buildBottleneckAnalysis({ key, version, rangeDays: rangeDaysFromQuery(req) });
   const result = await generativeAssistant.processBottleneckExplain({ key, ...data });
   res.json({ success: true, data: result });
@@ -328,9 +344,8 @@ export const explainOptimization = asyncHandler(async (req, res) => {
 export const explainVersionComparison = asyncHandler(async (req, res) => {
   const { key } = req.params;
   await assertKeyExists(key);
-  const versionA = Number(req.query.versionA);
-  const versionB = Number(req.query.versionB);
-  if (!versionA || !versionB) throw new AppError("versionA and versionB query params are required.", 400);
+  const versionA = versionFromQuery(req, "versionA", { required: true });
+  const versionB = versionFromQuery(req, "versionB", { required: true });
   const data = await buildVersionComparison({ key, versionA, versionB, rangeDays: rangeDaysFromQuery(req, 90) });
   const result = await generativeAssistant.processVersionComparisonExplain(data);
   res.json({ success: true, data: result });

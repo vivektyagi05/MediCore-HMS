@@ -54,20 +54,23 @@ export const computePatientRiskLevel = ({ medicalConditions = [], allergies = []
 // patientIds in a fixed number of queries (no N+1), regardless of batch
 // size. Used by both the registry list (lighter per-row use) and the
 // Patient 360 workspace (fuller single-patient use).
-export const buildPatientAggregates = async (patientIds) => {
+export const buildPatientAggregates = async (patientIds, { includeDoctorNames = true } = {}) => {
   const ids = patientIds.map((id) => (id instanceof mongoose.Types.ObjectId ? id : new mongoose.Types.ObjectId(id)));
   const now = Date.now();
 
   const [appointments, prescriptions, reports, payments, insurancePolicies, familyMembers] = await Promise.all([
-    Appointment.find({ patientId: { $in: ids } })
-      .populate({
-        path: "doctorId",
-        select: "specialization userId",
-        populate: { path: "userId", select: "name" },
-      })
-      .select("patientId doctorId date status reason painLevel consultationMode createdAt")
-      .sort({ date: -1 })
-      .lean(),
+    // includeDoctorNames=false (registry list) skips the doctor -> user populate: the list never shows a doctor name.
+    // Patient 360 keeps the default (true), so its output is unchanged.
+    (() => {
+      const query = Appointment.find({ patientId: { $in: ids } });
+      if (includeDoctorNames) {
+        query.populate({ path: "doctorId", select: "specialization userId", populate: { path: "userId", select: "name" } });
+      }
+      return query
+        .select("patientId doctorId date status reason painLevel consultationMode createdAt")
+        .sort({ date: -1, _id: -1 })
+        .lean();
+    })(),
     Prescription.find({ patientId: { $in: ids } })
       .select("patientId doctorId appointmentId followUpDate createdAt status")
       .lean(),

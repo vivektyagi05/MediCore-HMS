@@ -163,7 +163,7 @@ function ConnectivityView({ tick }) {
     <div className="grid gap-6 lg:grid-cols-2">
       <Card title={`Connected Modules (${data.connected.length})`}>
         <div className="space-y-2">
-          {data.connected.map((m) => (
+          {(data.connected ?? []).map((m) => (
             <div key={m.processId} className="flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 text-sm">
               <span className="font-bold text-slate-800">{m.label}</span>
               <span className="text-[11px] text-emerald-700">{m.via}</span>
@@ -176,7 +176,7 @@ function ConnectivityView({ tick }) {
           <EmptyState title="Nothing disconnected" description="Every process in the registry has at least one real dependency or automation edge." />
         ) : (
           <div className="space-y-2">
-            {data.disconnected.map((m) => (
+            {(data.disconnected ?? []).map((m) => (
               <div key={m.processId} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
                 <span className="flex items-center gap-2 font-bold text-slate-700"><Unlink2 size={12} /> {m.label}</span>
                 <span className="text-[11px] text-slate-400">{m.reason}</span>

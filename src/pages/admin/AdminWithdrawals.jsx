@@ -11,8 +11,10 @@ import Select from "../../components/ui/Select";
 import Skeleton from "../../components/shared/Skeleton";
 import EmptyState from "../../components/shared/EmptyState";
 import ErrorState from "../../components/shared/ErrorState";
+import ReasonDialog from "../../components/ui/ReasonDialog";
 import { useToast } from "../../context/ToastContext";
 
+import { useLatestRequest } from "../../hooks/useLatestRequest";
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 const STATUS_TONE = {
@@ -74,53 +76,53 @@ function AdminWithdrawals() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actingId, setActingId] = useState(null);
+  const [page, setPage] = useState(1);
+  const [dialog, setDialog] = useState(null); // { withdrawal, action }
 
+  const begin = useLatestRequest();
   const load = useCallback(async () => {
+    const isCurrent = begin(); // status filter / page changed again while this was in flight: drop the stale response
     setIsLoading(true);
     setLoadError("");
     try {
-      const params = { pageSize: 25 };
+      const params = { pageSize: 25, page };
       if (status) params.status = status;
       const res = await withdrawalAdminApi.list(params);
+      if (!isCurrent()) return;
       setWithdrawals(res.data?.withdrawals || []);
       setPagination(res.data?.pagination || null);
     } catch (error) {
-      setLoadError(getApiErrorMessage(error));
+      if (isCurrent()) setLoadError(getApiErrorMessage(error));
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
-  }, [status]);
+  }, [begin, status, page]);
 
   useFinancialSync(load);
   useEffect(() => { load(); }, [load]);
 
-  const runAction = async (withdrawal, action) => {
+  // Actions that need an external reference or a reason open a validated dialog (no window.prompt: it cannot validate,
+  // cannot show the server's error, and a cancelled prompt silently looked like success). Others run directly.
+  const perform = async (withdrawal, action, payload = {}) => {
     setActingId(withdrawal._id);
     try {
-      const payload = {};
-      if (action.needsSettlement) {
-        // Manual settlement is a statement by an authorized admin that money was
-        // moved OUTSIDE this system; it must carry a real external reference.
-        const reference = window.prompt("Manual settlement reference (e.g. bank / UTR reference). This records that you settled it outside MediCore.");
-        if (!reference?.trim()) { setActingId(null); return; }
-        const why = window.prompt("Reason / note for the audit trail");
-        if (!why?.trim()) { setActingId(null); return; }
-        payload.settlementReference = reference.trim();
-        payload.reason = why.trim();
-      } else if (action.needsReason) {
-        const why = window.prompt("Reason for marking this withdrawal failed");
-        if (!why?.trim()) { setActingId(null); return; }
-        payload.reason = why.trim();
-      }
       await withdrawalAdminApi[action.api](withdrawal._id, payload);
       toast.success(`Withdrawal recorded as: ${STATUS_LABEL[action.to] || action.to}.`);
       load();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error));
     } finally {
       setActingId(null);
     }
   };
+  const runAction = (withdrawal, action) => {
+    if (action.needsSettlement || action.needsReason) { setDialog({ withdrawal, action }); return; }
+    perform(withdrawal, action).catch((error) => { toast.error(getApiErrorMessage(error)); load(); });
+  };
+  const dialogFields = dialog?.action.needsSettlement
+    ? [
+        { name: "settlementReference", label: "Settlement reference (bank / UTR)", min: 4, max: 120, helperText: "This records that you moved the money outside MediCore." },
+        { name: "reason", label: "Reason / note for the audit trail", min: 5, max: 300, multiline: true },
+      ]
+    : [{ name: "reason", label: "Reason for marking this withdrawal failed", min: 5, max: 300, multiline: true }];
 
   return (
     <div className="space-y-6">
@@ -128,7 +130,7 @@ function AdminWithdrawals() {
 
       <Card>
         <div className="flex flex-wrap items-end gap-3">
-          <Select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <Select label="Status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
             <option value="">All statuses</option>
             {Object.keys(STATUS_LABEL).map((key) => (
               <option key={key} value={key}>{STATUS_LABEL[key]}</option>
@@ -179,9 +181,34 @@ function AdminWithdrawals() {
           </div>
         )}
         {pagination && pagination.total > 0 && (
-          <p className="mt-3 text-xs font-semibold text-slate-400">{pagination.total} total withdrawal request(s)</p>
+          <div className="mt-3 flex items-center justify-between text-xs font-semibold text-slate-500">
+            <span>{pagination.total} total withdrawal request(s) · page {pagination.page || page} of {pagination.totalPages || pagination.pages || 1}</span>
+            <span className="flex gap-2">
+              <Button size="sm" variant="secondary" disabled={page <= 1 || isLoading} onClick={() => setPage((p) => Math.max(p - 1, 1))}>Previous</Button>
+              <Button size="sm" variant="secondary" disabled={isLoading || page >= (pagination.totalPages || pagination.pages || 1)} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </span>
+          </div>
         )}
       </Card>
+
+      <ReasonDialog
+        isOpen={Boolean(dialog)}
+        title={dialog?.action.label}
+        description={dialog ? `${dialog.withdrawal.doctorId?.userId?.name || "Doctor"} · ${money(dialog.withdrawal.requestedAmount)}. This is recorded in the audit trail.` : ""}
+        fields={dialogFields}
+        confirmLabel={dialog?.action.label || "Confirm"}
+        tone={dialog?.action.needsReason ? "danger" : "primary"}
+        onClose={() => setDialog(null)}
+        onSubmit={async (values) => {
+          try {
+            await perform(dialog.withdrawal, dialog.action, values);
+            setDialog(null);
+          } catch (error) {
+            load(); // the row may have changed under us (409): show the truth behind the dialog
+            throw error;
+          }
+        }}
+      />
     </div>
   );
 }

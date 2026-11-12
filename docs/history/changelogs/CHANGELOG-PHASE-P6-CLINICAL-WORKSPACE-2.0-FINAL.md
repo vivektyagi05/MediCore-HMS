@@ -1,7 +1,9 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # CHANGELOG — Phase P6 FINAL: Clinical Workspace 2.0 Gap-Closure
 
 This is a gap-closure pass on the P6 deliverable described in
-`docs/CHANGELOG-PHASE-P6-CLINICAL-WORKSPACE-2.0.md` (kept, not replaced —
+`docs/history/changelogs/CHANGELOG-PHASE-P6-CLINICAL-WORKSPACE-2.0.md` (kept, not replaced —
 this file records what changed since). No working system was rebuilt; every
 change below is additive/corrective on top of the existing implementation.
 

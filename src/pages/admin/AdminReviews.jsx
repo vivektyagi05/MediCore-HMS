@@ -191,7 +191,7 @@ function AdminReviews() {
           <Button variant="secondary" size="sm" onClick={() => setDetailId(row._id)}>
             <Eye size={14} /> View
           </Button>
-          <Button variant="danger" size="sm" onClick={() => setDeleteTarget(row)}>
+          <Button aria-label="Delete" title="Delete" variant="danger" size="sm" onClick={() => setDeleteTarget(row)}>
             <Trash2 size={14} />
           </Button>
         </div>

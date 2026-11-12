@@ -1,0 +1,59 @@
+===== REQUIRED PHASE-1 CLOSURE TESTS =====
+email verification crypto contract: PASS
+phase 1 auth verification contract: PASS
+phase 1 onboarding contract: PASS
+PASS: legitimate onboarding field passes through
+PASS: self-approval / rating-fraud / userId-reassignment attack is blocked
+ALL ONBOARDING MASS ASSIGNMENT TESTS PASSED
+TAP version 13
+# Subtest: concurrent approve+approve on the same pending doctor: exactly one wins the atomic transition
+ok 1 - concurrent approve+approve on the same pending doctor: exactly one wins the atomic transition
+  ---
+  duration_ms: 5.916741
+  type: 'test'
+  ...
+# Subtest: concurrent reject+reject on the same pending doctor: exactly one wins the atomic transition
+ok 2 - concurrent reject+reject on the same pending doctor: exactly one wins the atomic transition
+  ---
+  duration_ms: 5.930812
+  type: 'test'
+  ...
+# Subtest: approve vs reject racing the same pending doctor: exactly one terminal transition wins, DB state and side effects never disagree
+ok 3 - approve vs reject racing the same pending doctor: exactly one terminal transition wins, DB state and side effects never disagree
+  ---
+  duration_ms: 5.803583
+  type: 'test'
+  ...
+# Subtest: a request racing against an already-terminal doctor safely no-ops instead of double-applying a transition
+ok 4 - a request racing against an already-terminal doctor safely no-ops instead of double-applying a transition
+  ---
+  duration_ms: 4.665479
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 71.293612
+phase 1 admin registration email contract: PASS
+TAP version 13
+# Subtest: two simultaneous verification attempts cannot both consume the active token
+ok 1 - two simultaneous verification attempts cannot both consume the active token
+  ---
+  duration_ms: 6.434076
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 53.636288
+runtime roles contract: PASS

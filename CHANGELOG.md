@@ -1,52 +1,19 @@
 # Changelog
 
-This file is the human-facing entry point. MediCore HMS has been built in
-many small, phase-by-phase passes, and each phase has its own detailed
-changelog file (in `docs/`, or at the repo root for the most recent P23
-sub-phases). This file summarizes where the project currently stands and
-points to the detailed history — it does not restate every historical
-entry.
+This file is the entry point to MediCore HMS history. The project was built in many phase-by-phase passes, and each pass has its own detailed changelog under [`docs/history/changelogs/`](docs/history/changelogs/) (88 files). This file does not restate them, and the historical files are preserved as written — their claims describe the state at their date, not the current state. For the current verified position use [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) and [`docs/REMAINING_RISKS.md`](docs/REMAINING_RISKS.md).
 
-## Current state (most recent work first)
+## Most recent recorded work
+The latest dated changelogs in the repository (dates as written inside the files) are the financial-foundation phases:
 
-The most recent engineering focus has been the **P23 financial-correctness
-phase** — payments, refunds, wallet, payouts, and withdrawals. In
-chronological order, most recent last:
+- [Phase 00 — Foundation](docs/history/changelogs/CHANGELOG-PHASE-00-FOUNDATION.md) (2026-10-13)
+- [Phase 01 — Payment core](docs/history/changelogs/CHANGELOG-PHASE-01-PAYMENT-CORE.md) (2026-10-13 to 2026-10-14)
+- [Phase 02 — Wallet and split payment](docs/history/changelogs/CHANGELOG-PHASE-02-WALLET-SPLIT-PAYMENT.md) (undated)
+- [Phase 03 — Financial operations hub](docs/history/changelogs/CHANGELOG-PHASE-03-FINANCIAL-OPERATIONS-HUB.md) (2026-10-17)
 
-- **P23 — Fake-Success Elimination** (`CHANGELOG-P23-FAKE-SUCCESS-ELIMINATION.md`,
-  repo root): fixed a refund-request contract bug and a real "fake success"
-  defect where a wallet recharge was credited on gateway *signature*
-  verification alone rather than on an authoritative captured-payment
-  check. Introduced a dedicated `WalletRecharge` lifecycle and state
-  machine. Also fixed a misleading-analytics bug (pending/failed ledger
-  rows being summed as completed) and three refund state-machine bypasses.
-  See that file for exactly what was and wasn't verified.
-- **P23 — Concurrency Hardening** (`CHANGELOG-P23-CONCURRENCY-HARDENING.md`,
-  repo root): socket-layer stability and shutdown-safety fixes, dependency
-  audit, and the introduction of `.github/workflows/ci.yml` groundwork.
-- **P23 — Continuation** (`CHANGELOG-P23-CONTINUATION.md`, repo root) and
-  **P23 — Payment/Refund 3.0** (`docs/CHANGELOG-PHASE-P23-PAYMENT-REFUND-3.0.md`):
-  earlier P23 work building out the payment/refund/payout domain that the
-  later two passes above hardened further.
-
-For the full, current picture of what's implemented vs. still incomplete,
-see `docs/PROJECT_STATUS.md` and `docs/REMAINING_RISKS.md` — those are kept
-current; this changelog is a historical record and is not re-edited to
-match later findings.
+They follow the earlier P23 financial-correctness work: [Fake-success elimination](docs/history/changelogs/CHANGELOG-P23-FAKE-SUCCESS-ELIMINATION.md), [Concurrency hardening](docs/history/changelogs/CHANGELOG-P23-CONCURRENCY-HARDENING.md), [Continuation](docs/history/changelogs/CHANGELOG-P23-CONTINUATION.md), [Payment/Refund 3.0](docs/history/changelogs/CHANGELOG-PHASE-P23-PAYMENT-REFUND-3.0.md), and the [financial hardening slices](docs/history/changelogs/CHANGELOG-FINANCIAL-HARDENING-SLICE1.md) ([slice 2](docs/history/changelogs/CHANGELOG-FINANCIAL-HARDENING-SLICE2.md)). Ordering beyond the dates above was not established from file contents.
 
 ## Earlier phases
+Public discovery and SEO, authentication, booking, the clinical workspace, doctor practice management, patient relationship tooling, admin operations, workflow automation and governance, and others. The complete list is indexed in [`docs/README.md`](docs/README.md#history).
 
-The project was built through dozens of earlier phases covering public-facing
-discovery (doctor search, profiles, SEO), authentication, appointment
-booking, the clinical workspace, doctor practice management, patient
-relationship tooling, admin operations, process automation/governance, and
-more. Each has its own changelog under `docs/`, generally named
-`CHANGELOG-<phase-name>.md` or `CHANGELOG-PHASE-<code>-<name>.md`. See
-`docs/README.md` for the documentation index, which groups these under
-"Historical Phases."
-
-Historical changelog files are preserved as-is and are not rewritten to
-reflect current status — if a historical file says a feature was "planned"
-or "architecture ready" at the time, and the feature is implemented today,
-that update lives in `docs/FEATURES.md` and `docs/PROJECT_STATUS.md`, not
-by editing the old entry.
+## Documentation changes
+The documentation was audited and reorganised against the repository snapshot; see [`docs/audits/DOCUMENTATION_AUDIT_REPORT.md`](docs/audits/DOCUMENTATION_AUDIT_REPORT.md). Reports that previously sat in the repository root now live under `docs/history/` and `docs/audits/historical-audits/` with unchanged filenames.

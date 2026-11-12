@@ -1,35 +1,20 @@
-# Remaining risks and verification gaps
+# Remaining Risks
 
-This page records documentation-supported gaps and verification work that cannot be closed by editing prose. It is not a full security, infrastructure, financial, or application audit.
+> **Status: rebuilt during the documentation audit.** Each item cites evidence found in the repository snapshot. Severity is the auditor's judgement, not a measurement. Items marked *Unverified* could not be checked without executing code or contacting services. The earlier risk list is preserved as history ([old status files](history/)); statements in it such as "no frontend test suite" or "90/94 backend tests" no longer match the code.
 
-## 1. Test results are inconsistent across reports
+Related: [Project status](PROJECT_STATUS.md) · [Security overview](security/security-overview.md)
 
-Historical reports list 90 passed / 4 failed, 185/185, and 190/190 results. The reports have not been tied to one exact source commit and execution environment here. The current result is **Unverified**. Run the documented suite on the exact candidate commit before publishing a fresh result; retain command output and environment details.
-
-## 2. Live integrations need runtime verification
-
-The repository documents MongoDB, Razorpay, and Brevo-related configuration. Live connection, gateway signature handling, webhook delivery, email delivery, and complete user journeys require the appropriate test environment and cannot be established by source inspection alone.
-
-## 3. Deployment is not verified by this documentation pass
-
-Dockerfiles, Compose configuration, CI workflow files, and hosting-related configuration exist in the repository. This task did not build containers, start services, deploy the application, or inspect external service state. Verify health checks, environment variables, CORS, frontend API URL, storage persistence, and logs in the intended deployment environment.
-
-## 4. Uploaded-file persistence and backups
-
-Deployment and risk documents describe local/volume-backed uploaded files. Confirm the actual storage configuration and backup/restore procedure for the target deployment. A MongoDB backup alone may not include files stored outside MongoDB.
-
-## 5. Dependency advisories are time-sensitive
-
-Historical validation and audit reports disagree about dependency vulnerability status. Do not rely on old “zero vulnerabilities” claims. Check the lockfiles and current package advisory data at release time, record the date and command, and assess required upgrades separately. This documentation-only task did not run dependency audits or change packages.
-
-## 6. Security and compliance claims
-
-Security-related middleware and authentication code may be present, but this review does not establish security effectiveness, regulatory compliance, privacy compliance, or suitability for real patient data. Such claims require dedicated review and operational evidence.
-
-## 7. Release evidence required
-
-Before calling a build verified, record the exact commit, runtime versions, commands, exit codes, test totals, relevant environment constraints, and which external systems were exercised. Separate unit/static checks from real-database, browser, gateway, container, CI, and production verification.
-
-## Scope note
-
-No application code, tests, dependencies, environment configuration, deployment configuration, or external services were modified or tested as part of this documentation cleanup.
+| ID | Risk | Evidence | Severity | Impact | Recommended action | Verification status |
+|---|---|---|---|---|---|---|
+| R-01 | Realtime presence and rate limiting are per-process | `backend/socket/presenceManager.js` keeps presence in memory; no Socket.IO adapter or Redis found in `backend/socket/` or `server.js`; no `store:` option on the rate limiters in `app.js` | Medium | With more than one web replica, presence and rate-limit counters are inconsistent per instance | Add a shared adapter/store before scaling out; keep one web instance meanwhile | Confirmed by code reading; behaviour not run |
+| R-02 | Free-text clinical content can reach the AI provider | `backend/ai/providers/phiMinimizer.js` header states free-text fields are not scrubbed; production requires the Gemini provider | High (privacy) | Patient-identifying text may be sent to a third party | Decide a policy for free text (scrub, block, or consent) and document the data-processing basis; see [AI architecture](AI-ARCHITECTURE.md) | Confirmed by code comment; actual payloads not inspected |
+| R-03 | `backend/.env.example` omits about 25 variables the code reads | Compare `backend/.env.example` with the scan in [environment variables](development/environment-variables.md): `SERVICE_ROLE`, `AI_TEXT_PROVIDER`, `GEMINI_*`, `STORAGE_*`, `ENABLE_IN_PROCESS_SCHEDULER`, `DOCTOR_WITHDRAWAL_*`, etc. | Medium | New deployments can fail production validation or silently use defaults | Extend the example file (not changed in this documentation-only audit) | Confirmed |
+| R-04 | Root `.env.example` mixes backend settings with frontend ones | `PAYMENT_GATEWAY_MODE`, `PLATFORM_FEE_PERCENT`, `TEST_PAYMENT_*` are read only by the backend | Low | Operators may set them on the frontend host, where they have no effect | Move them to the backend example | Confirmed |
+| R-05 | Frontend tests are not part of CI | `.github/workflows/ci.yml` has no `test:frontend` step; 21 vitest files exist | Medium | Frontend regressions can merge without tests running | Add the step; verify the suite passes first | Confirmed; suite not run |
+| R-06 | Load-test seed manifest directory is not git-ignored | `backend/scripts/seed-load-test.mjs` writes `backend/scripts/loadtest/.manifests/<run-id>.json`; neither `.gitignore` nor `backend/.gitignore` lists it; the original plan claimed it was ignored | Low | Run manifests could be committed accidentally | Add an ignore rule | Confirmed |
+| R-07 | Python wheel files committed in `backend/` | `dnspython-2.8.0`, `pymongo-4.18.2` and `pymongo_inmemory-0.5.0` `.whl` files sit in `backend/`; nothing in the repository references them | Low | Unexplained binaries, repository noise; provenance unknown | Confirm purpose; remove or document | Confirmed present; purpose unknown |
+| R-08 | Live third-party integrations never verified in this audit | Razorpay, Brevo, Gemini, object storage and hosting were not contacted | Unknown | Production behaviour of payments, email and AI is unproven by this audit | Run the [runbook](deployment/deployment-runbook.md) acceptance list in a real environment | Unverified |
+| R-09 | Test suite, lint and builds not executed in this audit | Constraint of the documentation-only task; no dependencies installed | Unknown | Pass/fail state of the snapshot is unknown to this audit | Run `npm --prefix backend test`, `test:mongo`, `npm run test:frontend`, `npm run lint`, `npm run build` | Unverified |
+| R-10 | Dependency advisories not re-checked | Earlier reports cite advisories for Vite and react-router; current manifests pin newer majors but no `npm audit` was run | Unknown | Known vulnerabilities may remain or may be resolved | Run `npm audit` for both packages | Unverified |
+| R-11 | Source comments cite docs by bare filename | e.g. changelog names in code comments now live under `docs/history/changelogs/`; `phiMinimizer.js` cited a missing doc (now provided at `docs/AI-ARCHITECTURE.md`) | Low | Readers following comments must search for the file | Update comments to full paths in a code change | Confirmed |
+| R-12 | Compliance not claimed | No PCI-DSS, SOC 2 or HIPAA/DPDP assessment evidence found in the repository | — | Regulatory readiness is unestablished | Seek a formal assessment before handling real patient or card data | No evidence either way |

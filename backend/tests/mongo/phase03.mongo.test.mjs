@@ -1,15 +1,18 @@
 // Phase 03 REAL-MongoDB evidence: coupon reserve/redeem/release atomicity ($elemMatch + $pull + positional $set),
 // refund-lock lease takeover + token fencing, email-outbox claim fencing, and the discrepancy report pipelines.
-// Skipped unless MONGODB_TEST_URI points at a DISPOSABLE database whose name contains "test" (DROPPED at start):
+// Skipped unless MONGODB_TEST_URI points at a DISPOSABLE database whose name is 'test' or ends in '_test'/'-test' (DROPPED at start):
 //   MONGODB_TEST_URI=mongodb://localhost:27017/hms_phase03_test node tests/mongo/phase03.mongo.test.mjs
 // AUTHORED BUT NOT EXECUTED in the authoring sandbox (no mongod). Until it passes against a real server every
 // Phase 03 concurrency claim is LOCALLY_VERIFIED at most (BLOCKED_EXTERNAL).
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
+import { getDisposableMongoTestUri } from "./safety.mjs";
 
-const uri = process.env.MONGODB_TEST_URI;
-if (!uri) { console.log("SKIP: set MONGODB_TEST_URI to run Phase 03 real-Mongo tests"); process.exit(0); }
-if (!/test/i.test(new URL(uri).pathname)) { console.error("REFUSING: database name must contain 'test' (it is dropped)"); process.exit(1); }
+const uri = getDisposableMongoTestUri();
+if (!uri) {
+  console.log("SKIP: set MONGODB_TEST_URI to a verified disposable *_test database to run real-Mongo tests");
+  process.exit(0);
+}
 process.env.MONGO_URI ||= uri; process.env.JWT_SECRET ||= "test_secret_for_ci_only_not_real_do_not_use"; process.env.NODE_ENV ||= "test";
 await mongoose.connect(uri, { autoIndex: false });
 await mongoose.connection.dropDatabase();

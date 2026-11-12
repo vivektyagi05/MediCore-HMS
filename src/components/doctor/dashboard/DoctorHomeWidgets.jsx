@@ -844,10 +844,10 @@ export function PendingApprovalsQueue({ appointments, onApprove, onReject, updat
                 <p className="text-xs font-semibold text-slate-500">{formatDate(a.date)} · {a.timeSlot}</p>
               </div>
               <div className="flex shrink-0 gap-2">
-                <Button size="sm" isLoading={updatingId === a._id} onClick={() => onApprove(a)}>
+                <Button aria-label="Confirm" title="Confirm" size="sm" isLoading={updatingId === a._id} onClick={() => onApprove(a)}>
                   <CheckCircle2 size={14} />
                 </Button>
-                <Button size="sm" variant="secondary" isLoading={updatingId === a._id} onClick={() => onReject(a)}>
+                <Button aria-label="Reject" title="Reject" size="sm" variant="secondary" isLoading={updatingId === a._id} onClick={() => onReject(a)}>
                   <XCircle size={14} />
                 </Button>
               </div>

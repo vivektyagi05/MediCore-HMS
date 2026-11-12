@@ -39,7 +39,7 @@ const hold = async (payment, store) => { await store.ensureWallet(payment.userId
 // ------------------------------------------------------------------ coupons
 await check("orphan coupon reservation (crash before Payment.create) is released exactly once; repeats never double-decrement", async () => {
   const pid = newId();
-  const coupon = await mkCoupon([{ userId: newId(), paymentId: pid, usedAt: old }]);
+  const coupon = await mkCoupon([{ userId: newId(), paymentId: pid, usedAt: old, state: "reserved" }]);
   const first = await C.recoverOrphanCouponReservations();
   assert.equal(first.length, 1); assert.equal(first[0].released, true);
   const again = await C.recoverOrphanCouponReservations();
@@ -50,12 +50,12 @@ await check("orphan coupon reservation (crash before Payment.create) is released
 await check("a coupon reservation that HAS a payment, or is still within the grace period, is left alone", async () => {
   const appointment = await mkAppointment();
   const payment = await mkPayment({ appointment });
-  const coupon = await mkCoupon([{ userId: newId(), paymentId: payment._id, usedAt: old }, { userId: newId(), paymentId: newId(), usedAt: new Date() }]);
+  const coupon = await mkCoupon([{ userId: newId(), paymentId: payment._id, usedAt: old, state: "reserved" }, { userId: newId(), paymentId: newId(), usedAt: new Date() }]);
   assert.equal((await C.recoverOrphanCouponReservations()).length, 0);
   assert.equal((await Coupon.findById(coupon._id).lean()).usedCount, 2);
 });
 await check("release is idempotent: double release decrements once", async () => {
-  const pid = newId(); const coupon = await mkCoupon([{ userId: newId(), paymentId: pid, usedAt: old }]);
+  const pid = newId(); const coupon = await mkCoupon([{ userId: newId(), paymentId: pid, usedAt: old, state: "reserved" }]);
   const { couponService } = await import("../payments/couponService.js");
   assert.equal((await couponService.release({ couponId: coupon._id, paymentId: pid })).released, true);
   assert.equal((await couponService.release({ couponId: coupon._id, paymentId: pid })).released, false);
@@ -68,7 +68,7 @@ await check("unpaid payment of a cancelled appointment: cancelled, coupon and wa
   const pid = newId();
   const coupon = await mkCoupon([]);
   const payment = await mkPayment({ appointment, walletAmount: 40, couponId: coupon._id, _id: pid });
-  await Coupon.updateOne({ _id: coupon._id }, { $inc: { usedCount: 1 }, $push: { usedBy: { userId: payment.userId, paymentId: pid, usedAt: old } } });
+  await Coupon.updateOne({ _id: coupon._id }, { $inc: { usedCount: 1 }, $push: { usedBy: { userId: payment.userId, paymentId: pid, usedAt: old, state: "reserved" } } });
   await hold(payment, store);
   assert.equal((await C.cancelAndReleaseUnpaidPayment(payment, { reason: "test" })), "released");
   assert.equal((await Payment.findById(pid).lean()).paymentState, "cancelled");

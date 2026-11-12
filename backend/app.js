@@ -1,3 +1,4 @@
+import { rejectRepeatedQuery } from "./middleware/rejectRepeatedQuery.js";
 import { getReadiness } from "./services/readinessService.js";
 import cors from "cors";
 import path from "path";
@@ -293,6 +294,12 @@ app.use("/api/doctors", doctorRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/master-data", masterDataRoutes);
 
+// D-01: sanitizeRequest above cleans req.body/req.params only, never req.query, so before this guard
+// `?patientId[$ne]=x` / `?search[]=a` reached doctor filters and `.trim()` calls as objects/arrays (500 or an
+// operator in a Mongo filter). Same central guard as /api/admin. Verified by static scan that the frontend sends
+// comma-joined strings (e.g. status=a,b,c), never repeated or bracketed keys, to these two mounts.
+app.use("/api/doctor", rejectRepeatedQuery);
+app.use("/api/appointments", rejectRepeatedQuery);
 app.use("/api/doctor", doctorWorkflowRoutes);
 app.use("/api/doctor", doctorPracticeRoutes);
 app.use("/api/doctor", doctorCommandCenterRoutes);
@@ -310,6 +317,8 @@ app.use("/api/refunds", refundRoutes);
 
 app.use("/api/realtime", realtimeRoutes);
 
+// A-14: one guard for every admin route (see middleware/rejectRepeatedQuery.js).
+app.use("/api/admin", rejectRepeatedQuery);
 app.use("/api/admin/services", serviceAdminRoutes);
 app.use("/api/admin/doctors", doctorAdminRoutes);
 app.use("/api/admin/appointments", appointmentAdminRoutes);

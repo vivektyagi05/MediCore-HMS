@@ -330,6 +330,9 @@ export const buildSmartAlerts = async () => {
   const fourteenDaysFromNow = new Date(now + 14 * 24 * 60 * 60 * 1000);
   const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000);
 
+  // Every alert below only needs a COUNT. These used to be find().select().lean() calls whose results were only ever
+  // measured with `.length`, shipping whole documents from Mongo to Node on every Mission Control poll (15 s per open tab)
+  // and every other buildSmartAlerts caller. countDocuments takes the same filters, so the counts are identical.
   const [
     staleDoctorVerifications,
     staleRefunds,
@@ -338,47 +341,45 @@ export const buildSmartAlerts = async () => {
     criticalUnreviewedReports,
     unreadCriticalNotifications,
   ] = await Promise.all([
-    Doctor.find({ verificationStatus: "pending", createdAt: { $lte: twoDaysAgo } }).select("createdAt").lean(),
-    RefundRequest.find({ status: "pending", createdAt: { $lte: sevenDaysAgo } }).select("createdAt amount").lean(),
-    Insurance.find({
+    Doctor.countDocuments({ verificationStatus: "pending", createdAt: { $lte: twoDaysAgo } }),
+    RefundRequest.countDocuments({ status: "pending", createdAt: { $lte: sevenDaysAgo } }),
+    Insurance.countDocuments({
       validTill: { $gte: new Date(now), $lte: fourteenDaysFromNow },
       claimStatus: { $nin: ["approved", "rejected"] },
-    })
-      .select("validTill provider")
-      .lean(),
+    }),
     Payment.countDocuments({ status: PAYMENT_STATUS.FAILED, createdAt: { $gte: sevenDaysAgo } }),
-    MedicalReport.find({ severity: "critical", reviewedAt: null }).select("title createdAt").lean(),
+    MedicalReport.countDocuments({ severity: "critical", reviewedAt: null }),
     NotificationDelivery.countDocuments({ severity: "critical", readAt: null }),
   ]);
 
   const alerts = [];
 
-  if (staleDoctorVerifications.length) {
+  if (staleDoctorVerifications > 0) {
     alerts.push({
       key: "doctor-verification-backlog",
       priority: "high",
       title: "Doctor verifications waiting over 2 days",
-      count: staleDoctorVerifications.length,
+      count: staleDoctorVerifications,
       link: "/admin/doctors",
     });
   }
 
-  if (staleRefunds.length) {
+  if (staleRefunds > 0) {
     alerts.push({
       key: "refund-backlog",
       priority: "critical",
       title: "Refund requests pending over 7 days",
-      count: staleRefunds.length,
+      count: staleRefunds,
       link: "/admin/refunds",
     });
   }
 
-  if (expiringInsurance.length) {
+  if (expiringInsurance > 0) {
     alerts.push({
       key: "insurance-expiring",
       priority: "medium",
       title: "Insurance policies expiring within 14 days with open claims",
-      count: expiringInsurance.length,
+      count: expiringInsurance,
       link: "/admin/patients",
     });
   }
@@ -393,12 +394,12 @@ export const buildSmartAlerts = async () => {
     });
   }
 
-  if (criticalUnreviewedReports.length) {
+  if (criticalUnreviewedReports > 0) {
     alerts.push({
       key: "critical-reports",
       priority: "critical",
       title: "Critical medical reports awaiting review",
-      count: criticalUnreviewedReports.length,
+      count: criticalUnreviewedReports,
       link: "/admin/patients",
     });
   }

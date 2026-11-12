@@ -8,7 +8,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 const realtime = read("src/context/RealtimeContext.jsx");
-const adminDoctors = read("backend/controllers/admin/doctorAdminController.js");
+// Doctor list pipeline now lives in services/adminDoctorListPipeline.js (S4); the contract covers both files.
+const adminDoctors = read("backend/controllers/admin/doctorAdminController.js") + read("backend/services/adminDoctorListPipeline.js");
 const publicController = read("backend/controllers/publicController.js");
 
 assert.match(realtime, /let initialConnection = true;/);
@@ -23,7 +24,8 @@ assert.match(onConnect, /return;/);
 assert.match(adminDoctors, /from: "appointments"/);
 assert.match(adminDoctors, /\$count: "count"/);
 assert.doesNotMatch(adminDoctors, /as: "appointments"[\s\S]{0,180}\$size: "\$appointments"/);
-assert.match(adminDoctors, /const countPipeline = \[\{ \$match: match \}\];/);
+assert.match(adminDoctors, /buildDoctorCountPipeline\(\{ match, searchTerm \}\)/);
+assert.match(adminDoctors, /\[\{ \$match: match \}, \.\.\.\(searchTerm/);
 
 const coverage = publicController.slice(
   publicController.indexOf("export const getDoctorCoverage"),

@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import * as server from "../utils/vitalsValidation.js";
+import * as client from "../../src/utils/vitalsValidation.js";
+const v = server.validateVitals; let n = 0; const ok = (m) => { n += 1; console.log("PASS:", m); };
+assert.deepEqual(v({}, {}), {}); assert.deepEqual(v(undefined, undefined), {}); assert.deepEqual(v({ heightCm: "", weightKg: null }, {}), {}); ok("every vital is optional");
+assert.deepEqual(v({ heightCm: 172, weightKg: 68.5, bloodPressureSystolic: 120, bloodPressureDiastolic: 80, restingHeartRate: 64 }, { sleepHoursAvg: 7.5 }), {}); ok("normal values pass (numbers and numeric strings)"); assert.deepEqual(v({ heightCm: "172" }), {});
+for (const [k, bad] of [["heightCm", 0], ["heightCm", 29], ["heightCm", 273], ["weightKg", 0], ["weightKg", 401], ["bloodPressureSystolic", 49], ["bloodPressureSystolic", 261], ["bloodPressureDiastolic", 29], ["bloodPressureDiastolic", 161], ["restingHeartRate", 19], ["restingHeartRate", 251], ["heightCm", -5], ["heightCm", "abc"], ["heightCm", NaN], ["weightKg", Infinity], ["heightCm", "1e2x"]]) assert.ok(v({ [k]: bad })[k], `${k}=${bad}`);
+assert.ok(v({}, { sleepHoursAvg: 25 }).sleepHoursAvg); assert.ok(v({}, { sleepHoursAvg: -1 }).sleepHoursAvg); assert.deepEqual(v({}, { sleepHoursAvg: 0 }), {}); ok("out-of-range, negative, non-numeric and non-finite rejected");
+assert.ok(v({ bloodPressureSystolic: 80, bloodPressureDiastolic: 90 }).bloodPressureDiastolic, "diastolic above systolic"); assert.ok(v({ bloodPressureSystolic: 90, bloodPressureDiastolic: 90 }).bloodPressureDiastolic);
+assert.deepEqual(v({ bloodPressureSystolic: 120 }), {}, "one of the pair alone is fine"); ok("blood pressure pair is coherent");
+const cases = [{}, { heightCm: 0 }, { heightCm: 172, weightKg: 70 }, { bloodPressureSystolic: 80, bloodPressureDiastolic: 90 }, { restingHeartRate: "x" }, { weightKg: 401 }];
+for (const c of cases) assert.deepEqual(client.validateVitals(c, { sleepHoursAvg: 30 }), server.validateVitals(c, { sleepHoursAvg: 30 })); ok("client and server agree on every case");
+console.log(`\n${n} vitals validation groups passed`);

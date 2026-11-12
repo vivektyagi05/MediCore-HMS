@@ -70,7 +70,7 @@ function HealthJourney() {
       {family.length > 0 && (
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs font-black uppercase tracking-wide text-slate-500">Viewing journey for</span>
-          <select
+          <select aria-label="Family member"
             className="rounded-xl border border-slate-200 bg-white/70 px-4 py-2 text-sm"
             value={familyMemberId}
             onChange={(e) => { setFamilyMemberId(e.target.value); load(e.target.value); }}

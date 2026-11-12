@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Service from "../../models/Service.js";
 import Doctor from "../../models/Doctor.js";
+import { queryString } from "../../utils/queryParams.js";
 import { asyncHandler } from "../../middleware/asyncHandler.js";
 import { AppError } from "../../middleware/errorMiddleware.js";
 import { writeAdminLog } from "../../utils/adminAudit.js";
@@ -72,15 +73,25 @@ const ensureRelatedRecords = async (payload, serviceId = null) => {
 export const listServices = asyncHandler(async (req, res) => {
   const page = Math.max(Number(req.query.page) || 1, 1);
   const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+  // A-14: strict query reads (repeated key -> 400) and A-08: `_id` tiebreaker on every sort.
+  const search = queryString(req.query, "search");
+  const category = queryString(req.query, "category");
+  const status = queryString(req.query, "status");
+  const visibility = queryString(req.query, "visibility");
+  const sortKey = queryString(req.query, "sort");
   const filter = {};
-  if (req.query.search) filter.$text = { $search: req.query.search.trim() };
-  if (req.query.category) filter.category = req.query.category.trim();
-  if (req.query.status) filter.status = req.query.status;
-  if (req.query.visibility) filter.visibility = req.query.visibility;
+  if (search) filter.$text = { $search: search };
+  if (category) filter.category = category;
+  if (status) filter.status = status;
+  if (visibility) filter.visibility = visibility;
   if (req.query.featured === "true") filter.featured = true;
-  const sortMap = { price_asc: { price: 1 }, price_desc: { price: -1 }, title_asc: { title: 1 }, newest: { createdAt: -1 }, display_order: { displayOrder: 1, title: 1 } };
+  const sortMap = {
+    price_asc: { price: 1, _id: 1 }, price_desc: { price: -1, _id: -1 }, title_asc: { title: 1, _id: 1 },
+    newest: { createdAt: -1, _id: -1 }, display_order: { displayOrder: 1, title: 1, _id: 1 },
+  };
+  const sort = (Object.prototype.hasOwnProperty.call(sortMap, sortKey) && sortMap[sortKey]) || sortMap.newest;
   const [services, total] = await Promise.all([
-    Service.find(filter).sort(sortMap[req.query.sort] || sortMap.newest).skip((page - 1) * limit).limit(limit).lean(),
+    Service.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
     Service.countDocuments(filter),
   ]);
   res.json({ success: true, data: { services, pagination: { page, limit, total, pages: Math.ceil(total / limit) } } });

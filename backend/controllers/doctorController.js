@@ -22,6 +22,7 @@ import { clampPagination, buildPaginationMeta } from "../utils/paginationValidat
 import { roomManager } from "../socket/roomManager.js";
 import { emailService } from "../services/emailService.js";
 import { applyDoctorMasterData, resolveDoctorMasterData } from "../services/masterDataService.js";
+import { validateDoctorNumbers } from "../utils/doctorNumbersValidation.js";
 import {
   computeRiskLevel,
   resolveFollowUpState,
@@ -53,17 +54,10 @@ const validateDoctorPayload = (payload, partial = false) => {
     }
   }
 
-  if (!partial || payload.experience !== undefined) {
-    if (payload.experience === undefined || Number(payload.experience) < 0) {
-      errors.experience = "Experience must be a non-negative number";
-    }
-  }
-
-  if (!partial || payload.fees !== undefined) {
-    if (payload.fees === undefined || Number(payload.fees) < 0) {
-      errors.fees = "Fees must be a non-negative number";
-    }
-  }
+  // required on create, validated (type + range) whenever present; "abc" and "" used to slip past `Number(x) < 0`
+  if (!partial && payload.experience === undefined) errors.experience = "Experience is required";
+  if (!partial && payload.fees === undefined) errors.fees = "Consultation fee is required";
+  Object.assign(errors, validateDoctorNumbers({ experience: payload.experience, fees: payload.fees }));
 
   if (payload.availability !== undefined && !Array.isArray(payload.availability)) {
     errors.availability = "Availability must be an array of day/time slot objects";

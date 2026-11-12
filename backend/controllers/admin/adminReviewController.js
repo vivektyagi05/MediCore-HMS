@@ -29,7 +29,15 @@ import { notificationEmitter } from "../../realtime/notificationEmitter.js";
 import { logger } from "../../utils/logger.js";
 import { writeAdminLog } from "../../utils/adminAudit.js";
 import { recalculateAndPersistDoctorRating } from "../../services/reviewRatingService.js";
-import { computeReviewAttentionItems, buildReviewSummary } from "../../services/reviewAdminAggregates.js";
+import { queryString } from "../../utils/queryParams.js";
+import {
+  ATTENTION_BUCKET_FILTERS,
+  ATTENTION_QUEUE_SIZE,
+  buildAttentionQueue,
+  buildReviewSummaryFromTotals,
+  buildReviewSummaryPipeline,
+  combineRatingFilter,
+} from "../../services/reviewAdminAggregates.js";
 
 const NOT_DELETED = { adminDeleted: { $ne: true } };
 
@@ -64,20 +72,20 @@ const resolveSearchFilter = async (term) => {
 
 // Only filters that can genuinely be backed by real database fields — no
 // fabricated "sentiment" or "urgency" filter beyond what the schema stores.
-const buildListFilter = async (query) => {
+const buildListFilter = async (rawQuery) => {
+  // A-14: repeated keys / non-string values are a 400 instead of a TypeError on .trim().
+  const query = Object.fromEntries(["doctorId", "rating", "sentiment", "replied", "pinned", "search"].map((key) => [key, queryString(rawQuery, key)]));
   const filter = { ...NOT_DELETED };
 
   if (query.doctorId && mongoose.Types.ObjectId.isValid(query.doctorId)) {
     filter.doctorId = query.doctorId;
   }
-  if (query.rating && ["1", "2", "3", "4", "5"].includes(String(query.rating))) {
-    filter.rating = Number(query.rating);
-  }
-  if (query.sentiment === "positive") {
-    filter.rating = { ...(filter.rating || {}), $gte: 4 };
-  } else if (query.sentiment === "negative") {
-    filter.rating = { ...(filter.rating || {}), $lte: 2 };
-  }
+  // A-15: an explicit rating and a sentiment bound must both hold (previously the explicit rating was dropped).
+  const ratingFilter = combineRatingFilter({
+    rating: query.rating && ["1", "2", "3", "4", "5"].includes(String(query.rating)) ? query.rating : undefined,
+    sentiment: query.sentiment,
+  });
+  if (ratingFilter !== undefined) filter.rating = ratingFilter;
   if (query.replied === "true") {
     filter["doctorReply.message"] = { $exists: true, $ne: "" };
   } else if (query.replied === "false") {
@@ -113,7 +121,7 @@ export const listReviewsAdmin = asyncHandler(async (req, res) => {
         populate: { path: "userId", select: "name" },
       })
       .populate("appointmentId", "date timeSlot")
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
@@ -130,13 +138,12 @@ export const listReviewsAdmin = asyncHandler(async (req, res) => {
   });
 });
 
-// Real, platform-wide KPI strip — traced straight from the same non-deleted
-// review set the registry itself reads, through buildReviewSummary() (which
-// returns null rather than a fabricated 0%/0 for metrics that aren't
-// meaningfully computable with zero reviews).
+// Real, platform-wide KPI strip over the non-deleted reviews. Computed with one database aggregation instead of loading
+// every review (A-03a); buildReviewSummaryFromTotals() keeps the null-rather-than-fabricated-zero rule and the exact
+// rounding of the in-memory buildReviewSummary() it replaces.
 export const getReviewSummaryAdmin = asyncHandler(async (_req, res) => {
-  const reviews = await Review.find(NOT_DELETED).select("rating doctorReply isPinned").lean();
-  const summary = buildReviewSummary(reviews);
+  const [totals] = await Review.aggregate(buildReviewSummaryPipeline());
+  const summary = buildReviewSummaryFromTotals(totals);
 
   res.status(200).json({
     success: true,
@@ -145,32 +152,39 @@ export const getReviewSummaryAdmin = asyncHandler(async (_req, res) => {
   });
 });
 
-// Deterministic attention queue — same source data as the summary above, run
-// through computeReviewAttentionItems(). Capped to a reasonable page size for
-// the UI; this is a queue to act on, not a second full registry.
+// Deterministic attention queue. A-03d: the severe conditions are filtered in the database (one bounded, newest-first
+// query per severity, each fetching at most ATTENTION_QUEUE_SIZE + 1 rows) instead of examining only the newest 500
+// reviews, so an old negative unreplied review is no longer invisible. `hasMore` says whether more items exist.
 export const getReviewAttentionQueueAdmin = asyncHandler(async (_req, res) => {
-  const reviews = await Review.find(NOT_DELETED)
-    .select("rating doctorReply isPinned userId doctorId createdAt")
-    .populate("userId", "name")
-    .populate({ path: "doctorId", select: "userId", populate: { path: "userId", select: "name" } })
-    .sort({ createdAt: -1 })
-    .limit(500)
-    .lean();
+  const fetchBucket = (bucketFilter) =>
+    Review.find({ ...NOT_DELETED, ...bucketFilter })
+      .select("rating doctorReply isPinned userId doctorId createdAt")
+      .populate("userId", "name")
+      .populate({ path: "doctorId", select: "userId", populate: { path: "userId", select: "name" } })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(ATTENTION_QUEUE_SIZE + 1)
+      .lean();
 
-  const items = computeReviewAttentionItems(reviews)
-    .slice(0, 25)
-    .map((item) => {
-      const review = reviews.find((r) => String(r._id) === String(item.reviewId));
-      return {
-        ...item,
-        patientName: review?.userId?.name || "Unknown patient",
-        doctorName: review?.doctorId?.userId?.name || "Unknown doctor",
-      };
-    });
+  const [critical, warning, info] = await Promise.all([
+    fetchBucket(ATTENTION_BUCKET_FILTERS.critical),
+    fetchBucket(ATTENTION_BUCKET_FILTERS.warning),
+    fetchBucket(ATTENTION_BUCKET_FILTERS.info),
+  ]);
+
+  const { items: pageItems, hasMore, reviews } = buildAttentionQueue({ critical, warning, info }, ATTENTION_QUEUE_SIZE);
+  const reviewsById = new Map(reviews.map((r) => [String(r._id), r]));
+  const items = pageItems.map((item) => {
+    const review = reviewsById.get(String(item.reviewId));
+    return {
+      ...item,
+      patientName: review?.userId?.name || "Unknown patient",
+      doctorName: review?.doctorId?.userId?.name || "Unknown doctor",
+    };
+  });
 
   res.status(200).json({
     success: true,
-    data: { items },
+    data: { items, hasMore },
     message: "Review attention queue fetched successfully",
   });
 });
@@ -220,30 +234,24 @@ export const getReviewDetailAdmin = asyncHandler(async (req, res) => {
 });
 
 export const deleteReview = asyncHandler(async (req, res) => {
-  const review = await Review.findById(req.params.id);
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) throw new AppError("Invalid review id", 400);
+
+  // A-16: one atomic claim instead of read / check / save. Of two concurrent deletes exactly one matches the filter, so
+  // the audit entry and the rating recalculation happen once.
+  const review = await Review.findOneAndUpdate(
+    { _id: req.params.id, adminDeleted: { $ne: true } },
+    { $set: { adminDeleted: true, adminDeletedAt: new Date(), adminDeletedBy: req.user._id } },
+    { new: true },
+  );
 
   if (!review) {
-    throw new AppError("Review not found", 404);
-  }
-
-  if (review.adminDeleted) {
+    const exists = await Review.exists({ _id: req.params.id });
+    if (!exists) throw new AppError("Review not found", 404);
     throw new AppError("Review has already been deleted", 409);
   }
 
-  // Soft delete — preserve audit trail
-  review.adminDeleted = true;
-  review.adminDeletedAt = new Date();
-  review.adminDeletedBy = req.user._id;
-  await review.save();
-
-  // Recalculate doctor rating after deletion
-  await recalculateAndPersistDoctorRating(review.doctorId);
-
-  // BUGFIX (PHASE UI-8 audit): this state-changing admin action previously
-  // wrote no AdminActivityLog entry at all, unlike every other admin
-  // mutation in the app (approve/cancel appointment, refund actions,
-  // service/CMS/settings changes, etc). Added additively — no new log
-  // system, same writeAdminLog() every other controller already uses.
+  // Audit first: the deletion is already committed, so it must be on record even if a later step fails.
+  // (BUGFIX UI-8: this action previously wrote no AdminActivityLog entry; same writeAdminLog() as other admin mutations.)
   try {
     await writeAdminLog({
       req,
@@ -255,6 +263,16 @@ export const deleteReview = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     logger.warn("Review-deleted audit log failed", { message: error?.message, reviewId: review._id });
+  }
+
+  // Recalculate the doctor's rating. A failure here must not turn an already-committed deletion into a 500 (a retry
+  // would only get 409): report it and let the next rating-affecting write repair the cached value.
+  let ratingRecalculated = true;
+  try {
+    await recalculateAndPersistDoctorRating(review.doctorId);
+  } catch (error) {
+    ratingRecalculated = false;
+    logger.error("Doctor rating recalculation failed after review deletion", { message: error?.message, reviewId: review._id, doctorId: review.doctorId });
   }
 
   // Notify the patient whose review was removed.
@@ -278,7 +296,7 @@ export const deleteReview = asyncHandler(async (req, res) => {
 
   res.status(200).json({
     success: true,
-    data: { reviewId: review._id },
-    message: "Review deleted successfully",
+    data: { reviewId: review._id, ratingRecalculated },
+    message: ratingRecalculated ? "Review deleted successfully" : "Review deleted; the doctor rating will refresh on the next rating update",
   });
 });

@@ -16,6 +16,7 @@ import { adminApi } from "../../api/adminApi";
 import { doctorApi } from "../../api/doctorApi";
 import { masterDataApi } from "../../api/masterDataApi";
 import { getApiErrorMessage } from "../../api/axios";
+import { useRequestLifecycle } from "../../hooks/useRequestLifecycle";
 import AdminModal from "../../components/admin/AdminModal";
 import AdminTable from "../../components/admin/AdminTable";
 import DoctorDetailWorkspace from "../../components/admin/DoctorDetailWorkspace";
@@ -61,7 +62,9 @@ function AdminDoctors() {
     district: searchParams.get("district") || "",
     city: searchParams.get("city") || "",
   });
-  const [sort, setSort] = useState(searchParams.get("sort") || "newest");
+  // The URL is the single source of truth for the sort order. It used to be a separate state mirrored into the URL, so
+  // one sort change re-ran the list effect twice (new sort + old params, then new params): two identical requests.
+  const sort = searchParams.get("sort") || "newest";
 
   const [doctors, setDoctors] = useState([]);
   const [pagination, setPagination] = useState(null);
@@ -97,17 +100,24 @@ function AdminDoctors() {
     [searchParams],
   );
 
+  const { begin: beginDoctorsRequest } = useRequestLifecycle();
+
   const loadDoctors = async () => {
+    const request = beginDoctorsRequest();
     setIsLoading(true);
     setLoadError("");
     try {
       const response = await adminApi.getDoctorsAdmin({ ...query, sort, limit: 100 });
+      // Latest request wins: a slow response for an older filter/sort must not replace the current list.
+      if (!request.isCurrent()) return;
       setDoctors(response.data.doctors || []);
       setPagination(response.data.pagination || null);
     } catch (error) {
+      if (!request.isCurrent()) return;
       setLoadError(getApiErrorMessage(error));
     } finally {
-      setIsLoading(false);
+      if (request.isCurrent()) setIsLoading(false);
+      request.finish();
     }
   };
 
@@ -123,7 +133,7 @@ function AdminDoctors() {
 
   useEffect(() => {
     loadDoctors();
-  }, [searchParams, sort]);
+  }, [searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -215,7 +225,6 @@ function AdminDoctors() {
   };
 
   const changeSort = (nextSort) => {
-    setSort(nextSort);
     setSearchParams(Object.fromEntries(Object.entries({ ...filters, sort: nextSort }).filter(([, value]) => value)));
   };
 
@@ -239,6 +248,7 @@ function AdminDoctors() {
 
   const saveDoctor = async (event) => {
     event.preventDefault();
+    if (isSaving) return; // a double click must not create the doctor twice
     setIsSaving(true);
     setFormErrors({});
     try {
@@ -569,7 +579,10 @@ function AdminDoctors() {
             <Input
               label="Experience (years)"
               type="number"
+              inputMode="numeric"
               min="0"
+              max="70"
+              step="1"
               value={form.experience}
               error={formErrors.experience}
               onChange={(e) => setForm({ ...form, experience: e.target.value })}
@@ -577,7 +590,10 @@ function AdminDoctors() {
             <Input
               label="Consultation Fee (₹)"
               type="number"
+              inputMode="decimal"
               min="0"
+              max="100000"
+              step="0.01"
               value={form.fees}
               error={formErrors.fees}
               onChange={(e) => setForm({ ...form, fees: e.target.value })}

@@ -1,59 +1,33 @@
-
 # Dependencies
 node_modules/
-**/node_modules/
 
-# Environment secrets
+# Environment and secrets
 .env
 .env.*
 !.env.example
 !.env.*.example
 
-# Build outputs
+# Build output
 dist/
 build/
+
+# Test and coverage output
 coverage/
-.next/
-out/
+.nyc_output/
+test-results/
+playwright-report/
 
-# Logs
+# Logs and temporary files
 *.log
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-
-# Local caches and temporary files
-.cache/
-.tmp/
-temp/
+logs/
 tmp/
-*.tmp
+temp/
 
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-venv/
+# Runtime uploads and generated data
+uploads/
+backend/uploads/
 
-# Local databases and test artifacts
-*.sqlite3
-*.db-journal
-
-# Uploaded/private runtime data
-backend/storage/doctor-profile/
-backend/storage/patient-profile/
-backend/storage/uploads/
-backend/storage/invoices/
-
-# Secrets and private keys
-*.pem
-*.key
-*.p12
-*.pfx
-
-# Editors and operating system
-.vscode/
-.idea/
+# Local editor and OS files
 .DS_Store
 Thumbs.db
+.idea/

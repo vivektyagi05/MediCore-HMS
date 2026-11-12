@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { validateAndDeriveAvailability as derive } from "../utils/slotEngine.js";
+const day = (over = {}) => ({ dayOfWeek: "monday", startTime: "09:00", endTime: "12:00", slotDurationMinutes: 30, bufferMinutes: 0, ...over });
+let n = 0; const ok = (m) => { n += 1; console.log("PASS:", m); };
+assert.equal(derive([day()]).length, 1); assert.equal(derive([day({ slotDurationMinutes: 5 })]).length, 1); assert.equal(derive([day({ slotDurationMinutes: 240, endTime: "17:00" })]).length, 1); ok("valid and boundary values are accepted");
+for (const bad of [0, 4, 241, 7.5, "30", NaN, -30]) assert.throws(() => derive([day({ slotDurationMinutes: bad })]), /duration|provide either/, `duration ${bad}`);
+for (const bad of [-1, 121, 2.5, "5"]) assert.throws(() => derive([day({ bufferMinutes: bad })]), /buffer/, `buffer ${bad}`);
+for (const bad of [-1, 21, 1.5]) assert.throws(() => derive([day({ emergencySlotsPerDay: bad })]), /emergency/, `emergency ${bad}`); ok("duration 5-240, buffer 0-120, emergency 0-20, whole numbers only");
+for (const bad of ["9:00", "25:00", "09:60", "abc", "09:00:00"]) assert.throws(() => derive([day({ startTime: bad })]), /valid times|end time/, `start ${bad}`);
+assert.throws(() => derive([day({ endTime: "08:00" })]), /end time must be after/); assert.throws(() => derive([day({ breaks: [{ start: "08:00", end: "10:00" }] })]), /within working hours/); assert.throws(() => derive([day({ breaks: [{ start: "10:00", end: "10:00" }] })]), /break end/); ok("time format, ordering and break containment still enforced");
+console.log(`\n${n} slot engine range groups passed`);

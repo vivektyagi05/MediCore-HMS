@@ -28,6 +28,7 @@ import EmptyState from "../../components/shared/EmptyState";
 import ErrorState from "../../components/shared/ErrorState";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
+import ReasonDialog from "../../components/ui/ReasonDialog";
 import AIDraftPanel from "../../components/ai/AIDraftPanel";
 import DoctorWithdrawalPanel from "../../components/finance/DoctorWithdrawalPanel";
 import BusinessIntelligenceNav from "../../components/business/BusinessIntelligenceNav";
@@ -214,8 +215,34 @@ function DoctorEarnings() {
     }
   }, []);
 
+  // Phase 03: refund-review requests (a request for an admin to look; never executes a refund)
+  const [reviews, setReviews] = useState({});
+  const [reviewForm, setReviewForm] = useState(null); // { paymentId }
+  const loadReviews = useCallback(async () => {
+    try {
+      const response = await doctorApi.getRefundReviews({ limit: 100 });
+      // most recent request per consultation wins
+      const byPayment = {};
+      for (const review of [...(response.data?.reviews || [])].reverse()) byPayment[review.paymentId] = review;
+      setReviews(byPayment);
+    } catch {
+      /* non-critical: the payout list still renders without request status */
+    }
+  }, []);
+  const submitReview = async ({ reason }) => {
+    try {
+      await doctorApi.requestRefundReview({ paymentId: reviewForm.paymentId, reason });
+      setReviewForm(null);
+      await loadReviews();
+    } catch (err) {
+      await loadReviews(); // a 409 "already open" means the status line is now stale
+      throw new Error(getApiErrorMessage(err), { cause: err });
+    }
+  };
+
   useEffect(() => {
     loadEarnings();
+    loadReviews();
     loadAttention();
     loadReconciliation();
     loadInvoices();
@@ -339,11 +366,11 @@ function DoctorEarnings() {
             <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label className="text-xs font-bold text-slate-500">From</label>
-                <input type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 p-2.5 text-sm" />
+                <input aria-label="From date" type="date" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 p-2.5 text-sm" />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500">To</label>
-                <input type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 p-2.5 text-sm" />
+                <input aria-label="To date" type="date" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 p-2.5 text-sm" />
               </div>
               <Button size="sm" onClick={runRangeComparison} disabled={!rangeFrom || !rangeTo || rangeLoading}>
                 {rangeLoading ? "Comparing..." : "Compare vs. Previous Period"}
@@ -497,14 +524,14 @@ function DoctorEarnings() {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="relative">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
+            <input aria-label="Search appointment or payout id"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPayoutPage(1); }}
               placeholder="Search appointment or payout id..."
               className="w-full rounded-xl border border-slate-200 py-3 pl-11 pr-4"
             />
           </div>
-          <select
+          <select aria-label="Status Filter"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPayoutPage(1); }}
             className="rounded-xl border border-slate-200 p-3"
@@ -568,11 +595,40 @@ function DoctorEarnings() {
                           : "Part of this consultation was refunded to the patient, so your share was reduced in proportion."}
                         {payout.status === "paid" ? " This payout was already paid, so the reversal is reflected in your net earnings and any available withdrawal balance." : ""}
                       </p>
+                      {(() => {
+                        const paymentKey = String(payout.paymentId?._id || payout.paymentId || "");
+                        const review = reviews[paymentKey];
+                        const active = review && ["open", "acknowledged"].includes(review.status);
+                        return (
+                          <div className="mt-2 text-xs font-semibold">
+                            {review && (
+                              <p>
+                                Review request: <span className="capitalize">{review.status}</span>
+                                {review.adminNote ? ` — ${review.adminNote}` : ""}
+                              </p>
+                            )}
+                            {paymentKey && !active && (
+                              <Button size="sm" variant="secondary" className="mt-1" onClick={() => setReviewForm({ paymentId: paymentKey })}>
+                                {review ? "Ask for another review" : "Ask an admin to review this refund"}
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
               ))}
             </div>
+            <ReasonDialog
+              isOpen={Boolean(reviewForm)}
+              title="Ask an admin to review this refund"
+              description="An administrator will look at it and reply here. This does not refund, reverse or pay anything, and you cannot see patient details."
+              fields={[{ name: "reason", label: "What looks wrong?", min: 10, max: 500, multiline: true }]}
+              confirmLabel="Send request"
+              onClose={() => setReviewForm(null)}
+              onSubmit={submitReview}
+            />
 
             {payoutPagination && payoutPagination.totalPages > 1 && (
               <div className="mt-5 flex items-center justify-between">

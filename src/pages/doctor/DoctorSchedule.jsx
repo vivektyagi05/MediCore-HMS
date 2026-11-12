@@ -19,6 +19,7 @@ import DoctorScheduleMonth from "../../components/schedule/DoctorScheduleMonth";
 import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
 
+import { validateDayConfig } from "../../utils/scheduleValidation";
 const TABS = [
   { id: "today", label: "Today" },
   { id: "week", label: "Week" },
@@ -84,6 +85,10 @@ function DoctorSchedule() {
 
   const saveSchedule = async (event) => {
     event.preventDefault();
+    if (isSaving) return;
+    // Same rules the server enforces: name the first bad day instead of letting the save fail with a generic error.
+    const firstBad = availability.map((day) => ({ day, problems: validateDayConfig(day) })).find((x) => x.problems.length);
+    if (firstBad) { toast.error(`${firstBad.day.dayOfWeek[0].toUpperCase()}${firstBad.day.dayOfWeek.slice(1)}: ${firstBad.problems[0]}`); return; }
     setIsSaving(true);
     try {
       await doctorWorkflowApi.updateSchedule({ availability, blockedDates });
@@ -185,7 +190,7 @@ function DoctorSchedule() {
                       <span className="font-semibold text-slate-900">{template.name}</span>
                       <div className="flex gap-2">
                         <Button variant="secondary" onClick={() => applyTemplate(template._id)}>Apply</Button>
-                        <Button variant="secondary" onClick={() => deleteTemplate(template._id)}><Trash2 size={14} /></Button>
+                        <Button aria-label="Delete" title="Delete" variant="secondary" onClick={() => deleteTemplate(template._id)}><Trash2 size={14} /></Button>
                       </div>
                     </div>
                   ))}

@@ -110,6 +110,12 @@ export const validateAndDeriveAvailability = (availabilityInput) => {
       return day;
     }
 
+    // Numeric ranges (the UI only hinted at these with min/max attributes; a crafted request or a cleared field skipped them).
+    const inRange = (value, min, max, whole = true) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max && (!whole || Number.isInteger(value));
+    if (!inRange(day.slotDurationMinutes, 5, 240)) throw new SlotEngineError(`${day.dayOfWeek}: appointment duration must be a whole number of minutes from 5 to 240`);
+    if (day.bufferMinutes !== undefined && day.bufferMinutes !== null && !inRange(day.bufferMinutes, 0, 120)) throw new SlotEngineError(`${day.dayOfWeek}: buffer must be a whole number of minutes from 0 to 120`);
+    if (day.emergencySlotsPerDay !== undefined && day.emergencySlotsPerDay !== null && !inRange(day.emergencySlotsPerDay, 0, 20)) throw new SlotEngineError(`${day.dayOfWeek}: emergency slots must be a whole number from 0 to 20`);
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(day.startTime)) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(day.endTime))) throw new SlotEngineError(`${day.dayOfWeek}: start and end time must be valid times (HH:MM)`);
     if (toMinutes(day.endTime) <= toMinutes(day.startTime)) {
       throw new SlotEngineError(`${day.dayOfWeek}: end time must be after start time`);
     }

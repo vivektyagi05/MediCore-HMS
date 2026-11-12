@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import { buildInventory, criticalSpecs, defaultIndexName, lintInventory, loadAllModels } from "../migrations/lib/indexInventory.js";
-import { checkCriticalIndexes, classifyAgainst, ensureIndexes, findDuplicates, STATUS } from "../migrations/lib/indexMigration.js";
-import { acquireMigrationLock, finishMigration, getMigrationState } from "../migrations/lib/migrationState.js";
+import { checkCriticalIndexes, classifyAgainst, ensureIndexes, findDuplicates, scanLegacySparse, STATUS } from "../migrations/lib/indexMigration.js";
+import { acquireMigrationLock, finishMigration, getMigrationState, renewMigrationLock } from "../migrations/lib/migrationState.js";
 import { run } from "../migrations/011_ensure_production_indexes.js";
 import { createFakeDb, oid } from "./helpers/fakeDb.mjs";
 
@@ -52,6 +52,22 @@ fk.collection("notificationdeliveries")._seed([
 ]);
 assert.equal((await findDuplicates(fk, notif)).groups, 0, "keyless notifications are not duplicates under the partial index");
 console.log("PASS: N-024 notification index no longer treats keyless notifications as duplicates");
+
+let duplicateScanOptions;
+const collationSource = createFakeDb();
+collationSource.collection("casecodes")._seed([{ _id: "a", code: "ABC" }, { _id: "b", code: "abc" }]);
+const collationDb = {
+  collection(name) {
+    const source = collationSource.collection(name);
+    return { aggregate(pipeline, options) { duplicateScanOptions = options; return source.aggregate(pipeline, options); } };
+  },
+};
+await findDuplicates(collationDb, {
+  collection: "casecodes", key: { code: 1 }, unique: true,
+  options: { unique: true, collation: { locale: "en", strength: 2 } },
+});
+assert.deepEqual(duplicateScanOptions.collation, { locale: "en", strength: 2 });
+console.log("PASS: duplicate aggregation receives the unique index collation options");
 
 // ── ensure: creates everything on an empty DB, verified ───────────────────
 const db = createFakeDb();
@@ -112,6 +128,33 @@ eqDb.collection("invoices")._seedIndex({ v: 2, key: { paymentId: 1 }, name: "som
 assert.equal(classifyAgainst(byName("uniq_invoice_payment"), await eqDb.collection("invoices").indexes()).state, "present");
 console.log("PASS: an equivalent index under a different name satisfies the spec");
 
+// A same-name text index is not automatically accepted: the server's text
+// marker and declared text-field weights must still match.
+const textSpec = { collection: "articles", name: "article_text", key: { title: "text" }, options: {}, unique: false, text: true };
+assert.equal(classifyAgainst(textSpec, [{ name: "article_text", key: { title: 1 }, unique: false }]).state, "conflict");
+assert.equal(classifyAgainst(textSpec, [{ name: "article_text", key: { _fts: "text", _ftsx: 1 }, weights: { title: 1 } }]).state, "present");
+assert.ok(lintInventory([
+  { ...textSpec, model: "ArticleA" },
+  { ...textSpec, model: "ArticleB", name: "another_text_index", key: { body: "text" } },
+]).some((problem) => /multiple text indexes/.test(problem)));
+console.log("PASS: text index name alone cannot satisfy a different or non-text definition; multiple text indexes per collection are linted");
+
+// Same key with unrelated incompatible options is a conflict, not a futile
+// attempt to create a second definition. The documented sparse->partial
+// replacement remains the only supported additive legacy transition.
+const sameKeyConflict = classifyAgainst(
+  { collection: "x", name: "wanted", key: { accountId: 1 }, options: { unique: true }, unique: true },
+  [{ name: "old", key: { accountId: 1 }, unique: false }],
+);
+assert.equal(sameKeyConflict.state, "conflict");
+const partialUniqueAddition = classifyAgainst(
+  { collection: "x", name: "uniq_active", key: { accountId: 1 }, options: { unique: true, partialFilterExpression: { status: "active" } }, unique: true },
+  [{ name: "accountId_1", key: { accountId: 1 }, unique: false }],
+);
+assert.equal(partialUniqueAddition.state, "missing");
+assert.match(partialUniqueAddition.note, /additively beside ordinary non-unique index/);
+console.log("PASS: generic same-key conflicts remain blocked; partial unique constraints can be added beside ordinary indexes");
+
 // ── legacy sparse index: created additively beside it, null rows reported ─
 const legDb = createFakeDb();
 legDb.collection("withdrawals")._seed([{ _id: 1, idempotencyKey: null }, { _id: 2, idempotencyKey: "x" }]);
@@ -126,6 +169,10 @@ assert.equal(legacy.explicitNullRows, 1);
 assert.match(legacy.manualStep, /dropIndex\("idempotencyKey_1"\)/);
 assert.ok(legDb._collections.get("withdrawals").indexes.some((i) => i.name === "idempotencyKey_1"), "legacy sparse index is left in place for a reviewed manual drop");
 console.log("PASS: legacy sparse index gets an additive partial replacement; explicit-null rows reported; old index stays for manual drop");
+
+const legacyScanFailure = { collection() { return { indexes: async () => { throw new Error("simulated listIndexes failure"); } }; } };
+await assert.rejects(() => scanLegacySparse(legacyScanFailure, specs), /simulated listIndexes failure/);
+console.log("PASS: legacy sparse-index inspection failures propagate instead of becoming an empty/clean report");
 
 // ── server refusal / creation failure => nonzero ──────────────────────────
 const failReport = await ensureIndexes(createFakeDb({ failCreateFor: ["uniq_invoice_payment"] }), specs);
@@ -147,6 +194,53 @@ assert.ok(o2 && o2.token !== o1.token, "expired lease can be taken over");
 assert.equal(await finishMigration(sdb2, "m3", o1.token, { status: "completed" }), false, "stale owner cannot mark completed");
 assert.equal(await finishMigration(sdb2, "m3", o2.token, { status: "completed" }), true);
 assert.equal((await getMigrationState(sdb2, "m3")).status, "completed");
+
+let leaseClock = new Date();
+const leaseDb = createFakeDb();
+const leaseOwner = await acquireMigrationLock(leaseDb, "lease-renewal", { leaseMs: 300, now: () => leaseClock });
+const beforeRenewal = await getMigrationState(leaseDb, "lease-renewal");
+leaseClock = new Date(leaseClock.getTime() + 200);
+assert.equal(await renewMigrationLock(leaseDb, "lease-renewal", leaseOwner.token, { leaseMs: 300, now: () => leaseClock }), true);
+const afterRenewal = await getMigrationState(leaseDb, "lease-renewal");
+assert.ok(afterRenewal.leaseExpiresAt > beforeRenewal.leaseExpiresAt);
+leaseClock = new Date(leaseClock.getTime() + 200);
+assert.equal(await acquireMigrationLock(leaseDb, "lease-renewal", { leaseMs: 300, now: () => leaseClock }), null, "heartbeat keeps a long-running owner alive");
+leaseClock = new Date(leaseClock.getTime() + 200);
+const replacementOwner = await acquireMigrationLock(leaseDb, "lease-renewal", { leaseMs: 300, now: () => leaseClock });
+assert.ok(replacementOwner);
+assert.equal(await renewMigrationLock(leaseDb, "lease-renewal", leaseOwner.token, { leaseMs: 300, now: () => leaseClock }), false, "expired/stale owners cannot renew after takeover");
+assert.equal(await finishMigration(leaseDb, "lease-renewal", leaseOwner.token, { status: "completed" }), false);
+await assert.rejects(() => finishMigration(leaseDb, "lease-renewal", replacementOwner.token, { status: "running" }), /Invalid terminal migration status/);
+
+// CAS regression: if a heartbeat updates the lease after a contender reads
+// an expired snapshot but before it writes the takeover, the stale takeover
+// must not overwrite the renewed lease.
+let raceClock = new Date();
+const raceDb = createFakeDb();
+const raceOwner = await acquireMigrationLock(raceDb, "heartbeat-takeover-race", { leaseMs: 100, now: () => raceClock });
+raceClock = new Date(raceClock.getTime() + 200);
+const racingDb = {
+  collection(name) {
+    const collection = raceDb.collection(name);
+    return new Proxy(collection, {
+      get(target, property) {
+        if (property === "findOne") return async (filter) => {
+          const snapshot = await target.findOne(filter);
+          await target.updateOne({ _id: "heartbeat-takeover-race", ownerToken: raceOwner.token, status: "running" }, {
+            $set: { leaseExpiresAt: new Date(raceClock.getTime() + 1000) },
+          });
+          return snapshot;
+        };
+        const value = target[property];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  },
+};
+assert.equal(await acquireMigrationLock(racingDb, "heartbeat-takeover-race", { leaseMs: 100, now: () => raceClock }), null);
+assert.equal((await getMigrationState(raceDb, "heartbeat-takeover-race")).ownerToken, raceOwner.token);
+console.log("PASS: compare-and-set takeover cannot steal a lease renewed after a stale read");
+console.log("PASS: migration lock renews, expires, fences stale owners and rejects non-terminal final states");
 console.log("PASS: migration lock is serialized, crash-recoverable, fenced; half-done runs never show completed");
 
 // ── runner: exit codes + state recording ──────────────────────────────────

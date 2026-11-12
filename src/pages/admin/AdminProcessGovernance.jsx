@@ -295,7 +295,7 @@ function AdminProcessGovernance() {
         <Card
           title="Compliance Matrix"
           action={
-            <select
+            <select aria-label="Compliance Filter"
               value={complianceFilter}
               onChange={(e) => setComplianceFilter(e.target.value)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold"
@@ -456,7 +456,7 @@ function AdminProcessGovernance() {
 
       <Modal isOpen={Boolean(decisionModal)} title={decisionModal?.action === "submit-review" ? "Submit for Review" : decisionModal?.action === "reject" ? "Reject" : "Request Changes"} onClose={() => setDecisionModal(null)}>
         <div className="space-y-3">
-          <textarea
+          <textarea aria-label="Decision Note"
             className="w-full rounded-xl border border-slate-300 p-3 text-sm"
             rows={4}
             placeholder={decisionModal?.action === "submit-review" ? "Why is this ready for review?" : "Reason (required)"}

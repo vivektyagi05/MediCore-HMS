@@ -14,4 +14,6 @@ const build = { version, builtAt: new Date().toISOString() };
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: { __MEDICORE_BUILD__: JSON.stringify(build) },
+  // Frontend tests (vitest + jsdom + Testing Library). Run: npm run test:frontend
+  test: { environment: "jsdom", setupFiles: ["./src/test/setup.js"], include: ["src/**/*.test.{js,jsx}"], css: false },
 });

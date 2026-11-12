@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # PHASE DOC-03 — Doctor Patient Relationship Center
 
 Status: **substantially complete, honestly scoped**. Core list/security/profile

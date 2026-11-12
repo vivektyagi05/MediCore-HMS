@@ -485,9 +485,15 @@ async function fetchResolvedOverlayItems() {
   });
 }
 
-async function buildUnifiedQueue(filters = {}) {
-  const raw = await fetchRawOperations();
-  const withAssignments = await attachAssignments(raw);
+// One full read of the live sources plus the assignment overlay. Callers that need several views of the SAME snapshot in
+// one request (e.g. "find this item" and "rank candidates against the whole queue") load it once and pass it to
+// buildUnifiedQueue()/findOperationItem() via `{ withAssignments }` instead of rebuilding it per view (S9/S10).
+async function loadAttachedOperations() {
+  return attachAssignments(await fetchRawOperations());
+}
+
+async function buildUnifiedQueue(filters = {}, { withAssignments: preloaded } = {}) {
+  const withAssignments = preloaded || (await loadAttachedOperations());
 
   const includeResolved = filters.status === "all" || filters.status === "resolved" || filters.status === "cancelled";
   let items = includeResolved
@@ -586,8 +592,8 @@ export const getOperationsQueueUnified = asyncHandler(async (req, res) => {
   });
 });
 
-async function findOperationItem(operationKey) {
-  const items = await attachAssignments(await fetchRawOperations());
+async function findOperationItem(operationKey, { withAssignments } = {}) {
+  const items = withAssignments || (await loadAttachedOperations());
   const item = items.find((i) => i.id === operationKey);
   if (!item) throw new AppError("Operation not found or no longer open", 404);
   return item;
@@ -833,4 +839,4 @@ export const getWorkflowExplain = asyncHandler(async (req, res) => {
 // Phase A6.2.2: findOperationItem added to this export so the Assignment
 // Engine can resolve a single item by key exactly the way every existing
 // lifecycle handler already does — never a second, parallel lookup.
-export const _internal = { buildUnifiedQueue, fetchRawOperations, findOperationItem };
+export const _internal = { buildUnifiedQueue, fetchRawOperations, findOperationItem, loadAttachedOperations };

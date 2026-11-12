@@ -15,6 +15,9 @@ import {
   Wifi,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRequestLifecycle } from "../../hooks/useRequestLifecycle";
+import { useSyncRefresh } from "../../hooks/useSyncRefresh";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
@@ -64,7 +67,10 @@ function AdminMissionControl() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const { begin, isInFlight } = useRequestLifecycle();
+
   const loadAll = async () => {
+    const request = begin();
     setIsLoading(true);
     setError("");
     try {
@@ -77,27 +83,31 @@ function AdminMissionControl() {
         // this page's existing queries.
         adminApi.getInfrastructureStatus().catch(() => ({ data: null })),
       ]);
+      // A newer load (manual refresh, sync tick) or unmount supersedes this one: drop the response.
+      if (!request.isCurrent()) return;
       setLive(liveResponse.data);
       setAlerts(alertsResponse.data);
       setInfra(infraResponse.data);
     } catch (loadError) {
+      if (!request.isCurrent()) return;
       setError(getApiErrorMessage(loadError));
     } finally {
-      setIsLoading(false);
+      if (request.isCurrent()) setIsLoading(false);
+      request.finish();
     }
   };
 
+  // First load on mount; later realtime ticks are handled by useSyncRefresh (deferred while the tab is hidden).
   useEffect(() => {
     loadAll();
-  }, [dashboardSyncTick]);
+  }, []);
+  useSyncRefresh(loadAll, dashboardSyncTick);
 
   // Live Platform is meant to feel like a real ops console — poll every 15s
   // on top of the realtime dashboard-sync tick, since presence/session
   // counts change without necessarily firing a dashboard:sync event.
-  useEffect(() => {
-    const interval = window.setInterval(loadAll, 15000);
-    return () => window.clearInterval(interval);
-  }, []);
+  // The poll skips a tick while a load is still running and pauses while the tab is hidden.
+  useVisiblePolling(loadAll, 15000, { isBusy: isInFlight });
 
   if (isLoading && !live) {
     return <Loader label="Loading mission control" />;

@@ -121,7 +121,7 @@ function CommandPalette({ open, onClose }) {
       <div className="relative w-full max-w-xl overflow-hidden rounded-card border border-slate-200 bg-white shadow-elevated">
         <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
           <Search size={18} className="text-slate-400" />
-          <input
+          <input aria-label="Search pages"
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}

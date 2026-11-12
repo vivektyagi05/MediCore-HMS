@@ -5,6 +5,8 @@ import Button from "../ui/Button";
 import { adminApi } from "../../api/adminApi";
 import { getApiErrorMessage } from "../../api/axios";
 import { useRealtime } from "../../context/RealtimeContext";
+import { useRequestLifecycle } from "../../hooks/useRequestLifecycle";
+import { useSyncRefresh } from "../../hooks/useSyncRefresh";
 
 const RANGE_OPTIONS = [
   { label: "7d", days: 7 },
@@ -59,24 +61,34 @@ function WidgetShell({
   const [days, setDays] = useState(30);
   const [drillDownOpen, setDrillDownOpen] = useState(false);
 
+  const { begin } = useRequestLifecycle();
+
   const load = useCallback(async () => {
     if (meta.allowed === false) return;
+    const request = begin();
     setLoading(true);
     setError("");
     try {
       const params = meta.supportsDateRange ? { days } : {};
       const response = await adminApi.getWidgetData(meta.key, params);
+      // Switching 7d/30d/90d quickly (or a sync tick) starts a newer load: drop the older response.
+      if (!request.isCurrent()) return;
       setData(response.data);
     } catch (loadError) {
+      if (!request.isCurrent()) return;
       setError(getApiErrorMessage(loadError));
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) setLoading(false);
+      request.finish();
     }
-  }, [meta.key, meta.allowed, meta.supportsDateRange, days]);
+  }, [begin, meta.key, meta.allowed, meta.supportsDateRange, days]);
 
+  // Initial load and date-range/widget changes; realtime ticks go through useSyncRefresh so a hidden tab does not
+  // refetch every widget on every event (it refreshes once when the tab is visible again).
   useEffect(() => {
     load();
-  }, [load, dashboardSyncTick]);
+  }, [load]);
+  useSyncRefresh(load, dashboardSyncTick);
 
   const isEmpty = useMemo(() => {
     if (!data) return false;
@@ -195,7 +207,7 @@ function WidgetShell({
           >
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-black text-slate-950">{meta.title} — details</h3>
-              <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" onClick={() => setDrillDownOpen(false)}>
+              <button aria-label="Close" title="Close" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100" onClick={() => setDrillDownOpen(false)}>
                 <X size={18} />
               </button>
             </div>

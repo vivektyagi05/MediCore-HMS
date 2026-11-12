@@ -17,6 +17,7 @@ import {
   BrevoConfigurationError,
   BrevoDeliveryError,
 } from "../services/emailService.js";
+import { validatePasswordValue } from "../validations/authValidation.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const OTP_TTL_MS = 15 * 60 * 1000;
@@ -216,9 +217,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
   if (typeof resetToken !== "string" || !resetToken) {
     throw new AppError(GENERIC_RESET_INVALID_MESSAGE, 400);
   }
-  if (typeof newPassword !== "string" || newPassword.length < 8) {
-    throw new AppError("Password must be at least 8 characters long", 400);
-  }
+  const passwordError = validatePasswordValue(newPassword);
+  if (passwordError) throw new AppError(passwordError, 400);
 
   const resetTokenHash = hashResetToken(resetToken);
 

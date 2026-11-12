@@ -113,8 +113,10 @@ export const couponService = {
   async release({ couponId, paymentId }) {
     if (!couponId || !paymentId) return { released: false };
     const updated = await Coupon.findOneAndUpdate(
-      { _id: couponId, usedCount: { $gt: 0 }, usedBy: { $elemMatch: { paymentId, state: { $ne: "redeemed" } } } },
-      { $inc: { usedCount: -1, releasedCount: 1 }, $pull: { usedBy: { paymentId, state: { $ne: "redeemed" } } } },
+      // Phase 03: only an explicit "reserved" entry is releasable. A legacy entry (no state) predates the lifecycle,
+      // so there is no reliable evidence whether it was redeemed; it is left unclassified and never released here.
+      { _id: couponId, usedCount: { $gt: 0 }, usedBy: { $elemMatch: { paymentId, state: "reserved" } } },
+      { $inc: { usedCount: -1, releasedCount: 1 }, $pull: { usedBy: { paymentId, state: "reserved" } } },
       { returnDocument: "after" },
     );
     return { released: Boolean(updated) };

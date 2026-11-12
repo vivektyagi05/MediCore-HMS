@@ -110,9 +110,9 @@ function CertificateGenerator({ patientId, appointmentId, certificates = [], onI
                   <p className="text-xs text-slate-500">{certificate.type.replace("_", " ")} · {new Date(certificate.createdAt).toLocaleDateString()} · {certificate.status}</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => download(certificate._id)}><Download size={16} /></Button>
+                  <Button aria-label="Download" title="Download" variant="secondary" onClick={() => download(certificate._id)}><Download size={16} /></Button>
                   {certificate.status === "issued" && (
-                    <Button variant="secondary" onClick={() => revoke(certificate._id)}><XCircle size={16} /></Button>
+                    <Button aria-label="Reject" title="Reject" variant="secondary" onClick={() => revoke(certificate._id)}><XCircle size={16} /></Button>
                   )}
                 </div>
               </div>

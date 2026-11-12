@@ -16,7 +16,7 @@ function ReportCard({ report, onDownload, onPreview }) {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={onPreview}>Preview</Button>
-          <Button onClick={onDownload}><Download size={16} /></Button>
+          <Button aria-label="Download" title="Download" onClick={onDownload}><Download size={16} /></Button>
         </div>
       </div>
     </Card>

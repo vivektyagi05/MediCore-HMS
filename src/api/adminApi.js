@@ -132,7 +132,18 @@ export const adminApi = {
   },
   // Read-only wallet/ledger discrepancy report (never repairs anything).
   getFinanceDiscrepancies(params = {}) {
-    return apiClient.get("/admin/finance/reconciliation/discrepancies", { params }).then((res) => res.data);
+    return apiClient.get("/admin/finance/reconciliation/discrepancies", { params, timeout: 90000 }).then((res) => res.data);
+  },
+  // Phase 03: the single audited reconciliation repair (SUPER_ADMIN, reason required, idempotent, per recharge).
+  backfillRechargeLedger(rechargeId, reason) {
+    return apiClient.post(`/admin/finance/reconciliation/recharges/${rechargeId}/backfill-ledger`, { reason }).then((res) => res.data);
+  },
+  // Phase 03: doctor refund-review requests (a request for human review; never executes a refund).
+  getDoctorRefundReviewsAdmin(params = {}) {
+    return apiClient.get("/admin/refunds/reviews", { params }).then((res) => res.data);
+  },
+  resolveDoctorRefundReviewAdmin(id, body) {
+    return apiClient.post(`/admin/refunds/reviews/${id}/resolve`, body).then((res) => res.data);
   },
   getFinanceOutbox(params = {}) {
     return apiClient.get("/admin/finance/outbox", { params }).then((res) => res.data);

@@ -15,6 +15,7 @@ import EmptyState from "../../components/shared/EmptyState";
 import { useToast } from "../../context/ToastContext";
 import { useI18n } from "../../i18n/I18nContext";
 
+import { UPLOAD_LIMITS, validateUpload } from "../../utils/fileValidation";
 const STATUS_STYLES = {
   verified: "bg-emerald-100 text-emerald-700",
   pending: "bg-amber-100 text-amber-700",
@@ -41,6 +42,8 @@ function DoctorDocuments() {
   const [reportsAttention, setReportsAttention] = useState([]);
   const [reviewingReportId, setReviewingReportId] = useState(null);
   const [form, setForm] = useState({ title: "", type: "certification", expiryDate: "", file: null });
+  const [fileError, setFileError] = useState("");
+  const [fileKey, setFileKey] = useState(0);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(true);
@@ -111,6 +114,7 @@ function DoctorDocuments() {
       await doctorWorkflowApi.uploadDocument(formData);
       toast.success("Document uploaded for verification");
       setForm({ title: "", type: "certification", expiryDate: "", file: null });
+      setFileKey((k) => k + 1);
       await load();
     } catch (error) {
       toast.error(getApiErrorMessage(error));
@@ -224,14 +228,14 @@ function DoctorDocuments() {
         <Card title={t("doctor.documents.secureUpload")}>
           <form className="grid gap-4" onSubmit={upload}>
             <Input label="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-            <select className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+            <select aria-label="Type" className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
               <option value="certification">Certification / Medical License</option>
               <option value="identity">Identity</option>
               <option value="profile">Profile</option>
               <option value="other">Other</option>
             </select>
             <Input label="Expiry date (optional)" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
-            <input type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => setForm({ ...form, file: e.target.files[0] })} className="rounded-xl bg-white/70 p-3 text-sm" />
+            <div><input key={fileKey} aria-label="Document file (PDF, PNG or JPG, up to 5 MB)" type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => { const picked = e.target.files?.[0] || null; const problem = validateUpload(picked, { maxBytes: UPLOAD_LIMITS.doctorBytes }); if (problem) { setFileError(problem); e.target.value = ""; setForm((c) => ({ ...c, file: null })); return; } setFileError(""); setForm((c) => ({ ...c, file: picked })); }} className="w-full rounded-xl bg-white/70 p-3 text-sm" />{fileError && <p role="alert" className="mt-1.5 text-sm font-semibold text-rose-600">{fileError}</p>}</div>
             <Button type="submit" isLoading={isUploading} disabled={!form.file}><Upload size={17} /> Upload</Button>
           </form>
         </Card>
@@ -241,7 +245,7 @@ function DoctorDocuments() {
           action={
             <div className="flex gap-2">
               <Input placeholder="Search title…" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <select className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <select aria-label="Category Filter" className="rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-sm" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
                 <option value="all">All categories</option>
                 <option value="certification">Certification</option>
                 <option value="identity">Identity</option>
@@ -264,9 +268,9 @@ function DoctorDocuments() {
                   header: "",
                   render: (r) => (
                     <div className="flex items-center gap-1">
-                      <Button variant="secondary" onClick={() => downloadDocument(r)}><Download size={14} /></Button>
+                      <Button aria-label="Download" title="Download" variant="secondary" onClick={() => downloadDocument(r)}><Download size={14} /></Button>
                       {r.status !== "verified" && (
-                        <Button variant="secondary" onClick={() => deleteDocument(r._id)}><Trash2 size={14} /></Button>
+                        <Button aria-label="Delete" title="Delete" variant="secondary" onClick={() => deleteDocument(r._id)}><Trash2 size={14} /></Button>
                       )}
                     </div>
                   ),
@@ -295,7 +299,7 @@ function DoctorDocuments() {
                       <p className="text-xs text-slate-500">{certificate.patientId?.name} · {new Date(certificate.createdAt).toLocaleDateString()} · {certificate.status}</p>
                     </div>
                   </div>
-                  <Button variant="secondary" onClick={() => downloadCertificate(certificate._id)}><Download size={14} /></Button>
+                  <Button aria-label="Download" title="Download" variant="secondary" onClick={() => downloadCertificate(certificate._id)}><Download size={14} /></Button>
                 </div>
               ))}
             </div>
@@ -315,7 +319,7 @@ function DoctorDocuments() {
                       <p className="text-xs text-slate-500">{rx.diagnosis} · {new Date(rx.createdAt).toLocaleDateString()}</p>
                     </div>
                   </div>
-                  <Button variant="secondary" onClick={() => downloadPrescription(rx._id)}><Download size={14} /></Button>
+                  <Button aria-label="Download" title="Download" variant="secondary" onClick={() => downloadPrescription(rx._id)}><Download size={14} /></Button>
                 </div>
               ))}
             </div>

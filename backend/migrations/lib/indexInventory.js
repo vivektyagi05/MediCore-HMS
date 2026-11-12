@@ -12,9 +12,8 @@
 // human-readable invariant behind the correctness-bearing indexes.
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import mongoose from "mongoose";
-import { pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = path.resolve(__dirname, "../../models");
@@ -32,7 +31,11 @@ export async function loadAllModels() {
 export const defaultIndexName = (key) =>
   Object.entries(key).map(([field, dir]) => `${field}_${dir}`).join("_");
 
-const OPTION_KEYS = ["unique", "sparse", "partialFilterExpression", "expireAfterSeconds", "collation", "default_language", "language_override", "weights"];
+const OPTION_KEYS = [
+  "unique", "sparse", "partialFilterExpression", "expireAfterSeconds", "collation",
+  "default_language", "language_override", "weights", "hidden", "wildcardProjection",
+  "2dsphereIndexVersion", "bits", "min", "max", "bucketSize", "storageEngine", "prepareUnique",
+];
 
 const stable = (value) => {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
@@ -111,6 +114,25 @@ export function lintInventory(specs) {
     }
     if (spec.unique && spec.options.sparse && !spec.options.partialFilterExpression) {
       problems.push(`${spec.collection}.${spec.name} is unique+sparse without a partial filter (indexes explicit nulls; prefer partial $type)`);
+    }
+    if (spec.options.sparse && spec.options.partialFilterExpression) {
+      problems.push(`${spec.collection}.${spec.name} declares both sparse and partialFilterExpression; MongoDB does not support this combination`);
+    }
+  }
+  const textByCollection = new Map();
+  for (const spec of specs.filter((item) => item.text)) {
+    const prior = textByCollection.get(spec.collection);
+    if (prior) problems.push(`multiple text indexes declared on ${spec.collection}: ${prior.model}.${prior.name} and ${spec.model}.${spec.name}`);
+    else textByCollection.set(spec.collection, spec);
+  }
+  const semantic = new Map();
+  for (const spec of specs) {
+    const signature = `${spec.collection}::${stable(spec.key)}::${stable(spec.options)}`;
+    const prior = semantic.get(signature);
+    if (prior && prior.name !== spec.name) {
+      problems.push(`duplicate index definition on ${spec.collection}: ${prior.model}.${prior.name} and ${spec.model}.${spec.name} have the same key/options`);
+    } else {
+      semantic.set(signature, spec);
     }
   }
   return problems;

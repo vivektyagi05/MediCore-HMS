@@ -4,6 +4,7 @@ import {
   getRefundSummaryAdmin,
   getRefundDetailAdmin,
 } from "../../controllers/admin/refundAdminController.js";
+import { listRefundReviewsAdmin, resolveRefundReviewAdmin } from "../../controllers/refundReviewController.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { requireAdmin, requirePermission } from "../../middleware/adminMiddleware.js";
 
@@ -18,6 +19,9 @@ const gate = requirePermission("manage_payments");
 // Fixed subpaths before "/:id", same ordering convention as
 // paymentAdminRoutes.js / appointmentAdminRoutes.js.
 router.get("/summary", gate, getRefundSummaryAdmin);
+// Doctor refund-review requests (fixed subpaths before "/:id")
+router.get("/reviews", gate, listRefundReviewsAdmin);
+router.post("/reviews/:id/resolve", gate, resolveRefundReviewAdmin);
 router.get("/", gate, listRefundsAdmin);
 router.get("/:id", gate, getRefundDetailAdmin);
 

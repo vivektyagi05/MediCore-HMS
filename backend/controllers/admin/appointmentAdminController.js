@@ -19,6 +19,7 @@ import { ACTION } from "../../services/appointmentActionPolicy.js";
 import { getHospitalTimezone } from "../../services/hospitalSettingsService.js";
 import { containsRegex } from "../../utils/regexSafe.js";
 import mongoose from "mongoose";
+import { readOptionalObjectIdQuery } from "../../utils/queryObjectId.js";
 import Appointment from "../../models/Appointment.js";
 import Payment from "../../models/Payment.js";
 import RefundRequest from "../../models/RefundRequest.js";
@@ -89,16 +90,14 @@ const resolveSearchFilter = async (term) => {
 
 const buildListFilter = async (query) => {
   const filter = {};
+  const doctorId = readOptionalObjectIdQuery(query, "doctorId", "doctor", (value) => mongoose.Types.ObjectId.isValid(value));
+  const patientId = readOptionalObjectIdQuery(query, "patientId", "patient", (value) => mongoose.Types.ObjectId.isValid(value));
 
   if (query.status) filter.status = query.status;
   if (query.paymentStatus) filter.paymentStatus = query.paymentStatus;
   if (query.consultationMode) filter.consultationMode = query.consultationMode;
-  if (query.doctorId && mongoose.Types.ObjectId.isValid(query.doctorId)) {
-    filter.doctorId = query.doctorId;
-  }
-  if (query.patientId && mongoose.Types.ObjectId.isValid(query.patientId)) {
-    filter.patientId = query.patientId;
-  }
+  if (doctorId) filter.doctorId = doctorId;
+  if (patientId) filter.patientId = patientId;
 
   if (query.dateFrom || query.dateTo) {
     filter.date = {};

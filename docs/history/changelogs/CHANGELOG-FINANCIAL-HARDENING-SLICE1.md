@@ -1,0 +1,6 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
+# Financial hardening — slice 1
+New: `payments/{outOfBandRefund,subscriptionLifecycle}.js`, `cron/financialScheduler.js`, migrations 009 (invoice uniqueness, report-then-index) and 010 (read-only unpaid subscription report), tests (`financialRules…`, `financialScheduler`, gated `tests/mongo/`), docs (implementation map, accounting contract, re-audit, production verification).
+Changed: coupon claim/release, retry claim, cursor reconciliation, invoice unique index, out-of-band refund convergence, wallet recharge idempotent credit, provider-backed subscriptions and renewals, checkout callback error handling, ledger/wallet enums.
+Deploy notes: run `npm run migrate:invoice-uniqueness` before relying on the invoice index; set `ENABLE_IN_PROCESS_SCHEDULER=true` on one instance; run `npm run report:unpaid-subscriptions` and decide on legacy rows. Doctors can no longer self-activate a plan: the subscribe action opens a payment order.

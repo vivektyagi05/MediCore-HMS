@@ -15,9 +15,13 @@ const initialForm = { name: "", role: "patient", email: "", password: "", confir
 
 function validateForm(form, t) {
   const errors = {};
+  // Mirrors backend/validations/authValidation.js (name 2-100, email <=120, password 8-128 and not only spaces).
   if (form.name.trim().length < 2) errors.name = t("p14.register.nameShort");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = t("p14.register.invalidEmail");
+  else if (form.name.trim().length > 100) errors.name = "Name must be at most 100 characters";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) || form.email.trim().length > 120) errors.email = t("p14.register.invalidEmail");
   if (form.password.length < 8) errors.password = t("p14.register.passwordShort");
+  else if (form.password.length > 128) errors.password = "Password must be at most 128 characters";
+  else if (!/\S/.test(form.password)) errors.password = "Password cannot be only spaces";
   if (form.confirmPassword !== form.password) errors.confirmPassword = t("p14.register.passwordMismatch");
   if (!form.termsAccepted) errors.termsAccepted = t("p16.common.termsRequired");
   return errors;
@@ -103,7 +107,7 @@ function Register() {
         {bookingIntent && <div className="mt-5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold leading-6 text-sky-900" role="status">{t("p14.register.patientBooking")}</div>}
 
         <form className="mt-6 grid gap-5 sm:grid-cols-2" onSubmit={handleSubmit} noValidate aria-busy={isSubmitting} aria-describedby={serverError ? "auth-error" : undefined}>
-          <Input label={t("p14.register.nameLabel")} name="name" autoComplete="name" placeholder={t("p14.register.namePlaceholder")} value={form.name} onChange={updateField} error={errors.name} required />
+          <Input label={t("p14.register.nameLabel")} name="name" maxLength={100} autoComplete="name" placeholder={t("p14.register.namePlaceholder")} value={form.name} onChange={updateField} error={errors.name} required />
           <div>
             <label className="block" htmlFor={bookingIntent ? undefined : "account-role"}>
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">{t("p14.register.roleLabel")}<span className="ml-1 text-rose-600">*</span></span>
@@ -116,15 +120,15 @@ function Register() {
             </label>
             <p id="role-help" className="mt-1.5 text-sm leading-5 text-slate-500">{t("p14.register.secureNote")}</p>
           </div>
-          <div className="sm:col-span-2"><Input label={t("p14.register.emailLabel")} name="email" type="email" inputMode="email" autoComplete="email" placeholder={t("p14.register.emailPlaceholder")} value={form.email} onChange={updateField} error={errors.email} required /></div>
+          <div className="sm:col-span-2"><Input label={t("p14.register.emailLabel")} name="email" type="email" maxLength={120} inputMode="email" autoComplete="email" placeholder={t("p14.register.emailPlaceholder")} value={form.email} onChange={updateField} error={errors.email} required /></div>
           <div className="relative">
-            <Input id={passwordId} label={t("p14.register.passwordLabel")} name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder={t("p14.register.passwordPlaceholder")} value={form.password} onChange={updateField} error={errors.password} required />
+            <Input id={passwordId} label={t("p14.register.passwordLabel")} name="password" type={showPassword ? "text" : "password"} maxLength={128} autoComplete="new-password" placeholder={t("p14.register.passwordPlaceholder")} value={form.password} onChange={updateField} error={errors.password} required />
             <button type="button" aria-label={showPassword ? t("p14.register.hidePassword") : t("p14.register.showPassword")} aria-controls={passwordId} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)} className="absolute right-2 top-[34px] rounded-lg p-2 text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-4 focus-visible:ring-orange-500/20">
               {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
             </button>
           </div>
           <div className="relative">
-            <Input id={confirmPasswordId} label={t("p14.register.confirmPasswordLabel")} name="confirmPassword" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" placeholder={t("p14.register.confirmPasswordPlaceholder")} value={form.confirmPassword} onChange={updateField} error={errors.confirmPassword} required />
+            <Input id={confirmPasswordId} label={t("p14.register.confirmPasswordLabel")} name="confirmPassword" type={showConfirmPassword ? "text" : "password"} maxLength={128} autoComplete="new-password" placeholder={t("p14.register.confirmPasswordPlaceholder")} value={form.confirmPassword} onChange={updateField} error={errors.confirmPassword} required />
             <button type="button" aria-label={showConfirmPassword ? t("p14.register.hidePassword") : t("p14.register.showPassword")} aria-controls={confirmPasswordId} aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword((value) => !value)} className="absolute right-2 top-[34px] rounded-lg p-2 text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-4 focus-visible:ring-orange-500/20">
               {showConfirmPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
             </button>

@@ -225,7 +225,7 @@ await check("coupon claim succeeds but Payment creation fails: reservation is re
   assert.equal(provider.createOrderCalls, 0);
 });
 await check("process dies after the coupon claim (no release runs): orphan recovery frees it exactly once", async () => {
-  const coupon = await M.Coupon.create({ code: "ORPH", type: "fixed", value: 50, expiresAt: new Date(Date.now() + 1e9), usageLimit: 5, usedCount: 1, usedBy: [{ userId: H.newId(), paymentId: H.newId(), usedAt: new Date(Date.now() - 3600_000) }] });
+  const coupon = await M.Coupon.create({ code: "ORPH", type: "fixed", value: 50, expiresAt: new Date(Date.now() + 1e9), usageLimit: 5, usedCount: 1, usedBy: [{ userId: H.newId(), paymentId: H.newId(), usedAt: new Date(Date.now() - 3600_000), state: "reserved" }] });
   const { recoverOrphanCouponReservations } = await import("../payments/unpaidPaymentCleanup.js");
   assert.equal((await recoverOrphanCouponReservations()).length, 1);
   assert.equal((await recoverOrphanCouponReservations()).length, 0);

@@ -76,7 +76,7 @@ function AdminAudit() {
           </div>
           <div>
             <label className="mb-2 block text-sm font-semibold text-slate-700">Severity</label>
-            <select
+            <select aria-label="Severity"
               value={severity}
               onChange={(e) => setSeverity(e.target.value)}
               className="rounded-xl border border-slate-200 px-4 py-3 text-sm"

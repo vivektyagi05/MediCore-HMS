@@ -182,7 +182,7 @@ export default function PatientDoctors() {
               <Input className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search saved doctors..." />
             </div>
             {allTags.length > 0 && (
-              <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}
+              <select aria-label="Tag Filter" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}
                 className="rounded-xl border border-slate-200 p-3 text-sm">
                 <option value="">All tags</option>
                 {allTags.map((tg) => <option key={tg} value={tg}>{tg}</option>)}
@@ -285,11 +285,11 @@ export default function PatientDoctors() {
                   <Button className="flex-1" onClick={() => navigate(`/patient/appointments/book?doctorId=${doctorId}`)}>
                     <Calendar size={15} /> Book Again
                   </Button>
-                  <Button variant="secondary" onClick={() => openEdit(saved)}>
+                  <Button aria-label="Edit" title="Edit" variant="secondary" onClick={() => openEdit(saved)}>
                     <Pencil size={15} />
                   </Button>
-                  <Button to={`/doctors/${doctorId}`} variant="secondary"><Bookmark size={15} /></Button>
-                  <Button variant="danger" onClick={() => removeSaved(doctorId)}>
+                  <Button aria-label="Bookmark" title="Bookmark" to={`/doctors/${doctorId}`} variant="secondary"><Bookmark size={15} /></Button>
+                  <Button aria-label="Delete" title="Delete" variant="danger" onClick={() => removeSaved(doctorId)}>
                     <Trash2 size={15} />
                   </Button>
                 </div>
@@ -319,7 +319,7 @@ export default function PatientDoctors() {
         <form onSubmit={submitEdit} className="space-y-4">
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-500 uppercase tracking-wider">Notes</label>
-            <textarea
+            <textarea aria-label="e.g. Great with kids, prefers morning slots"
               value={editForm.notes}
               onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
               rows={3}

@@ -83,7 +83,7 @@ function AdminAnalytics() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
+          <select aria-label="Date range"
             value={rangeDays}
             onChange={(e) => setRangeDays(Number(e.target.value))}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm"

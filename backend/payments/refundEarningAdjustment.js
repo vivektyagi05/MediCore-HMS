@@ -51,8 +51,14 @@ export const applyRefundToDoctorEarning = async ({ paymentId, refundAmount, paym
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const payout = await DoctorPayout.findOne({ paymentId }).lean();
     if (!payout) return { applied: false, reason: "no_payout" };
-    if ((payout.refundAdjustments || []).some((entry) => entry.refundKey === refundKey)) {
-      return { applied: false, replay: true, payout };
+    const existing = (payout.refundAdjustments || []).find((entry) => entry.refundKey === refundKey);
+    if (existing) {
+      // Replay (e.g. recovery after a crash). Return what a notifier needs so a lost notice can be re-sent idempotently.
+      const doctor = await Doctor.findById(payout.doctorId).select("userId").lean();
+      return {
+        applied: false, replay: true, payout, doctorAdjustment: existing.doctorAdjustment, platformAdjustment: existing.platformAdjustment,
+        becameLiability: existing.payoutStatusAtAdjustment === "paid", doctorUserId: doctor?.userId,
+      };
     }
 
     const { doctorAdjustment, platformAdjustment } = computeEarningAdjustment({ payout, refundAmount, paymentTotal, refundedBefore });

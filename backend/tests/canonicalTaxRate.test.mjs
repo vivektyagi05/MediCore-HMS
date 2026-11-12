@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 // Regression test for a real, confirmed billing-accuracy bug: the tax rate
 // an admin configures in Admin > Settings (HospitalSetting.paymentSettings.
 // taxRate) was purely decorative -- what a patient was actually CHARGED
@@ -10,8 +11,6 @@
 // invoice.
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import HospitalSetting from "../models/HospitalSetting.js";
 import { calculateBill } from "../payments/money.js";
 import {
@@ -65,15 +64,15 @@ assert.equal(bill.tax, invoiceAmounts.taxAmount, "the invoice's tax figure must 
 console.log("PASS: invoiceService's tax calculation is percentage-correct and agrees with the real charge (calculateBill)");
 
 // ── source-level: the disconnected env var is gone from both call sites ──
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const paymentControllerSrc = fs.readFileSync(path.join(root, "controllers", "paymentController.js"), "utf8");
-const invoiceServiceSrc = fs.readFileSync(path.join(root, "services", "invoiceService.js"), "utf8");
+const root = fileURLToPath(new URL("../", import.meta.url));
+const paymentControllerSrc = fs.readFileSync(`${root}controllers/paymentController.js`, "utf8");
+const invoiceServiceSrc = fs.readFileSync(`${root}services/invoiceService.js`, "utf8");
 assert.doesNotMatch(paymentControllerSrc, /process\.env\.CONSULTATION_TAX_RATE/);
 assert.doesNotMatch(invoiceServiceSrc, /process\.env\.CONSULTATION_TAX_RATE/);
 assert.match(paymentControllerSrc, /getTaxRatePercent\(\)/);
 assert.match(invoiceServiceSrc, /getTaxRatePercent\(\)/);
 console.log("PASS: neither call site reads the disconnected CONSULTATION_TAX_RATE env var anymore");
 
-const envExample = fs.readFileSync(path.join(root, ".env.example"), "utf8");
+const envExample = fs.readFileSync(`${root}.env.example`, "utf8");
 assert.doesNotMatch(envExample, /^CONSULTATION_TAX_RATE=/m, ".env.example must not document a variable that is no longer read");
 console.log("PASS: .env.example no longer documents the obsolete env var");

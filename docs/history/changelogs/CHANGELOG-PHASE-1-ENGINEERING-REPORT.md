@@ -1,3 +1,5 @@
+> **Historical record.** Preserved as written; it describes the repository at the time of writing and was not re-verified against the current code. For the current verified position see [PROJECT_STATUS](../../PROJECT_STATUS.md) and [REMAINING_RISKS](../../REMAINING_RISKS.md).
+
 # Changelog — Phase 1 Engineering Report / Re-verification Pass
 
 Date: 2026-09-15
@@ -26,7 +28,7 @@ audit had missed, plus one log-hygiene issue.
 
 ## Added
 
-- `docs/PHASE-1-ENGINEERING-REPORT.md` — evidence-based report (root cause /
+- `docs/history/phase-reports/PHASE-1-ENGINEERING-REPORT.md` — evidence-based report (root cause /
   implementation / test / result / production verification) for every defect found in
   this pass, plus a re-verification record for all twelve historical failures named in
   the assignment brief.
@@ -46,7 +48,7 @@ audit had missed, plus one log-hygiene issue.
 ## Not done in this pass (disclosed, not fabricated)
 
 - No live MongoDB/Brevo/Razorpay/OpenAI credentials in this sandbox — see
-  `docs/PHASE-1-ENGINEERING-REPORT.md` "Explicitly NOT verified" for the full list.
+  `docs/history/phase-reports/PHASE-1-ENGINEERING-REPORT.md` "Explicitly NOT verified" for the full list.
 - Did not re-run the full ~20-domain per-route classification matrix from Part A of the
   brief as a standalone artifact; targeted the concrete historical-failure list instead,
   which is where the real defects were actually found.

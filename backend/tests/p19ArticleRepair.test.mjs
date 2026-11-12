@@ -22,7 +22,7 @@ const checks = [
   ["Review transition exists", /mutate\("review",a\)/.test(admin)],
   ["Delete is confirmed and persisted", /deleteConfirm/.test(admin) && /deleteCMSPage\(a\._id\)/.test(admin)],
   ["Public article content is sanitized before serialization", /sanitizePlainContent/.test(serializer)],
-  ["Public article renders canonical sanitized content", /dangerouslySetInnerHTML=\{\{__html:a\.content/.test(detail)],
+  ["Public article renders server-sanitized content, sanitized again in the browser (defence in depth)", /dangerouslySetInnerHTML=\{\{__html:sanitizeHtml\(a\.content\)/.test(detail) && /from "..\/..\/utils\/safeHtml"/.test(detail)],
   ["Sanitizer strips dangerous primitives", /script|style|iframe|object|embed/.test(helpers) && /javascript|vbscript|data/.test(helpers)],
 ];
 let failed = 0;

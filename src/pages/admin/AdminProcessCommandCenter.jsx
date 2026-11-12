@@ -155,7 +155,7 @@ export default function AdminProcessCommandCenter() {
               >
                 <ul className="space-y-2">
                   {registry?.available &&
-                    registry.data.needsAttention.map((p) => (
+                    (registry.data.needsAttention ?? []).map((p) => (
                       <li key={p.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
                         <span className="font-semibold text-slate-800">{p.label}</span>
                         <span className={`text-xs font-bold ${p.score != null && p.score < 50 ? "text-rose-700" : "text-amber-700"}`}>
@@ -184,7 +184,7 @@ export default function AdminProcessCommandCenter() {
               >
                 <ul className="space-y-2">
                   {governance?.available &&
-                    governance.data.approvalQueuePreview.map((q) => (
+                    (governance.data.approvalQueuePreview ?? []).map((q) => (
                       <li key={q.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
                         <div>
                           <p className="font-semibold text-slate-800">{q.name}</p>

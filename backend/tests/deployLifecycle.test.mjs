@@ -37,7 +37,11 @@ const migratedDb = withPing(createFakeDb());
 await ensureIndexes(migratedDb, buildInventory());
 setLockIndexCheckForTesting(async () => true);
 const ready = await getReadiness({ db: migratedDb, now: 1_000_000 });
-assert.equal(ready.ready, true);
+assert.equal(
+  ready.ready,
+  true,
+  JSON.stringify(ready.checks, null, 2)
+);
 assert.equal(ready.checks.indexes.checked, criticalSpecs(buildInventory()).length);
 setLockIndexCheckForTesting(async () => false);
 assert.equal((await getReadiness({ db: migratedDb, now: 1_000_100 })).ready, true, "result is cached for 30s");
@@ -70,20 +74,19 @@ const weak = runPreflight({ ...goodProd, JWT_SECRET: "short" }, { checkFilesyste
 assert.ok(!JSON.stringify(weak).includes("short\""), "weak secret value is not echoed either");
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pf-"));
 assert.equal(runPreflight({ NODE_ENV: "development", MONGO_URI: "mongodb://localhost/x", JWT_SECRET: "x", STORAGE_LOCAL_ROOT: tmpRoot }).ok, true, "dev env with a writable storage root passes");
-fs.rmSync(tmpRoot, { recursive: true, force: true });
-// Use a regular file as the parent of the requested storage directory. This
-// reliably makes recursive mkdir fail on Windows, macOS and Linux, unlike
-// POSIX-only paths such as /dev/null/not-a-dir.
-const blocker = path.join(os.tmpdir(), `pf-blocker-${process.pid}-${Date.now()}`);
-fs.writeFileSync(blocker, "not a directory");
+
+// Create a regular file, then use a child path beneath it. This is reliably
+// unwritable on Windows, macOS and Linux (unlike the Unix-only /dev/null path).
+const blockerFile = path.join(tmpRoot, "not-a-directory");
+fs.writeFileSync(blockerFile, "file");
 const noWrite = runPreflight({
   NODE_ENV: "development",
   MONGO_URI: "mongodb://localhost/x",
   JWT_SECRET: "x",
-  STORAGE_LOCAL_ROOT: path.join(blocker, "child"),
+  STORAGE_LOCAL_ROOT: path.join(blockerFile, "child"),
 });
-assert.ok(noWrite.problems.some((p) => /not writable/.test(p)), `expected storage write error, got: ${noWrite.problems.join("; ")}`);
-fs.rmSync(blocker, { force: true });
+assert.ok(noWrite.problems.some((p) => /not writable/.test(p)));
+fs.rmSync(tmpRoot, { recursive: true, force: true });
 console.log("PASS: preflight lists every problem at once, never prints secrets, checks storage-root writability");
 
 // ── static contracts: reproducible build + lifecycle ──────────────────────

@@ -16,6 +16,7 @@
 // workspace and the mutating /api/refunds/* admin actions already use —
 // refund data is financial data, no new permission key introduced.
 import mongoose from "mongoose";
+import { readOptionalObjectIdQuery } from "../../utils/queryObjectId.js";
 import RefundRequest from "../../models/RefundRequest.js";
 import Payment from "../../models/Payment.js";
 import Appointment from "../../models/Appointment.js";
@@ -82,6 +83,10 @@ const resolveSearchFilter = async (term) => {
 
 const buildListFilter = async (query) => {
   const filter = {};
+  const patientId = readOptionalObjectIdQuery(query, "patientId", "patient", (value) => mongoose.Types.ObjectId.isValid(value));
+  const paymentId = readOptionalObjectIdQuery(query, "paymentId", "payment", (value) => mongoose.Types.ObjectId.isValid(value));
+  const doctorId = readOptionalObjectIdQuery(query, "doctorId", "doctor", (value) => mongoose.Types.ObjectId.isValid(value));
+  const appointmentId = readOptionalObjectIdQuery(query, "appointmentId", "appointment", (value) => mongoose.Types.ObjectId.isValid(value));
 
   if (query.status) {
     filter.status = { $in: String(query.status).split(",").map((s) => s.trim()).filter(Boolean) };
@@ -96,21 +101,14 @@ const buildListFilter = async (query) => {
     if (query.minAmount) filter.amount.$gte = Number(query.minAmount);
     if (query.maxAmount) filter.amount.$lte = Number(query.maxAmount);
   }
-  if (query.patientId && mongoose.Types.ObjectId.isValid(query.patientId)) {
-    filter.requestedBy = query.patientId;
-  }
-  if (query.paymentId && mongoose.Types.ObjectId.isValid(query.paymentId)) {
-    filter.paymentId = query.paymentId;
-  }
+  if (patientId) filter.requestedBy = patientId;
+  if (paymentId) filter.paymentId = paymentId;
   // doctorId/appointmentId live on Payment, not RefundRequest — resolve the
   // matching payment ids first rather than fabricating a direct field.
-  if (
-    (query.doctorId && mongoose.Types.ObjectId.isValid(query.doctorId)) ||
-    (query.appointmentId && mongoose.Types.ObjectId.isValid(query.appointmentId))
-  ) {
+  if (doctorId || appointmentId) {
     const paymentMatch = {};
-    if (query.doctorId) paymentMatch.doctorId = query.doctorId;
-    if (query.appointmentId) paymentMatch.appointmentId = query.appointmentId;
+    if (doctorId) paymentMatch.doctorId = doctorId;
+    if (appointmentId) paymentMatch.appointmentId = appointmentId;
     const paymentIds = await Payment.find(paymentMatch).distinct("_id");
     filter.paymentId = filter.paymentId
       ? { $in: [filter.paymentId].filter((id) => paymentIds.some((p) => p.toString() === id.toString())) }

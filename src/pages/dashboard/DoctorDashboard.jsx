@@ -341,7 +341,7 @@ function DoctorDashboard() {
       <Card className="!p-4">
         <div className="flex items-center gap-3">
           <Search size={18} className="text-slate-400" />
-          <input
+          <input aria-label="Smart search: find a patient by name or email"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Smart search: find a patient by name or email…"

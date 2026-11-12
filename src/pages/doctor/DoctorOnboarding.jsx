@@ -28,6 +28,7 @@ import { useI18n } from "../../i18n/I18nContext";
 import { useAuth } from "../../context/AuthContext";
 
 
+import { DOCTOR_NUMBER_LIMITS, validateDoctorNumbers } from "../../utils/doctorNumbersValidation";
 const initialForm = {
   specialization: "",
   qualification: "",
@@ -264,6 +265,9 @@ const uploadDocument =
   const dependenciesLoading = locationStatus.loading || specializationsLoading;
   const dependenciesFailed = locationStatus.error || specializationsError;
   const hasError = (field) => attemptedSubmit && missingFields.includes(field);
+  // Range/format rules (same as the server): shown as soon as something is typed, or after a submit attempt for blanks.
+  const numberErrors = validateDoctorNumbers({ experience: form.experience, fees: form.fees, graduationYear: form.graduationYear });
+  const numberError = (field) => (attemptedSubmit || String(form[field] ?? "") !== "" ? numberErrors[field] : undefined);
 
   const submitForm = async (e) => {
     e.preventDefault();
@@ -284,6 +288,10 @@ const uploadDocument =
     }
     if (missingFields.length > 0) {
       toast.error(`Required before you can submit: ${describeMissingRequirements(missingFields).join(", ")}.`);
+      return;
+    }
+    if (Object.keys(numberErrors).length > 0) {
+      toast.error(Object.values(numberErrors)[0]);
       return;
     }
 
@@ -428,10 +436,14 @@ const uploadDocument =
               label="Graduation Year"
               name="graduationYear"
               type="number"
+              inputMode="numeric"
+              min={DOCTOR_NUMBER_LIMITS.graduationYearMin}
+              max={new Date().getFullYear()}
+              step={1}
               value={form.graduationYear}
               onChange={updateField}
               required
-              error={hasError("graduationYear") ? "Graduation year is required." : undefined}
+              error={hasError("graduationYear") ? "Graduation year is required." : numberError("graduationYear")}
             />
           </div>
         </Card>
@@ -445,16 +457,26 @@ const uploadDocument =
               label="Experience (Years)"
               name="experience"
               type="number"
+              inputMode="numeric"
+              min={0}
+              max={DOCTOR_NUMBER_LIMITS.experienceMax}
+              step={1}
               value={form.experience}
               onChange={updateField}
+              error={numberError("experience")}
             />
 
             <Input
               label="Consultation Fees"
               name="fees"
               type="number"
+              inputMode="decimal"
+              min={0}
+              max={DOCTOR_NUMBER_LIMITS.feesMax}
+              step="0.01"
               value={form.fees}
               onChange={updateField}
+              error={numberError("fees")}
             />
 
             <Input

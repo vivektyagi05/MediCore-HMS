@@ -35,11 +35,11 @@ import { scoreCandidate, explainScore } from "./assignmentScoring.js";
  * and the AssignmentScheduler's auto-assign sweep — so all three always
  * agree on who the best candidate is, computed one way.
  */
-export async function rankCandidatesForItem(item) {
+export async function rankCandidatesForItem(item, { withAssignments } = {}) {
   const [pool, capacity, { items: unifiedItems }] = await Promise.all([
     getCandidatePool(),
     getCapacitySettings(),
-    _internal.buildUnifiedQueue({ status: "all" }),
+    _internal.buildUnifiedQueue({ status: "all" }, { withAssignments }),
   ]);
 
   const eligible = pool.filter((c) => EligibilityPolicy.isEligibleAssignee(c.role));
@@ -77,8 +77,10 @@ export async function rankCandidatesForItem(item) {
 
 /** Step 4/5: transparent ranked candidates for one item. Never auto-assigns — read-only. */
 export async function getRecommendations(operationKey, { limit = 5 } = {}) {
-  const item = await _internal.findOperationItem(operationKey);
-  const ranked = await rankCandidatesForItem(item);
+  // One queue snapshot shared by the lookup and the ranking (previously two full rebuilds per request).
+  const withAssignments = await _internal.loadAttachedOperations();
+  const item = await _internal.findOperationItem(operationKey, { withAssignments });
+  const ranked = await rankCandidatesForItem(item, { withAssignments });
   return { item: { id: item.id, type: item.type, typeLabel: item.typeLabel, priority: item.priority }, candidates: ranked.slice(0, limit) };
 }
 
@@ -87,8 +89,9 @@ export async function getRecommendations(operationKey, { limit = 5 } = {}) {
  * existing assign endpoint. Never executes a reassignment itself.
  */
 export async function getReassignmentRecommendation(operationKey) {
-  const item = await _internal.findOperationItem(operationKey);
-  const ranked = await rankCandidatesForItem(item);
+  const withAssignments = await _internal.loadAttachedOperations();
+  const item = await _internal.findOperationItem(operationKey, { withAssignments });
+  const ranked = await rankCandidatesForItem(item, { withAssignments });
 
   const currentAssigneeId = item.assignedTo?.id?.toString();
   const current = currentAssigneeId ? ranked.find((r) => r.admin.id.toString() === currentAssigneeId) : null;

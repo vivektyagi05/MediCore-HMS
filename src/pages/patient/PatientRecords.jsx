@@ -16,9 +16,12 @@ import { useI18n } from "../../i18n/I18nContext";
 import AIDraftPanel from "../../components/ai/AIDraftPanel";
 import { aiAssistApi } from "../../api/aiAssistApi";
 
+import { useConfirm } from "../../hooks/useConfirm";
+import { validateUpload } from "../../utils/fileValidation";
 const reportFormInitial = { title: "", category: "", reportDate: "", notes: "", tags: "", familyMemberId: "", file: null };
 
 function PatientRecords() {
+  const { confirm, confirmDialog } = useConfirm();
   const [params, setParams] = useSearchParams();
   const [overview, setOverview] = useState(null);
   const [reports, setReports] = useState([]);
@@ -29,6 +32,8 @@ function PatientRecords() {
   const [timeline, setTimeline] = useState([]);
   const [family, setFamily] = useState([]);
   const [form, setForm] = useState(reportFormInitial);
+  const [fileError, setFileError] = useState("");
+  const [fileKey, setFileKey] = useState(0); // remount the uncontrolled file input after a save so it stops showing the old file name
   const [preview, setPreview] = useState(null);
   const [prescriptionPreview, setPrescriptionPreview] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -100,6 +105,7 @@ function PatientRecords() {
       await patientWorkflowApi.uploadReport(formData);
       toast.success("Report uploaded");
       setForm(reportFormInitial);
+      setFileKey((k) => k + 1);
       await load();
     } catch (error) {
       toast.error(getApiErrorMessage(error));
@@ -135,7 +141,7 @@ function PatientRecords() {
   };
 
   const removeReport = async (report) => {
-    if (!window.confirm(`Delete "${report.title}"? This cannot be undone.`)) return;
+    if (!(await confirm({ title: "Delete this report?", description: `"${report.title}" will be permanently deleted. This cannot be undone.`, confirmLabel: "Delete report" }))) return;
     try {
       await patientWorkflowApi.deleteReport(report._id);
       toast.success("Report deleted");
@@ -184,16 +190,17 @@ function PatientRecords() {
   if (isLoading) return <Loader label="Loading digital health records" />;
 
   return (
+    <>
     <div className="space-y-6">
       <div><p className="text-sm font-black uppercase tracking-[0.18em] text-blue-600">Digital Health Ecosystem</p><h1 className="mt-2 text-3xl font-black text-slate-950">Records, prescriptions, and health timeline</h1></div>
       <HealthEcosystemNav overview={overview} active="records" />
       <div className="grid gap-3 rounded-2xl bg-white/50 p-4 shadow-lg md:grid-cols-4">
         <Input placeholder="Search records..." value={params.get("search") || ""} onChange={(e) => setParam("search", e.target.value)} />
-        <select className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={params.get("category") || ""} onChange={(e) => setParam("category", e.target.value)}>
+        <select aria-label="Category" className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={params.get("category") || ""} onChange={(e) => setParam("category", e.target.value)}>
           <option value="">All categories</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={params.get("familyMemberId") || ""} onChange={(e) => setParam("familyMemberId", e.target.value)}>
+        <select aria-label="Uploaded for" className="rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={params.get("familyMemberId") || ""} onChange={(e) => setParam("familyMemberId", e.target.value)}>
           <option value="">Everyone</option>
           {family.map((member) => <option key={member._id} value={member._id}>{member.name} ({member.relation})</option>)}
         </select>
@@ -201,7 +208,7 @@ function PatientRecords() {
           <Button variant={params.get("pinned") === "true" ? "primary" : "secondary"} onClick={() => setParam("pinned", params.get("pinned") === "true" ? "" : "true")}>
             <Star size={16} /> Pinned
           </Button>
-          <Button variant="secondary" onClick={() => exportData("reports", "csv")}><Download size={16} /></Button>
+          <Button aria-label="Download" title="Download" variant="secondary" onClick={() => exportData("reports", "csv")}><Download size={16} /></Button>
         </div>
       </div>
       <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
@@ -213,13 +220,13 @@ function PatientRecords() {
             <Input label="Tags" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="comma, separated, tags" />
             <div>
               <span className="mb-2 block text-sm font-semibold text-slate-700">For</span>
-              <select className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={form.familyMemberId} onChange={(e) => setForm({ ...form, familyMemberId: e.target.value })}>
+              <select aria-label="Family member" className="w-full rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" value={form.familyMemberId} onChange={(e) => setForm({ ...form, familyMemberId: e.target.value })}>
                 <option value="">Myself</option>
                 {family.map((member) => <option key={member._id} value={member._id}>{member.name} ({member.relation})</option>)}
               </select>
             </div>
-            <input type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => setForm({ ...form, file: e.target.files[0] })} className="rounded-xl bg-white/70 p-3 text-sm" required />
-            <textarea className="min-h-24 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            <div><input key={fileKey} aria-label="Report file (PDF, PNG or JPG, up to 8 MB)" type="file" accept=".pdf,image/png,image/jpeg" onChange={(e) => { const picked = e.target.files?.[0] || null; const problem = validateUpload(picked); if (problem) { setFileError(problem); e.target.value = ""; setForm((c) => ({ ...c, file: null })); return; } setFileError(""); setForm((c) => ({ ...c, file: picked })); }} className="w-full rounded-xl bg-white/70 p-3 text-sm" required />{fileError && <p role="alert" className="mt-1.5 text-sm font-semibold text-rose-600">{fileError}</p>}</div>
+            <textarea aria-label="Notes" className="min-h-24 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             <Button type="submit" isLoading={isUploading} disabled={!form.file}>Upload Report</Button>
           </form>
         </Card>
@@ -246,10 +253,10 @@ function PatientRecords() {
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Button variant="secondary" onClick={() => setPreview(report)}>Preview</Button>
-                    <Button onClick={() => downloadBlob(() => patientWorkflowApi.downloadReport(report._id), report.fileName)}><Download size={16} /></Button>
-                    <Button variant="secondary" onClick={() => shareReport(report)}><Share2 size={16} /></Button>
+                    <Button aria-label="Download" title="Download" onClick={() => downloadBlob(() => patientWorkflowApi.downloadReport(report._id), report.fileName)}><Download size={16} /></Button>
+                    <Button aria-label="Share" title="Share" variant="secondary" onClick={() => shareReport(report)}><Share2 size={16} /></Button>
                     <Button variant="secondary" onClick={() => setEditing({ ...report, tags: report.tags?.join(", ") || "" })}>Edit</Button>
-                    <Button variant="secondary" onClick={() => removeReport(report)}><Trash2 size={16} /></Button>
+                    <Button aria-label="Delete" title="Delete" variant="secondary" onClick={() => removeReport(report)}><Trash2 size={16} /></Button>
                   </div>
                 </Card>
               ))}
@@ -378,7 +385,7 @@ function PatientRecords() {
             <Input label="Title" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} />
             <Input label="Category" value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })} />
             <Input label="Tags" value={editing.tags} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} />
-            <textarea className="min-h-24 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Notes" value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
+            <textarea aria-label="Notes" className="min-h-24 rounded-xl border border-slate-200 bg-white/70 px-4 py-3 text-sm" placeholder="Notes" value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={() => setEditing(null)}><X size={16} /> Cancel</Button>
               <Button type="submit">Save changes</Button>
@@ -387,6 +394,8 @@ function PatientRecords() {
         )}
       </AdminModal>
     </div>
+    {confirmDialog}
+    </>
   );
 }
 

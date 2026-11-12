@@ -12,6 +12,7 @@ import Wallet from "../models/Wallet.js";
 import WalletRecharge, { WALLET_RECHARGE_STATUS as RS } from "../models/WalletRecharge.js";
 import TransactionLedger from "../models/TransactionLedger.js";
 import { toPaise } from "./money.js";
+import { financialEmails, loadEmailRecipient } from "../services/financialEmails.js";
 import { paymentGateway } from "./paymentGateway.js";
 import { logger } from "../utils/logger.js";
 
@@ -67,6 +68,9 @@ export const finishRechargePosting = async (recharge, { actorId = null, source =
   if (current.status !== RS.CAPTURED) return { recharge: current, skipped: true };
   const wallet = await creditWalletForRecharge(current);
   const ledger = await postRechargeLedger(current, current.gatewayPaymentId, wallet?._id);
+  // Phase 03: durable confirmation, enqueued BEFORE the terminal status so a crash here is replayed (eventKey dedupes).
+  // Best effort: a missing recipient/outbox never blocks or reverts the credit.
+  await financialEmails.rechargeCredited({ recharge: current, user: await loadEmailRecipient(current.userId) }).catch(() => {});
   const posted = await WalletRecharge.findOneAndUpdate(
     { _id: current._id, status: RS.CAPTURED },
     {

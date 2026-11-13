@@ -33,24 +33,43 @@ export const authoritativeGatewayAmount = (payment) => Number(payment.gatewayAmo
 
 export const attemptReceipt = (paymentId, attemptNumber) => `pay_${paymentId}_${attemptNumber}`;
 
-export const reserveAttempt = async ({ payment, gateway = paymentGateway.mode(), maxTries = 6 }) => {
+
+export const reserveAttempt = async ({ payment, gateway = paymentGateway.mode() }) => {
   const amount = authoritativeGatewayAmount(payment);
-  for (let i = 0; i < maxTries; i += 1) {
-    const last = await PaymentAttempt.findOne({ paymentId: payment._id }).sort({ attemptNumber: -1 }).select("attemptNumber").lean();
-    const attemptNumber = (last?.attemptNumber || 0) + 1;
-    const _id = new mongoose.Types.ObjectId();
-    try {
-      return await PaymentAttempt.create({
-        _id, paymentId: payment._id, attemptNumber, gateway,
-        gatewayOrderId: `${ATTEMPT_PLACEHOLDER_PREFIX}${_id}`,
-        status: "created", amount, currency: payment.currency, startedAt: new Date(),
-      });
-    } catch (error) {
-      if (error?.code !== 11000) throw error; // another worker took this number: re-read and take the next
+
+  // Atomically allocate a unique, monotonically increasing number.
+  // MongoDB serializes concurrent $inc operations on the same Payment.
+  const allocated = await Payment.findOneAndUpdate(
+    { _id: payment._id },
+    { $inc: { attemptSequence: 1 } },
+    {
+      new: true,
+      projection: { attemptSequence: 1 },
     }
+  ).lean();
+
+  if (!allocated) {
+    const error = new Error("Payment not found while reserving attempt");
+    error.statusCode = 404;
+    throw error;
   }
-  const error = new Error("Could not reserve a payment attempt number"); error.statusCode = 409; throw error;
+
+  const attemptNumber = allocated.attemptSequence;
+  const _id = new mongoose.Types.ObjectId();
+
+  return PaymentAttempt.create({
+    _id,
+    paymentId: payment._id,
+    attemptNumber,
+    gateway,
+    gatewayOrderId: `${ATTEMPT_PLACEHOLDER_PREFIX}${_id}`,
+    status: "created",
+    amount,
+    currency: payment.currency,
+    startedAt: new Date(),
+  });
 };
+
 
 const isDefinitiveProviderRejection = (error) => {
   const code = Number(error?.statusCode || error?.response?.status);

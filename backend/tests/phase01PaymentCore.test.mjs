@@ -97,7 +97,17 @@ const mkPayment = async (over = {}) => Payment.create({
 const mkAttempt = (payment, attemptNumber, gatewayOrderId, over = {}) => PaymentAttempt.create({
   paymentId: payment._id, attemptNumber, gateway: "razorpay", gatewayOrderId, status: "checkout_started", amount: 590, currency: "INR", ...over,
 });
-const scenario = async (over = {}) => { const payment = await mkPayment(over); const a1 = await mkAttempt(payment, 1, payment.razorpayOrderId); return { payment, a1 }; };
+const scenario = async (over = {}) => {
+  const payment = await mkPayment(over);
+  const a1 = await mkAttempt(payment, 1, payment.razorpayOrderId);
+
+  await Payment.updateOne(
+    { _id: payment._id },
+    { $set: { attemptSequence: 1 } }
+  );
+
+  return { payment, a1 };
+};
 const fresh = (id) => Payment.findById(id).lean();
 const attemptsOf = async (id) => (await PaymentAttempt.find({ paymentId: id }).sort({ attemptNumber: 1 }).lean());
 

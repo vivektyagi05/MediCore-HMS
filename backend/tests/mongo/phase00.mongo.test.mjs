@@ -35,24 +35,87 @@ const check = async (name, fn) => { await fn(); console.log(`PASS: ${name}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = { log() {}, error: console.error };
 
+
 await check("real Mongo migration lock serializes concurrent runners, renews leases and recovers after a crash", async () => {
   const id = "phase00_real_lock";
+
+  // Controlled clock: test no longer depends on machine speed.
+  let clock = new Date();
+  const now = () => new Date(clock);
+
+  const leaseMs = 500;
+
   const contenders = await Promise.all([
-    acquireMigrationLock(mongoose.connection.db, id, { leaseMs: 500 }),
-    acquireMigrationLock(mongoose.connection.db, id, { leaseMs: 500 }),
+    acquireMigrationLock(mongoose.connection.db, id, { leaseMs, now }),
+    acquireMigrationLock(mongoose.connection.db, id, { leaseMs, now }),
   ]);
-  assert.equal(contenders.filter(Boolean).length, 1, "only one concurrent insert/takeover may own the migration id");
+
+  assert.equal(
+    contenders.filter(Boolean).length,
+    1,
+    "only one concurrent insert/takeover may own the migration id"
+  );
+
   const owner = contenders.find(Boolean);
-  await sleep(150);
-  assert.equal(await renewMigrationLock(mongoose.connection.db, id, owner.token, { leaseMs: 500 }), true);
-  assert.equal(await acquireMigrationLock(mongoose.connection.db, id, { leaseMs: 500 }), null, "renewed lease blocks a second runner");
-  await sleep(550);
-  const recovered = await acquireMigrationLock(mongoose.connection.db, id, { leaseMs: 500 });
-  assert.ok(recovered && recovered.token !== owner.token, "expired running state is recoverable after process crash");
-  assert.equal(await finishMigration(mongoose.connection.db, id, owner.token, { status: "completed" }), false, "stale runner cannot finalize after takeover");
-  assert.equal(await finishMigration(mongoose.connection.db, id, recovered.token, { status: "completed" }), true);
-  assert.equal((await getMigrationState(mongoose.connection.db, id)).status, "completed");
+
+  // Advance time by 150ms, without waiting in real time.
+  clock = new Date(clock.getTime() + 150);
+
+  assert.equal(
+    await renewMigrationLock(
+      mongoose.connection.db,
+      id,
+      owner.token,
+      { leaseMs, now }
+    ),
+    true
+  );
+
+  assert.equal(
+    await acquireMigrationLock(
+      mongoose.connection.db,
+      id,
+      { leaseMs, now }
+    ),
+    null,
+    "renewed lease blocks a second runner"
+  );
+
+  // Advance beyond the renewed lease expiry.
+  clock = new Date(clock.getTime() + 550);
+
+  const recovered = await acquireMigrationLock(
+    mongoose.connection.db,
+    id,
+    { leaseMs, now }
+  );
+
+  assert.ok(
+    recovered && recovered.token !== owner.token,
+    "expired running state is recoverable after process crash"
+  );
+
+  assert.equal(
+    await finishMigration(mongoose.connection.db, id, owner.token, {
+      status: "completed",
+    }),
+    false,
+    "stale runner cannot finalize after takeover"
+  );
+
+  assert.equal(
+    await finishMigration(mongoose.connection.db, id, recovered.token, {
+      status: "completed",
+    }),
+    true
+  );
+
+  assert.equal(
+    (await getMigrationState(mongoose.connection.db, id)).status,
+    "completed"
+  );
 });
+
 
 await check("before migration the lock index is absent and trackRun fails closed", async () => {
   setLockIndexCheckForTesting(); // real listIndexes

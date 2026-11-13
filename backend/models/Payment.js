@@ -171,6 +171,11 @@ const paymentSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    attemptSequence: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     nextRetryAt: Date,
     // F-006: short lease taken atomically by claimRetry(); a crashed worker's
     // lease expires on its own instead of wedging the payment.

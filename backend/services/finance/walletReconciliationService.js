@@ -163,8 +163,14 @@ const dateRange = ({ from, to }, field) => {
   return Object.keys(range).length ? { [field]: range } : {};
 };
 
-const countOf = async (agg) => (await agg.concat([{ $count: "n" }]))?.[0]?.n || 0;
+const countOf = async (Model, pipeline) => {
+  const result = await Model.aggregate([
+    ...pipeline,
+    { $count: "n" },
+  ]);
 
+  return result[0]?.n || 0;
+};
 const finders = {
   async [DISCREPANCY_CATEGORIES.WALLET_BALANCE_DRIFT]({ skip, limit, filters }) {
     const total = await Wallet.countDocuments(dateRange(filters, "updatedAt"));
@@ -188,7 +194,7 @@ const finders = {
       { $group: { _id: { t: "$type", r: "$referenceId" }, count: { $sum: 1 }, ids: { $push: "$_id" }, amounts: { $addToSet: "$amount" } } },
       { $match: { count: { $gt: 1 } } },
     ];
-    const total = await countOf(TransactionLedger.aggregate(base));
+    const total = await countOf(TransactionLedger, base);
     const rows = await TransactionLedger.aggregate([...base, { $sort: { "_id.r": 1, "_id.t": 1 } }, { $skip: skip }, { $limit: limit }]);
     return { total, items: rows.map((r) => ({
       id: buildDiscrepancyId({ category: DISCREPANCY_CATEGORIES.DUPLICATE_LEDGER_REFERENCE, subjectId: r._id.r, ref: r._id.t }),
@@ -206,7 +212,7 @@ const finders = {
       { $lookup: { from: TransactionLedger.collection.name, let: { rid: "$gatewayRefundId" }, pipeline: [{ $match: { $expr: { $eq: ["$idempotencyKey", { $concat: ["refund:gateway:", { $ifNull: ["$$rid", ""] }] }] } } }, { $limit: 1 }, { $project: { _id: 1 } }], as: "gw" } },
       { $match: { gw: { $size: 0 } } },
     ];
-    const total = await countOf(RefundRequest.aggregate(missing));
+    const total = await countOf(RefundRequest, missing);
     const rows = await RefundRequest.aggregate([...missing, { $sort: { _id: 1 } }, { $skip: skip }, { $limit: limit }, { $project: { paymentId: 1, amount: 1, gatewayRefundAmount: 1, gatewayRefundId: 1, updatedAt: 1 } }]);
     return { total, items: rows.map((r) => ({
       id: buildDiscrepancyId({ category: DISCREPANCY_CATEGORIES.REFUND_WITHOUT_LEDGER, subjectId: r._id }),
@@ -223,7 +229,7 @@ const finders = {
       { $unwind: "$p" },
       { $match: { $expr: { $gt: ["$confirmed", { $ifNull: ["$p.refundedAmount", 0] }] } } },
     ];
-    const total = await countOf(RefundRequest.aggregate(base));
+    const total = await countOf(RefundRequest, base);
     const rows = await RefundRequest.aggregate([...base, { $sort: { _id: 1 } }, { $skip: skip }, { $limit: limit }, { $project: { confirmed: 1, refunded: "$p.refundedAmount", total: "$p.totalAmount" } }]);
     return { total, items: rows.flatMap((r) => classifyRefundTotals({ paymentId: r._id, confirmedRequestsPaise: toPaise(r.confirmed), paymentRefundedPaise: toPaise(r.refunded || 0), paymentTotalPaise: toPaise(r.total || 0) })) };
   },
@@ -523,7 +529,7 @@ Object.assign(finders, {
       { $group: { _id: "$gatewayRefundId", count: { $sum: 1 }, ids: { $push: "$_id" }, payments: { $addToSet: "$paymentId" } } },
       { $match: { count: { $gt: 1 } } },
     ];
-    const total = await countOf(RefundRequest.aggregate(base));
+    const total = await countOf(RefundRequest, base);
     const rows = await RefundRequest.aggregate([...base, { $sort: { _id: 1 } }, { $skip: skip }, { $limit: limit }]);
     return { total, items: rows.map((r) => mk(DISCREPANCY_CATEGORIES.DUPLICATE_REFUND_REFERENCE, r._id, "dup", {
       certainty: CERTAINTY.CONFIRMED, subject: { type: "gateway_refund", gatewayRefundId: r._id }, count: r.count, refundRequestIds: r.ids.map(String), paymentIds: r.payments.map(String),

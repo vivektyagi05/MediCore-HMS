@@ -34,7 +34,7 @@ export const defaultIndexName = (key) =>
 const OPTION_KEYS = [
   "unique", "sparse", "partialFilterExpression", "expireAfterSeconds", "collation",
   "default_language", "language_override", "weights", "hidden", "wildcardProjection",
-  "2dsphereIndexVersion", "bits", "min", "max", "bucketSize", "storageEngine", "prepareUnique",
+  "bits", "min", "max", "bucketSize", "storageEngine", "prepareUnique",
 ];
 
 const stable = (value) => {

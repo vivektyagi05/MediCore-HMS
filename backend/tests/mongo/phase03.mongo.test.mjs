@@ -64,7 +64,10 @@ await check("global usage limit holds under 30 concurrent claims for limit 5", a
 });
 
 await check("refund lock: live lease blocks; expired lease is taken over; stale release cannot free the new holder", async () => {
-  const payment = await Payment.collection.insertOne({ createdAt: new Date() });
+  const payment = await Payment.collection.insertOne({
+    razorpayOrderId: `test_refund_lock_${oid()}`,
+    createdAt: new Date(),
+  });
   const id = payment.insertedId;
   const t1 = await acquireRefundLock(id);
   await assert.rejects(() => acquireRefundLock(id), /already in progress/);
@@ -76,7 +79,10 @@ await check("refund lock: live lease blocks; expired lease is taken over; stale 
   const row = await Payment.collection.findOne({ _id: id }); assert.equal(row.refundLockedAt, undefined);
 });
 await check("10 concurrent acquires of one payment: exactly one wins", async () => {
-  const id = (await Payment.collection.insertOne({ createdAt: new Date() })).insertedId;
+  const id = (await Payment.collection.insertOne({
+    razorpayOrderId: `test_refund_concurrent_${oid()}`,
+    createdAt: new Date(),
+  })).insertedId;
   const r = await Promise.allSettled(Array.from({ length: 10 }, () => acquireRefundLock(id)));
   assert.equal(r.filter((x) => x.status === "fulfilled").length, 1);
 });
